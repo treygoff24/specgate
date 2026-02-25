@@ -28,6 +28,9 @@ petgraph = "0.7"
 # Glob matching
 globset = "0.4"
 
+# Deterministic fingerprint hashing
+sha2 = "0.10"
+
 # Error handling + diagnostics
 miette = { version = "7", features = ["fancy"] }
 thiserror = "2"

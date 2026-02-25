@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 /// Normalize a path to forward-slash form for deterministic output.
 pub fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
@@ -28,22 +30,16 @@ where
     set.into_iter().collect()
 }
 
-/// Build a deterministic hash for arbitrary bytes.
-///
-/// This is a lightweight FNV-1a 64-bit helper used for deterministic primitives
-/// in the Phase 1 foundation. Baseline fingerprinting can swap to SHA-256 in the
-/// baseline module without changing callsites.
+/// Build a deterministic SHA-256 hash for arbitrary bytes.
 pub fn stable_hash_hex(bytes: impl AsRef<[u8]>) -> String {
-    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
+    use std::fmt::Write as _;
 
-    let mut hash = OFFSET_BASIS;
-    for byte in bytes.as_ref() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+    let digest = Sha256::digest(bytes.as_ref());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
     }
-
-    format!("{hash:016x}")
+    hex
 }
 
 /// Hash a set of normalized fields in stable order.
@@ -55,7 +51,7 @@ pub fn stable_fingerprint(parts: &[impl AsRef<str>]) -> String {
         }
         joined.push_str(part.as_ref());
     }
-    format!("fnv64:{}", stable_hash_hex(joined.as_bytes()))
+    format!("sha256:{}", stable_hash_hex(joined.as_bytes()))
 }
 
 /// Normalize and sort paths deterministically.
@@ -88,6 +84,10 @@ mod tests {
         let left = stable_hash_hex("specgate");
         let right = stable_hash_hex("specgate");
         assert_eq!(left, right);
+        assert_eq!(
+            left,
+            "255a7328ba24b34e581428c9f423c7beead525d675fcf2856fe251e43af69405"
+        );
     }
 
     #[test]
@@ -96,6 +96,9 @@ mod tests {
         let a = stable_fingerprint(&parts);
         let b = stable_fingerprint(&parts);
         assert_eq!(a, b);
-        assert!(a.starts_with("fnv64:"));
+        assert_eq!(
+            a,
+            "sha256:95dece5be5240bcef7b92e9cdee2ba553ebe1269c41664008d938af9353fab9f"
+        );
     }
 }

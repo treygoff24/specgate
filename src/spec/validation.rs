@@ -159,6 +159,15 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             }
         }
 
+        for public_api_glob in &boundaries.public_api {
+            if Glob::new(public_api_glob).is_err() {
+                report.push_error(
+                    spec,
+                    format!("invalid boundaries.public_api glob pattern: '{public_api_glob}'"),
+                );
+            }
+        }
+
         let allow_set: BTreeSet<&str> = boundaries
             .allow_imports_from
             .iter()
@@ -175,6 +184,27 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
                 spec,
                 format!(
                     "module '{}' is in both allow_imports_from and never_imports",
+                    overlap
+                ),
+            );
+        }
+
+        let allow_imported_by_set: BTreeSet<&str> = boundaries
+            .allow_imported_by
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let deny_imported_by_set: BTreeSet<&str> = boundaries
+            .deny_imported_by
+            .iter()
+            .map(String::as_str)
+            .collect();
+
+        for overlap in allow_imported_by_set.intersection(&deny_imported_by_set) {
+            report.push_warning(
+                spec,
+                format!(
+                    "module '{}' is in both allow_imported_by and deny_imported_by",
                     overlap
                 ),
             );
@@ -251,6 +281,41 @@ mod tests {
             issue
                 .message
                 .contains("both allow_imports_from and never_imports")
+        }));
+    }
+
+    #[test]
+    fn provider_overlap_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imported_by: vec!["api".to_string()],
+            deny_imported_by: vec!["api".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(report.warnings().iter().any(|issue| {
+            issue
+                .message
+                .contains("both allow_imported_by and deny_imported_by")
+        }));
+    }
+
+    #[test]
+    fn invalid_public_api_glob_is_error() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            public_api: vec!["[".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(report.has_errors());
+        assert!(report.errors().iter().any(|issue| {
+            issue
+                .message
+                .contains("invalid boundaries.public_api glob pattern")
         }));
     }
 
