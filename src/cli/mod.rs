@@ -526,8 +526,8 @@ fn handle_init(args: InitArgs) -> CliRunResult {
     );
 
     let config_content = format!(
-        "spec_dirs:\n  - {}\nexclude: []\ntest_patterns: []\n",
-        normalized_spec_dir
+        "spec_dirs:\n  - \"{}\"\nexclude: []\ntest_patterns: []\n",
+        escape_yaml_double_quoted(&normalized_spec_dir)
     );
 
     let spec_content = format!(
@@ -602,7 +602,23 @@ fn write_scaffold_file(
 }
 
 fn escape_yaml_double_quoted(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut escaped = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            control if control.is_control() => {
+                escaped.push_str(&format!("\\u{:04X}", control as u32));
+            }
+            _ => escaped.push(ch),
+        }
+    }
+
+    escaped
 }
 
 fn handle_baseline(args: BaselineArgs) -> CliRunResult {
@@ -1194,10 +1210,11 @@ fn boundary_constraint_module<'a>(violation: &'a RuleViolation) -> Option<&'a st
     let rule = violation.rule.as_str();
 
     match rule {
-        "boundary.never_imports" | "boundary.allow_imports_from" | "boundary.public_api" => {
+        "boundary.never_imports" | "boundary.allow_imports_from" => {
             violation.from_module.as_deref()
         }
-        "boundary.deny_imported_by"
+        "boundary.public_api"
+        | "boundary.deny_imported_by"
         | "boundary.allow_imported_by"
         | "boundary.visibility.internal"
         | "boundary.visibility.private" => violation.to_module.as_deref(),
@@ -1774,6 +1791,75 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn boundary_public_api_uses_provider_constraint_severity() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project(temp.path());
+
+        write_file(
+            temp.path(),
+            "modules/app.spec.yml",
+            "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints:\n  - rule: boundary.public_api\n    severity: error\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/core.spec.yml",
+            "version: \"2.2\"\nmodule: core\nboundaries:\n  path: src/core/**/*\n  public_api:\n    - src/core/public/**/*\nconstraints:\n  - rule: boundary.public_api\n    severity: warning\n",
+        );
+        write_file(
+            temp.path(),
+            "src/core/internal.ts",
+            "export const internal = 1;\n",
+        );
+        write_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { internal } from '../core/internal';\nexport const app = internal;\n",
+        );
+
+        let result = run([
+            "specgate",
+            "check",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--no-baseline",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let output = parse_json(&result.stdout);
+        assert_eq!(output["summary"]["new_error_violations"], 0);
+        assert_eq!(output["summary"]["new_warning_violations"], 1);
+        assert_eq!(output["violations"][0]["rule"], "boundary.public_api");
+        assert_eq!(output["violations"][0]["severity"], "warning");
+    }
+
+    #[test]
+    fn escape_yaml_double_quoted_escapes_control_chars() {
+        let escaped = escape_yaml_double_quoted("line1\nline2\r\t\"\\");
+        assert_eq!(escaped, "line1\\nline2\\r\\t\\\"\\\\");
+    }
+
+    #[test]
+    fn init_quotes_spec_dir_with_special_chars() {
+        let temp = TempDir::new().expect("tempdir");
+        let spec_dir = "modules:#prod";
+
+        let result = run([
+            "specgate",
+            "init",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--spec-dir",
+            spec_dir,
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let config = fs::read_to_string(temp.path().join("specgate.config.yml"))
+            .expect("scaffold config exists");
+        assert!(config.contains("spec_dirs:\n  - \"modules:#prod\"\n"));
+        assert!(temp.path().join("modules:#prod/app.spec.yml").exists());
     }
 
     #[test]
