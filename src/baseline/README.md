@@ -1,6 +1,8 @@
 # baseline/
 
-Deferred to later phases.
+Wave 2C baseline support.
 
-Baseline fingerprint generation and baseline hit/new classification build on the deterministic
-primitives introduced in Phase 1.
+Responsibilities:
+- Generate stable fingerprints for policy violations
+- Read/write deterministic baseline JSON (`.specgate-baseline.json` by default)
+- Classify violations as `new` vs `baseline` for report-only behavior

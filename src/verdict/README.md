@@ -1,6 +1,9 @@
 # verdict/
 
-Deferred to later phases.
+Wave 2C verdict assembly.
 
-Deterministic/metrics verdict output assembly is implemented after rule evaluation and baseline
-classification are in place.
+Responsibilities:
+- Build deterministic JSON output for `check` results
+- Aggregate status from rule violations
+- Expose optional metrics mode (timing metadata)
+- Keep default output deterministic (no timestamps/durations unless metrics is enabled)

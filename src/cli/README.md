@@ -1,6 +1,15 @@
 # cli/
 
-Deferred to later phases.
+Wave 2C command wiring.
 
-Phase 1 focuses on foundational library modules (`spec`, `resolver`, `parser`, `deterministic`).
-CLI command wiring (`check`, `validate`, `init`, `doctor`, `baseline`) will be implemented in the next phase.
+Implemented commands:
+- `check`
+- `validate`
+- `doctor`
+- `doctor compare`
+- `baseline`
+
+Exit code contract:
+- `0` pass
+- `1` policy violations
+- `2` config/runtime errors
