@@ -12,13 +12,17 @@ pub mod circular;
 pub mod dependencies;
 pub mod layers;
 
+pub use boundary::{
+    BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
+    is_canonical_import_rule_id,
+};
 pub use circular::{
     CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
     evaluate_no_circular_deps,
 };
 pub use dependencies::{
+    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule,
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
-    is_test_file,
 };
 pub use layers::{
     ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,
@@ -47,15 +51,20 @@ pub struct RuleViolation {
     pub column: Option<u32>,
 }
 
-impl RuleViolation {
-    pub fn sort_stable(&mut self) {
-        // no-op helper to keep callsites expressive in engines.
-    }
-}
-
-/// Trait implemented by rule engines.
+/// Trait implemented by stateless graph-only rule engines.
 pub trait Rule {
     fn evaluate(&self, ctx: &RuleContext<'_>) -> Vec<RuleViolation>;
+}
+
+/// Bridge trait for rules that require mutable infrastructure (e.g. resolver caches).
+pub trait RuleWithResolver {
+    type Error;
+
+    fn evaluate_with_resolver(
+        &self,
+        ctx: &RuleContext<'_>,
+        resolver: &mut crate::resolver::ModuleResolver,
+    ) -> std::result::Result<Vec<RuleViolation>, Self::Error>;
 }
 
 pub(crate) fn sort_violations_stable(violations: &mut [RuleViolation]) {
@@ -126,4 +135,13 @@ pub(crate) fn matches_test_file(
 
     let relative = normalize_repo_relative(project_root, file);
     test_matcher.is_match(&relative)
+}
+
+#[cfg(test)]
+pub(crate) fn write_test_file(project_root: &Path, relative_path: &str, contents: &str) {
+    let full_path = project_root.join(relative_path);
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir test fixture parent");
+    }
+    std::fs::write(full_path, contents).expect("write test fixture file");
 }

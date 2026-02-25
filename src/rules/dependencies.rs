@@ -11,7 +11,9 @@ use crate::resolver::{ModuleResolver, ResolvedImport};
 use crate::spec::{Boundaries, SpecConfig, SpecFile};
 
 use super::{
-    GlobCompileError, compile_optional_globset_strict, matches_test_file, normalized_string_set,
+    GlobCompileError, RuleContext, RuleViolation, RuleWithResolver,
+    compile_optional_globset_strict, matches_test_file, normalized_string_set,
+    sort_violations_stable,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -51,6 +53,26 @@ pub enum DependencyRuleError {
 }
 
 pub type Result<T> = std::result::Result<T, DependencyRuleError>;
+
+pub const DEPENDENCY_FORBIDDEN_RULE_ID: &str = "dependency.forbidden";
+pub const DEPENDENCY_NOT_ALLOWED_RULE_ID: &str = "dependency.not_allowed";
+
+/// Dependency policy rule bridge that integrates with [`RuleContext`] and a mutable resolver.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DependencyRule;
+
+impl RuleWithResolver for DependencyRule {
+    type Error = DependencyRuleError;
+
+    fn evaluate_with_resolver(
+        &self,
+        ctx: &RuleContext<'_>,
+        resolver: &mut ModuleResolver,
+    ) -> Result<Vec<RuleViolation>> {
+        let typed = evaluate_dependency_rules(ctx.project_root, resolver, ctx.specs, ctx.config)?;
+        Ok(typed_violations_to_rule_violations(typed))
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct DependencyPolicy {
@@ -147,8 +169,42 @@ pub fn evaluate_dependency_rules(
     Ok(violations)
 }
 
-pub fn is_test_file(project_root: &Path, file: &Path, test_patterns: &GlobSet) -> bool {
-    matches_test_file(project_root, file, Some(test_patterns))
+fn typed_violations_to_rule_violations(typed: Vec<DependencyViolation>) -> Vec<RuleViolation> {
+    let mut violations = typed
+        .into_iter()
+        .map(|violation| {
+            let (rule, message) = match violation.kind {
+                DependencyViolationKind::ForbiddenDependency => (
+                    DEPENDENCY_FORBIDDEN_RULE_ID,
+                    format!(
+                        "module '{}' forbids dependency '{}' (import '{}')",
+                        violation.module_id, violation.package_name, violation.specifier
+                    ),
+                ),
+                DependencyViolationKind::DependencyNotAllowed => (
+                    DEPENDENCY_NOT_ALLOWED_RULE_ID,
+                    format!(
+                        "module '{}' does not allow dependency '{}' (import '{}')",
+                        violation.module_id, violation.package_name, violation.specifier
+                    ),
+                ),
+            };
+
+            RuleViolation {
+                rule: rule.to_string(),
+                message,
+                from_file: violation.file,
+                to_file: None,
+                from_module: Some(violation.module_id),
+                to_module: None,
+                line: None,
+                column: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    sort_violations_stable(&mut violations);
+    violations
 }
 
 fn module_policies(specs: &[SpecFile]) -> BTreeMap<String, DependencyPolicy> {
@@ -189,7 +245,8 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::deterministic::normalize_repo_relative;
-    use crate::spec::Boundaries;
+    use crate::rules::{RuleContext, RuleWithResolver, write_test_file};
+    use crate::spec::{Boundaries, SpecConfig};
 
     use super::*;
 
@@ -421,11 +478,8 @@ import 'node:fs/promises';
     #[test]
     fn violations_are_sorted_deterministically() {
         let temp = TempDir::new().expect("tempdir");
-        fs::create_dir_all(temp.path().join("src/a")).expect("mkdir a");
-        fs::create_dir_all(temp.path().join("src/b")).expect("mkdir b");
-
-        fs::write(temp.path().join("src/b/second.ts"), "import 'zod';\n").expect("write second");
-        fs::write(temp.path().join("src/a/first.ts"), "import 'axios';\n").expect("write first");
+        write_test_file(temp.path(), "src/b/second.ts", "import 'zod';\n");
+        write_test_file(temp.path(), "src/a/first.ts", "import 'axios';\n");
         write_npm_package(temp.path(), "axios");
         write_npm_package(temp.path(), "zod");
 
@@ -477,5 +531,41 @@ import 'node:fs/promises';
                 "beta|src/b/second.ts|zod|zod|DependencyNotAllowed",
             ]
         );
+    }
+
+    #[test]
+    fn dependency_rule_bridge_evaluates_with_mutable_resolver() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(temp.path(), "src/app/main.ts", "import 'axios';\n");
+        write_npm_package(temp.path(), "axios");
+
+        let specs = vec![spec_with_boundaries(
+            "app",
+            "src/app/**/*",
+            Boundaries {
+                allowed_dependencies: vec!["lodash".to_string()],
+                ..Boundaries::default()
+            },
+        )];
+        let config = SpecConfig::default();
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let graph = crate::graph::DependencyGraph::build(temp.path(), &mut resolver, &config)
+            .expect("graph");
+
+        let rule = DependencyRule;
+        let ctx = RuleContext {
+            project_root: temp.path(),
+            config: &config,
+            specs: &specs,
+            graph: &graph,
+        };
+
+        let violations = rule
+            .evaluate_with_resolver(&ctx, &mut resolver)
+            .expect("dependency rule bridge");
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, DEPENDENCY_NOT_ALLOWED_RULE_ID);
+        assert_eq!(violations[0].from_module.as_deref(), Some("app"));
     }
 }

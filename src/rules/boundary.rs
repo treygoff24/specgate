@@ -12,6 +12,11 @@ use crate::rules::{
 };
 use crate::spec::{Boundaries, Visibility};
 
+/// Canonical rule id for enforcing cross-module canonical import usage.
+pub const BOUNDARY_CANONICAL_IMPORT_RULE_ID: &str = "boundary.canonical_import";
+/// Backward-compatible alias for older emitted id.
+pub const BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS: &str = "boundary.canonical_imports";
+
 /// Boundary rule engine for importer/provider constraints.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BoundaryRule;
@@ -360,7 +365,7 @@ fn check_provider_side(
         && is_cross_module_relative(specifier, edge_kind)
     {
         violations.push(build_violation(
-            "boundary.canonical_imports",
+            BOUNDARY_CANONICAL_IMPORT_RULE_ID,
             format!(
                 "module '{provider_module}' requires canonical imports; cross-module relative specifier '{specifier}' is not allowed"
             ),
@@ -422,6 +427,13 @@ fn as_set(values: &[String]) -> BTreeSet<&str> {
     values.iter().map(String::as_str).collect()
 }
 
+pub fn is_canonical_import_rule_id(rule_id: &str) -> bool {
+    matches!(
+        rule_id,
+        BOUNDARY_CANONICAL_IMPORT_RULE_ID | BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS
+    )
+}
+
 fn build_violation(
     rule: &str,
     message: String,
@@ -445,12 +457,11 @@ fn build_violation(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use tempfile::TempDir;
 
     use crate::graph::DependencyGraph;
     use crate::resolver::ModuleResolver;
+    use crate::rules::write_test_file;
     use crate::spec::{Boundaries, SpecConfig, SpecFile, Visibility};
 
     use super::*;
@@ -470,14 +481,6 @@ mod tests {
             constraints: Vec::new(),
             spec_path: None,
         }
-    }
-
-    fn write_file(root: &Path, rel: &str, contents: &str) {
-        let path = root.join(rel);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("mkdir");
-        }
-        fs::write(path, contents).expect("write file");
     }
 
     fn run_engine(
@@ -504,18 +507,18 @@ mod tests {
     fn enforces_importer_allow_and_never_with_type_only_carve_out() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "import { b } from '../b/index';\nimport type { T } from '../types/index';\nimport { n } from '../never/index';\nexport const x = b + n;\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
-        write_file(
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(
             temp.path(),
             "src/types/index.ts",
             "export type T = string;\n",
         );
-        write_file(temp.path(), "src/never/index.ts", "export const n = 1;\n");
+        write_test_file(temp.path(), "src/never/index.ts", "export const n = 1;\n");
 
         let specs = vec![
             spec_with_boundaries(
@@ -542,17 +545,17 @@ mod tests {
     fn enforces_public_api_on_provider_files() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/app/main.ts",
             "import { ok } from '../provider/public/index';\nimport { nope } from '../provider/internal/secret';\nexport const x = ok + nope;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/provider/public/index.ts",
             "export const ok = 1;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/provider/internal/secret.ts",
             "export const nope = 2;\n",
@@ -580,12 +583,12 @@ mod tests {
     fn enforces_provider_visibility_allow_and_deny_precedence() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "import { p } from '../provider/index';\nexport const x = p;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/provider/index.ts",
             "export const p = 1;\n",
@@ -615,22 +618,22 @@ mod tests {
     fn visibility_internal_respects_friend_modules_and_private_blocks_all() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/friend/main.ts",
             "import { i } from '../internal/index';\nimport { p } from '../private/index';\nexport const x = i + p;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/stranger/main.ts",
             "import { i } from '../internal/index';\nexport const y = i;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/internal/index.ts",
             "export const i = 1;\n",
         );
-        write_file(temp.path(), "src/private/index.ts", "export const p = 2;\n");
+        write_test_file(temp.path(), "src/private/index.ts", "export const p = 2;\n");
 
         let specs = vec![
             spec_with_boundaries("friend", "src/friend/**/*", Boundaries::default()),
@@ -670,13 +673,13 @@ mod tests {
     fn canonical_imports_bans_cross_module_relative_when_enabled() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "import { b } from '../b/index';\nimport { c } from '@acme/c/index';\nexport const x = b + c;\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
-        write_file(temp.path(), "src/c/index.ts", "export const c = 2;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(temp.path(), "src/c/index.ts", "export const c = 2;\n");
 
         let specs = vec![
             spec_with_boundaries("a", "src/a/**/*", Boundaries::default()),
@@ -693,19 +696,30 @@ mod tests {
 
         let violations = run_engine(&temp, SpecConfig::default(), specs);
         assert_eq!(violations.len(), 1);
-        assert_eq!(violations[0].rule, "boundary.canonical_imports");
+        assert_eq!(violations[0].rule, BOUNDARY_CANONICAL_IMPORT_RULE_ID);
+    }
+
+    #[test]
+    fn canonical_import_rule_id_alias_is_recognized() {
+        assert!(is_canonical_import_rule_id(
+            BOUNDARY_CANONICAL_IMPORT_RULE_ID
+        ));
+        assert!(is_canonical_import_rule_id(
+            BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS
+        ));
+        assert!(!is_canonical_import_rule_id("boundary.never_imports"));
     }
 
     #[test]
     fn test_files_are_exempt_unless_enforce_in_tests_is_true() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/example.test.ts",
             "import { b } from '../b/index';\nexport const x = b;\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
 
         let specs = vec![
             spec_with_boundaries(
@@ -747,12 +761,12 @@ mod tests {
     fn ignores_imports_marked_with_specgate_ignore() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "// @specgate-ignore: temporary\nimport { b } from '../b/index';\nexport const x = b;\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
 
         let specs = vec![
             spec_with_boundaries(
@@ -774,12 +788,12 @@ mod tests {
     fn ignore_is_scoped_to_single_import_occurrence() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "// @specgate-ignore: temporary\nimport { b as ignored } from '../b/index';\nimport { b as enforced } from '../b/index';\nexport const x = ignored + enforced;\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
 
         let specs = vec![
             spec_with_boundaries(
@@ -803,12 +817,12 @@ mod tests {
     fn reports_importer_and_provider_violations_for_same_edge() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "import { p } from '../provider/index';\nexport const x = p;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/provider/index.ts",
             "export const p = 1;\n",
@@ -848,12 +862,12 @@ mod tests {
     fn invalid_public_api_glob_is_reported_as_config_violation() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/app/main.ts",
             "import { p } from '../provider/index';\nexport const x = p;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/provider/index.ts",
             "export const p = 1;\n",
@@ -884,12 +898,12 @@ mod tests {
     fn uses_edge_position_metadata_for_non_import_edges() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/a/main.ts",
             "export * from '../b/index';\n",
         );
-        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
 
         let specs = vec![
             spec_with_boundaries(
@@ -919,18 +933,18 @@ mod tests {
     fn violations_are_deterministically_sorted() {
         let temp = TempDir::new().expect("tempdir");
 
-        write_file(
+        write_test_file(
             temp.path(),
             "src/z/main.ts",
             "import { a } from '../a/index';\nimport { b } from '../b/index';\nexport const z = a + b;\n",
         );
-        write_file(
+        write_test_file(
             temp.path(),
             "src/y/main.ts",
             "import { a } from '../a/index';\nexport const y = a;\n",
         );
-        write_file(temp.path(), "src/a/index.ts", "export const a = 1;\n");
-        write_file(temp.path(), "src/b/index.ts", "export const b = 2;\n");
+        write_test_file(temp.path(), "src/a/index.ts", "export const a = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 2;\n");
 
         let specs = vec![
             spec_with_boundaries(
