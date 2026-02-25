@@ -5,12 +5,12 @@ use chrono::NaiveDate;
 use miette::Diagnostic;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, CallExpression, ChainElement, Comment, Declaration,
-    ExportDefaultDeclarationKind, Expression, ForStatementInit, ForStatementLeft, Function,
-    MemberExpression, ObjectPropertyKind, Statement,
+    Argument, ArrayExpressionElement, BindingPatternKind, CallExpression, ChainElement, Comment,
+    Declaration, ExportDefaultDeclarationKind, Expression, ForStatementInit, ForStatementLeft,
+    Function, ImportExpression, MemberExpression, ObjectPropertyKind, Statement,
 };
 use oxc_parser::Parser;
-use oxc_span::{SourceType, Span};
+use oxc_span::{GetSpan, SourceType, Span};
 use thiserror::Error;
 
 use crate::deterministic::stable_unique;
@@ -157,31 +157,6 @@ pub fn parse_file(path: &Path) -> Result<FileAnalysis> {
         &mut analysis,
     );
 
-    for dynamic_import in &parser_return.module_record.dynamic_imports {
-        let expr_span = dynamic_import.module_request;
-        let (line, column) = mapper.line_col(expr_span.start);
-        let raw_expression = span_slice(&source, expr_span)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-
-        if let Some(specifier) = parse_string_literal_expression(&raw_expression) {
-            analysis.dynamic_imports.push(DynamicImportInfo {
-                specifier,
-                line,
-                column,
-            });
-        } else {
-            analysis.dynamic_warnings.push(DynamicImportWarning {
-                rule: "resolver.unresolved_dynamic_import".to_string(),
-                message: "dynamic import uses a non-literal expression".to_string(),
-                line,
-                column,
-                expression: raw_expression,
-            });
-        }
-    }
-
     for statement in &parser_return.program.body {
         visit_statement_for_calls(statement, &source, &mapper, &mut analysis);
     }
@@ -249,10 +224,15 @@ fn extract_module_declarations(
                     }
                 }
             }
-            Statement::ExportDefaultDeclaration(_) => {
+            Statement::ExportDefaultDeclaration(decl) => {
                 analysis.exports.push(ExportInfo {
                     name: "__default".to_string(),
-                    is_type_only: false,
+                    // Keep this conservative: only mark default exports as type-only when
+                    // oxc gives us an explicit type-only default declaration node.
+                    is_type_only: matches!(
+                        decl.declaration,
+                        ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
+                    ),
                     is_default: true,
                 });
             }
@@ -281,7 +261,48 @@ fn extract_declaration_exports(declaration: &Declaration<'_>, analysis: &mut Fil
                 });
             }
         }
+        Declaration::VariableDeclaration(declaration) => {
+            for declarator in &declaration.declarations {
+                extract_binding_pattern_exports(&declarator.id, analysis);
+            }
+        }
         _ => {}
+    }
+}
+
+fn extract_binding_pattern_exports(
+    pattern: &oxc_ast::ast::BindingPattern<'_>,
+    analysis: &mut FileAnalysis,
+) {
+    match &pattern.kind {
+        BindingPatternKind::BindingIdentifier(identifier) => {
+            analysis.exports.push(ExportInfo {
+                name: identifier.name.to_string(),
+                is_type_only: false,
+                is_default: false,
+            });
+        }
+        BindingPatternKind::AssignmentPattern(assignment) => {
+            extract_binding_pattern_exports(&assignment.left, analysis);
+        }
+        BindingPatternKind::ObjectPattern(object_pattern) => {
+            for property in &object_pattern.properties {
+                extract_binding_pattern_exports(&property.value, analysis);
+            }
+            if let Some(rest) = &object_pattern.rest {
+                extract_binding_pattern_exports(&rest.argument, analysis);
+            }
+        }
+        BindingPatternKind::ArrayPattern(array_pattern) => {
+            for element in &array_pattern.elements {
+                if let Some(binding) = element {
+                    extract_binding_pattern_exports(binding, analysis);
+                }
+            }
+            if let Some(rest) = &array_pattern.rest {
+                extract_binding_pattern_exports(&rest.argument, analysis);
+            }
+        }
     }
 }
 
@@ -558,6 +579,7 @@ fn visit_expression_for_calls(
             }
         }
         Expression::ImportExpression(import_expression) => {
+            collect_dynamic_import(import_expression, source, mapper, analysis);
             visit_expression_for_calls(&import_expression.source, source, mapper, analysis);
             if let Some(options) = &import_expression.options {
                 visit_expression_for_calls(options, source, mapper, analysis);
@@ -761,6 +783,40 @@ fn visit_argument(
     }
 }
 
+fn collect_dynamic_import(
+    import_expression: &ImportExpression<'_>,
+    source: &str,
+    mapper: &SourceMapper,
+    analysis: &mut FileAnalysis,
+) {
+    let source_span = import_expression.source.span();
+    let (line, column) = mapper.line_col(source_span.start);
+
+    // Use typed AST nodes instead of raw source slicing for string detection.
+    // This keeps quote matching and escape handling parser-driven and deterministic.
+    if let Expression::StringLiteral(specifier) = &import_expression.source {
+        analysis.dynamic_imports.push(DynamicImportInfo {
+            specifier: specifier.value.to_string(),
+            line,
+            column,
+        });
+        return;
+    }
+
+    let raw_expression = span_slice(source, source_span)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    analysis.dynamic_warnings.push(DynamicImportWarning {
+        rule: "resolver.unresolved_dynamic_import".to_string(),
+        message: "dynamic import uses a non-literal expression".to_string(),
+        line,
+        column,
+        expression: raw_expression,
+    });
+}
+
 fn collect_call_expression(
     call: &CallExpression<'_>,
     mapper: &SourceMapper,
@@ -839,23 +895,6 @@ fn find_ignore_comment(
         })
         .max_by_key(|(end, _)| *end)
         .map(|(_, parsed)| parsed)
-}
-
-fn parse_string_literal_expression(expr: &str) -> Option<String> {
-    let trimmed = expr.trim();
-    if trimmed.len() < 2 {
-        return None;
-    }
-
-    let starts_with_quote = trimmed.starts_with('"') || trimmed.starts_with('\'');
-    let ends_with_quote = trimmed.ends_with('"') || trimmed.ends_with('\'');
-
-    if starts_with_quote && ends_with_quote {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        return Some(inner.to_string());
-    }
-
-    None
 }
 
 fn sort_analysis(analysis: &mut FileAnalysis) {
@@ -1028,6 +1067,104 @@ export default function main() {}
         );
 
         assert!(analysis.exports.iter().any(|export| export.is_default));
+    }
+
+    #[test]
+    fn extracts_variable_exports_from_export_declarations() {
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("exports.ts");
+
+        fs::write(
+            &file_path,
+            r#"
+export const alpha = 1, beta = 2;
+export let { gamma: renamed, delta, nested: { leaf } } = source;
+export var [first, , ...rest] = values;
+"#,
+        )
+        .expect("write exports");
+
+        let analysis = parse_file(&file_path).expect("analysis");
+
+        for name in ["alpha", "beta", "renamed", "delta", "leaf", "first", "rest"] {
+            assert!(
+                analysis.exports.iter().any(|export| export.name == name
+                    && !export.is_default
+                    && !export.is_type_only),
+                "missing export {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_only_literal_dynamic_imports_and_warns_on_non_literals() {
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("dynamic.ts");
+
+        fs::write(
+            &file_path,
+            r#"
+const path = "./runtime";
+
+async function load(name: string) {
+  await import("./double\"quote");
+  await import('./single\'quote');
+  await import(path);
+  await import(`./${name}`);
+}
+"#,
+        )
+        .expect("write dynamic file");
+
+        let analysis = parse_file(&file_path).expect("analysis");
+
+        assert!(
+            analysis
+                .dynamic_imports
+                .iter()
+                .any(|edge| edge.specifier == "./double\"quote")
+        );
+        assert!(
+            analysis
+                .dynamic_imports
+                .iter()
+                .any(|edge| edge.specifier == "./single'quote")
+        );
+
+        assert!(analysis.dynamic_warnings.iter().any(|warning| {
+            warning.rule == "resolver.unresolved_dynamic_import" && warning.expression == "path"
+        }));
+        assert!(analysis.dynamic_warnings.iter().any(|warning| {
+            warning.rule == "resolver.unresolved_dynamic_import"
+                && warning.expression == "`./${name}`"
+        }));
+    }
+
+    #[test]
+    fn marks_default_interface_export_as_type_only() {
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("default-interface.ts");
+
+        fs::write(&file_path, "export default interface Api { id: string }\n")
+            .expect("write default interface");
+
+        let analysis = parse_file(&file_path).expect("analysis");
+        assert!(analysis.exports.iter().any(|export| {
+            export.is_default && export.name == "__default" && export.is_type_only
+        }));
+    }
+
+    #[test]
+    fn keeps_default_value_exports_non_type_only() {
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("default-value.ts");
+
+        fs::write(&file_path, "export default class Api {}\n").expect("write default value");
+
+        let analysis = parse_file(&file_path).expect("analysis");
+        assert!(analysis.exports.iter().any(|export| {
+            export.is_default && export.name == "__default" && !export.is_type_only
+        }));
     }
 
     #[test]
