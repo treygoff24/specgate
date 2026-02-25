@@ -7,6 +7,7 @@ use crate::spec::{SpecConfig, SpecFile};
 pub mod boundary;
 pub mod circular;
 pub mod dependencies;
+pub mod layers;
 
 pub use circular::{
     CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
@@ -15,6 +16,11 @@ pub use circular::{
 pub use dependencies::{
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
     is_test_file,
+};
+pub use layers::{
+    ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,
+    LayerConfigParseError, LayerViolation, evaluate_enforce_layer, layer_for_module,
+    parse_enforce_layer_config,
 };
 
 /// Shared evaluation context passed into rules.
