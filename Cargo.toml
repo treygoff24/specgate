@@ -1,0 +1,59 @@
+[package]
+name = "specgate"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+description = "Machine-checkable architectural intent for TypeScript projects"
+license = "MIT"
+
+[dependencies]
+# AST parsing + module resolution (use latest 0.x — pin minor)
+oxc_parser = "0"
+oxc_ast = "0"
+oxc_resolver = "4"
+oxc_span = "0"
+oxc_allocator = "0"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+yaml_serde = { package = "serde_yml", version = "0.0.12" }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Graph algorithms
+petgraph = "0.7"
+
+# Glob matching
+globset = "0.4"
+
+# Error handling + diagnostics
+miette = { version = "7", features = ["fancy"] }
+thiserror = "2"
+
+# JSON Schema generation
+schemars = "0.8"
+
+# Date parsing (for ignore expiry)
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+
+# File walking
+walkdir = "2"
+
+# Parallelism (optional, feature-gated)
+rayon = { version = "1", optional = true }
+
+[features]
+default = []
+parallel = ["rayon"]
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+tempfile = "3"
+pretty_assertions = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
