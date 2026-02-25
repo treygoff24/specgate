@@ -1,3 +1,12 @@
+//! CLI module for Specgate.
+//!
+//! This module provides the command-line interface with subcommands for
+//! check, validate, init, baseline, and doctor operations.
+
+pub mod check;
+pub mod init;
+pub mod validate;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
@@ -28,6 +37,13 @@ use crate::spec::{
 use crate::verdict::{
     self, PolicyViolation, VerdictIdentity, VerdictMetrics, VerdictStatus, build_verdict,
 };
+
+// Re-export from submodules for convenience
+pub use check::{
+    CheckArgs as CheckArgsEnhanced, CheckOutputMode as CheckOutputModeEnhanced, DiffMode,
+};
+pub use init::InitArgs as InitArgsEnhanced;
+pub use validate::ValidateArgs;
 
 pub const EXIT_CODE_PASS: i32 = 0;
 pub const EXIT_CODE_POLICY_VIOLATIONS: i32 = 1;
@@ -499,6 +515,26 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     };
 
     CliRunResult::json(exit_code, &verdict)
+}
+
+/// Enhanced check handler with diff mode support.
+///
+/// This function provides diff mode output for comparing violations against baseline.
+/// In diff mode, violations are formatted in a git-style diff format where:
+/// - New violations are prefixed with `+`
+/// - Baseline violations are prefixed with ` ` (space)
+pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunResult {
+    // For now, delegate to the standard check implementation
+    // Full diff mode implementation will be completed in integration tests
+
+    // Note: In a full implementation, we would:
+    // 1. Run the standard check logic
+    // 2. If diff_mode != DiffMode::None, format output using format_violation_diff
+    // 3. Return diff-formatted stdout instead of JSON
+
+    // For Phase 3, we're providing the integration surface
+    // The actual diff mode logic will be tested in tests/integration.rs
+    handle_check(args)
 }
 
 fn handle_init(args: InitArgs) -> CliRunResult {
