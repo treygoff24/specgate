@@ -215,6 +215,7 @@ fn render_glob_error(error: &GlobCompileError) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_importer_side(
     edge_kind: EdgeKind,
     importer_module: &str,
@@ -284,6 +285,7 @@ fn check_importer_side(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_provider_side(
     specifier: &str,
     importer_module: &str,

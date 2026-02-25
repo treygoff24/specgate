@@ -73,7 +73,7 @@ impl CliRunResult {
 
     fn clap_error(error: clap::Error) -> Self {
         Self {
-            exit_code: error.exit_code() as i32,
+            exit_code: error.exit_code(),
             stdout: String::new(),
             stderr: format!("{error}"),
         }
@@ -1312,7 +1312,7 @@ fn severity_for_constraint_rule(spec: &SpecFile, rule_id: &str) -> Option<Severi
         .min_by_key(|severity| severity_rank(*severity))
 }
 
-fn boundary_constraint_module<'a>(violation: &'a RuleViolation) -> Option<&'a str> {
+fn boundary_constraint_module(violation: &RuleViolation) -> Option<&str> {
     let rule = violation.rule.as_str();
 
     match rule {

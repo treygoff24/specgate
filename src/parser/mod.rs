@@ -301,10 +301,8 @@ fn extract_binding_pattern_exports(
             }
         }
         BindingPatternKind::ArrayPattern(array_pattern) => {
-            for element in &array_pattern.elements {
-                if let Some(binding) = element {
-                    extract_binding_pattern_exports(binding, analysis);
-                }
+            for binding in (&array_pattern.elements).into_iter().flatten() {
+                extract_binding_pattern_exports(binding, analysis);
             }
             if let Some(rest) = &array_pattern.rest {
                 extract_binding_pattern_exports(&rest.argument, analysis);
