@@ -1,9 +1,16 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::graph::DependencyGraph;
 use crate::spec::{SpecConfig, SpecFile};
 
 pub mod boundary;
+pub mod dependencies;
+
+pub use dependencies::{
+    DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
+    is_test_file,
+};
 
 /// Shared evaluation context passed into rules.
 pub struct RuleContext<'a> {
@@ -49,4 +56,13 @@ pub(crate) fn sort_violations_stable(violations: &mut [RuleViolation]) {
             .then_with(|| a.rule.cmp(&b.rule))
             .then_with(|| a.message.cmp(&b.message))
     });
+}
+
+pub(crate) fn normalized_string_set(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
