@@ -3,9 +3,22 @@ use std::path::PathBuf;
 
 use globset::Glob;
 
+use crate::rules::{BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS};
 use crate::spec::types::{SUPPORTED_SPEC_VERSION, SpecFile};
 
-const KNOWN_CONSTRAINT_RULES: &[&str] = &["no-circular-deps", "enforce-layer"];
+const KNOWN_CONSTRAINT_RULES: &[&str] = &[
+    "no-circular-deps",
+    "enforce-layer",
+    "boundary.never_imports",
+    "boundary.allow_imports_from",
+    "boundary.public_api",
+    "boundary.deny_imported_by",
+    "boundary.allow_imported_by",
+    "boundary.visibility.internal",
+    "boundary.visibility.private",
+    BOUNDARY_CANONICAL_IMPORT_RULE_ID,
+    BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationLevel {
@@ -221,6 +234,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
 
 #[cfg(test)]
 mod tests {
+    use crate::rules::BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS;
     use crate::spec::types::{Boundaries, Constraint, Severity};
 
     use super::*;
@@ -264,6 +278,28 @@ mod tests {
 
         let report = validate_specs(&[spec]);
         assert!(report.has_errors());
+    }
+
+    #[test]
+    fn boundary_constraint_rules_are_supported() {
+        let mut spec = base_spec("orders");
+        spec.constraints = vec![
+            Constraint {
+                rule: "boundary.never_imports".to_string(),
+                params: serde_json::json!({}),
+                severity: Severity::Warning,
+                message: None,
+            },
+            Constraint {
+                rule: BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS.to_string(),
+                params: serde_json::json!({}),
+                severity: Severity::Error,
+                message: None,
+            },
+        ];
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
     }
 
     #[test]
