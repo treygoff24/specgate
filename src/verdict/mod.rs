@@ -1,3 +1,7 @@
+//! Verdict module for policy check results.
+
+pub mod format;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
 use crate::baseline::{
@@ -39,9 +39,7 @@ use crate::verdict::{
 };
 
 // Re-export from submodules for convenience
-pub use check::{
-    CheckArgs as CheckArgsEnhanced, CheckOutputMode as CheckOutputModeEnhanced, DiffMode,
-};
+pub use check::{CheckArgs, CheckOutputMode, DiffMode};
 pub use init::InitArgs as InitArgsEnhanced;
 pub use validate::ValidateArgs;
 
@@ -110,31 +108,6 @@ struct CommonProjectArgs {
     /// Project root containing code + specs + optional specgate.config.yml.
     #[arg(long, default_value = ".")]
     project_root: PathBuf,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum CheckOutputMode {
-    Deterministic,
-    Metrics,
-}
-
-#[derive(Debug, Clone, Args)]
-pub struct CheckArgs {
-    #[command(flatten)]
-    common: CommonProjectArgs,
-    /// Output mode contract (`deterministic` by default; `metrics` includes timing metadata).
-    #[arg(long, value_enum, default_value_t = CheckOutputMode::Deterministic)]
-    pub output_mode: CheckOutputMode,
-    /// Deprecated alias for `--output-mode metrics`.
-    #[arg(long)]
-    pub metrics: bool,
-    /// Baseline file path.
-    #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
-    pub baseline: PathBuf,
-    /// Disable baseline classification even if a baseline file exists.
-    #[arg(long)]
-    pub no_baseline: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -396,11 +369,19 @@ fn handle_validate(args: CommonProjectArgs) -> CliRunResult {
 }
 
 fn handle_check(args: CheckArgs) -> CliRunResult {
+    // Extract diff mode before processing
+    let diff_mode = DiffMode::from(&args);
+
+    // If diff mode is enabled, use the diff handler
+    if diff_mode != DiffMode::None {
+        return handle_check_with_diff(args, diff_mode);
+    }
+
     let mut timings = BTreeMap::new();
     let total_start = Instant::now();
 
     let load_start = Instant::now();
-    let loaded = match load_project(&args.common.project_root) {
+    let loaded = match load_project(&args.project_root) {
         Ok(loaded) => loaded,
         Err(error) => {
             return runtime_error_json("config", "failed to load project", vec![error]);
@@ -524,17 +505,106 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
 /// - New violations are prefixed with `+`
 /// - Baseline violations are prefixed with ` ` (space)
 pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunResult {
-    // For now, delegate to the standard check implementation
-    // Full diff mode implementation will be completed in integration tests
+    let loaded = match load_project(&args.project_root) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return runtime_error_json("config", "failed to load project", vec![error]);
+        }
+    };
 
-    // Note: In a full implementation, we would:
-    // 1. Run the standard check logic
-    // 2. If diff_mode != DiffMode::None, format output using format_violation_diff
-    // 3. Return diff-formatted stdout instead of JSON
+    if loaded.validation.has_errors() {
+        let details = loaded
+            .validation
+            .errors()
+            .into_iter()
+            .map(|issue| format!("{}: {}", issue.module, issue.message))
+            .collect();
+        return runtime_error_json(
+            "validation",
+            "spec validation failed; run `specgate validate` for details",
+            details,
+        );
+    }
 
-    // For Phase 3, we're providing the integration surface
-    // The actual diff mode logic will be tested in tests/integration.rs
-    handle_check(args)
+    let artifacts = match analyze_project(&loaded) {
+        Ok(artifacts) => artifacts,
+        Err(error) => {
+            return runtime_error_json("runtime", "failed to analyze project", vec![error]);
+        }
+    };
+
+    if !artifacts.layer_config_issues.is_empty() {
+        return runtime_error_json(
+            "config",
+            "invalid enforce-layer rule configuration",
+            artifacts.layer_config_issues,
+        );
+    }
+
+    let baseline = if args.no_baseline {
+        None
+    } else {
+        let baseline_path = resolve_against_root(&loaded.project_root, &args.baseline);
+        match load_optional_baseline(&baseline_path) {
+            Ok(baseline) => baseline,
+            Err(error) => {
+                return runtime_error_json(
+                    "baseline",
+                    "failed to load baseline file",
+                    vec![error.to_string()],
+                );
+            }
+        }
+    };
+
+    let classified = classify_violations(
+        &loaded.project_root,
+        &artifacts.policy_violations,
+        baseline.as_ref(),
+    );
+
+    // Filter based on diff mode
+    let filtered: Vec<_> = match diff_mode {
+        DiffMode::NewOnly => classified
+            .iter()
+            .filter(|v| matches!(v.disposition, verdict::ViolationDisposition::New))
+            .cloned()
+            .collect(),
+        DiffMode::Full => classified,
+        DiffMode::None => classified,
+    };
+
+    // Format output using diff formatter
+    let mut lines: Vec<String> = Vec::new();
+    for entry in &filtered {
+        lines.push(verdict::format::format_violation_diff(
+            &loaded.project_root,
+            entry,
+        ));
+    }
+
+    // Compute stats for summary
+    let stats = verdict::format::ViolationStats::from_violations(&filtered);
+    lines.push(String::new());
+    lines.push(format!("Summary: {}", stats.format_human()));
+
+    // Determine exit code based on new errors
+    let has_new_errors = filtered.iter().any(|v| {
+        matches!(v.disposition, verdict::ViolationDisposition::New)
+            && v.violation.severity == Severity::Error
+    });
+
+    let exit_code = if has_new_errors {
+        EXIT_CODE_POLICY_VIOLATIONS
+    } else {
+        EXIT_CODE_PASS
+    };
+
+    CliRunResult {
+        exit_code,
+        stdout: lines.join("\n") + "\n",
+        stderr: String::new(),
+    }
 }
 
 fn handle_init(args: InitArgs) -> CliRunResult {
