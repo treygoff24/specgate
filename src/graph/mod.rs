@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,11 +11,11 @@ use thiserror::Error;
 
 use crate::parser::{self, FileAnalysis};
 use crate::resolver::{ModuleResolver, ResolvedImport};
-use crate::spec::{JestMockMode, SpecConfig, SpecFile};
+use crate::spec::{JestMockMode, SpecConfig};
 
 pub mod discovery;
 
-use discovery::discover_source_files;
+use discovery::{DiscoveryWarning, discover_source_files};
 
 #[derive(Debug, Clone)]
 pub struct FileNode {
@@ -94,20 +95,23 @@ pub struct DependencyGraph {
     graph: DiGraph<FileNode, EdgeRecord>,
     file_index: BTreeMap<PathBuf, NodeIndex>,
     module_membership: BTreeMap<PathBuf, String>,
+    reverse_module_edges: BTreeMap<String, BTreeSet<String>>,
+    canonical_lookup_cache: RefCell<BTreeMap<PathBuf, PathBuf>>,
+    discovery_warnings: Vec<DiscoveryWarning>,
 }
 
 impl DependencyGraph {
     /// Build the project-level file dependency graph.
     pub fn build(
         project_root: &Path,
-        _specs: &[SpecFile],
         resolver: &mut ModuleResolver,
         config: &SpecConfig,
     ) -> Result<Self> {
         let project_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
 
-        let files = discover_source_files(&project_root, &config.exclude)?;
+        let discovery = discover_source_files(&project_root, &config.exclude)?;
+        let files = discovery.files;
 
         let mut graph = DiGraph::<FileNode, EdgeRecord>::new();
         let mut file_index = BTreeMap::new();
@@ -177,11 +181,16 @@ impl DependencyGraph {
             graph.add_edge(from_idx, to_idx, edge);
         }
 
+        let reverse_module_edges = reverse_module_dependency_edges(&graph);
+
         Ok(Self {
             project_root,
             graph,
             file_index,
             module_membership,
+            reverse_module_edges,
+            canonical_lookup_cache: RefCell::new(BTreeMap::new()),
+            discovery_warnings: discovery.warnings,
         })
     }
 
@@ -195,6 +204,11 @@ impl DependencyGraph {
         self.graph.edge_count()
     }
 
+    /// Non-fatal discovery diagnostics collected while walking the filesystem.
+    pub fn discovery_warnings(&self) -> &[DiscoveryWarning] {
+        &self.discovery_warnings
+    }
+
     /// Return all graph files in deterministic path order.
     pub fn files(&self) -> Vec<&FileNode> {
         self.file_index
@@ -205,7 +219,11 @@ impl DependencyGraph {
 
     /// Look up a file node by path.
     pub fn file(&self, path: &Path) -> Option<&FileNode> {
-        let canonical = canonicalize_for_graph(&self.project_root, path);
+        if let Some(idx) = self.file_index.get(path) {
+            return self.graph.node_weight(*idx);
+        }
+
+        let canonical = self.lookup_canonical_path(path);
         let idx = self.file_index.get(&canonical)?;
         self.graph.node_weight(*idx)
     }
@@ -261,54 +279,52 @@ impl DependencyGraph {
 
     /// Deterministic list of outgoing edges from a single file.
     pub fn dependencies_from(&self, path: &Path) -> Vec<DependencyEdge> {
-        let Some(node) = self.file(path) else {
-            return Vec::new();
+        let node_idx = if let Some(idx) = self.file_index.get(path) {
+            *idx
+        } else {
+            let canonical = self.lookup_canonical_path(path);
+            let Some(idx) = self.file_index.get(&canonical) else {
+                return Vec::new();
+            };
+            *idx
         };
 
-        self.dependency_edges()
-            .into_iter()
-            .filter(|edge| edge.from == node.path)
-            .collect()
+        let mut edges = self
+            .graph
+            .edges(node_idx)
+            .map(|edge_ref| DependencyEdge {
+                from: edge_ref.weight().from.clone(),
+                to: edge_ref.weight().to.clone(),
+                kind: edge_ref.weight().kind,
+                specifier: edge_ref.weight().specifier.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        edges.sort_by(|a, b| {
+            a.to.cmp(&b.to)
+                .then_with(|| a.kind.cmp(&b.kind))
+                .then_with(|| a.specifier.cmp(&b.specifier))
+        });
+
+        edges
     }
 
     /// Look up the module_id for a given file path.
     pub fn module_of_file(&self, path: &Path) -> Option<&str> {
-        let canonical = canonicalize_for_graph(&self.project_root, path);
+        if let Some(module_id) = self.module_membership.get(path) {
+            return Some(module_id.as_str());
+        }
+
+        let canonical = self.lookup_canonical_path(path);
         self.module_membership.get(&canonical).map(String::as_str)
     }
 
     /// Get all module IDs that have at least one file importing from the given module.
     pub fn importers_of_module(&self, module_id: &str) -> BTreeSet<String> {
-        let mut importers = BTreeSet::new();
-
-        let target_nodes = self
-            .file_index
-            .iter()
-            .filter_map(|(_path, idx)| {
-                let node = self.graph.node_weight(*idx)?;
-                (node.module_id.as_deref() == Some(module_id)).then_some(*idx)
-            })
-            .collect::<Vec<_>>();
-
-        for target in target_nodes {
-            for incoming in self
-                .graph
-                .edges_directed(target, petgraph::Direction::Incoming)
-            {
-                let source_idx = incoming.source();
-                let Some(source_node) = self.graph.node_weight(source_idx) else {
-                    continue;
-                };
-                let Some(source_module) = &source_node.module_id else {
-                    continue;
-                };
-                if source_module != module_id {
-                    importers.insert(source_module.clone());
-                }
-            }
-        }
-
-        importers
+        self.reverse_module_edges
+            .get(module_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Return SCCs (Tarjan) in deterministic order.
@@ -357,11 +373,10 @@ impl DependencyGraph {
             return affected;
         }
 
-        let reverse_module_edges = self.reverse_module_dependency_edges();
         let mut queue = affected.iter().cloned().collect::<VecDeque<_>>();
 
         while let Some(module) = queue.pop_front() {
-            if let Some(importers) = reverse_module_edges.get(&module) {
+            if let Some(importers) = self.reverse_module_edges.get(&module) {
                 for importer in importers {
                     if affected.insert(importer.clone()) {
                         queue.push_back(importer.clone());
@@ -392,35 +407,67 @@ impl DependencyGraph {
         CycleComponent { files, modules }
     }
 
-    fn reverse_module_dependency_edges(&self) -> BTreeMap<String, BTreeSet<String>> {
-        let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
-
-        for edge in self.graph.edge_references() {
-            let Some(source_node) = self.graph.node_weight(edge.source()) else {
-                continue;
-            };
-            let Some(target_node) = self.graph.node_weight(edge.target()) else {
-                continue;
-            };
-
-            let (Some(source_module), Some(target_module)) =
-                (&source_node.module_id, &target_node.module_id)
-            else {
-                continue;
-            };
-
-            if source_module == target_module {
-                continue;
+    fn lookup_canonical_path(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            if self.file_index.contains_key(path) || self.module_membership.contains_key(path) {
+                return path.to_path_buf();
             }
+        } else {
+            let joined = self.project_root.join(path);
+            if self.file_index.contains_key(&joined) || self.module_membership.contains_key(&joined)
+            {
+                return joined;
+            }
+        }
 
-            reverse
-                .entry(target_module.clone())
-                .or_default()
-                .insert(source_module.clone());
+        let cache_key = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.project_root.join(path)
+        };
+
+        if let Some(cached) = self.canonical_lookup_cache.borrow().get(&cache_key) {
+            return cached.clone();
+        }
+
+        let canonical = canonicalize_for_graph(&self.project_root, path);
+        self.canonical_lookup_cache
+            .borrow_mut()
+            .insert(cache_key, canonical.clone());
+        canonical
+    }
+}
+
+fn reverse_module_dependency_edges(
+    graph: &DiGraph<FileNode, EdgeRecord>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
+
+    for edge in graph.edge_references() {
+        let Some(source_node) = graph.node_weight(edge.source()) else {
+            continue;
+        };
+        let Some(target_node) = graph.node_weight(edge.target()) else {
+            continue;
+        };
+
+        let (Some(source_module), Some(target_module)) =
+            (&source_node.module_id, &target_node.module_id)
+        else {
+            continue;
+        };
+
+        if source_module == target_module {
+            continue;
         }
 
         reverse
+            .entry(target_module.clone())
+            .or_default()
+            .insert(source_module.clone());
     }
+
+    reverse
 }
 
 fn edge_requests(analysis: &FileAnalysis, config: &SpecConfig) -> Vec<(EdgeKind, String)> {
@@ -481,7 +528,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::spec::{Boundaries, SpecConfig};
+    use crate::spec::{Boundaries, SpecConfig, SpecFile};
 
     use super::*;
 
@@ -542,8 +589,8 @@ console.log(value, dep);
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
 
         let config_warn = SpecConfig::default();
-        let graph_warn = DependencyGraph::build(temp.path(), &specs, &mut resolver, &config_warn)
-            .expect("build graph");
+        let graph_warn =
+            DependencyGraph::build(temp.path(), &mut resolver, &config_warn).expect("build graph");
 
         let kinds_warn = graph_warn
             .dependency_edges()
@@ -563,9 +610,8 @@ console.log(value, dep);
         let mut config_enforce = SpecConfig::default();
         config_enforce.jest_mock_mode = JestMockMode::Enforce;
 
-        let graph_enforce =
-            DependencyGraph::build(temp.path(), &specs, &mut resolver, &config_enforce)
-                .expect("build graph enforce");
+        let graph_enforce = DependencyGraph::build(temp.path(), &mut resolver, &config_enforce)
+            .expect("build graph enforce");
 
         let kinds_enforce = graph_enforce
             .dependency_edges()
@@ -597,8 +643,8 @@ console.log(value, dep);
 
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
         let config = SpecConfig::default();
-        let graph = DependencyGraph::build(temp.path(), &specs, &mut resolver, &config)
-            .expect("build graph");
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
 
         let canonical_root = fs::canonicalize(temp.path()).expect("canonical root");
 
@@ -666,8 +712,8 @@ console.log(value, dep);
 
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
         let config = SpecConfig::default();
-        let graph = DependencyGraph::build(temp.path(), &specs, &mut resolver, &config)
-            .expect("build graph");
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
 
         let affected = graph.affected_modules(&[temp.path().join("src/core/a.ts")]);
         assert_eq!(
@@ -718,8 +764,8 @@ console.log(value, dep);
 
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
         let config = SpecConfig::default();
-        let graph = DependencyGraph::build(temp.path(), &specs, &mut resolver, &config)
-            .expect("build graph");
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
 
         let internal = graph.find_cycles(CycleScope::Internal);
         assert_eq!(internal.len(), 1);
@@ -751,6 +797,109 @@ console.log(value, dep);
         assert_eq!(
             first_component_files,
             vec!["src/alpha/a.ts", "src/alpha/b.ts"]
+        );
+    }
+
+    #[test]
+    fn relative_paths_resolve_for_file_and_module_lookups() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src/a")).expect("mkdir a");
+        fs::write(
+            temp.path().join("src/a/main.ts"),
+            "export const main = 1;\n",
+        )
+        .expect("write");
+
+        let specs = vec![spec("alpha", "src/a/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
+
+        let relative = Path::new("./src/a/../a/main.ts");
+        assert!(graph.file(relative).is_some());
+        assert_eq!(graph.module_of_file(relative), Some("alpha"));
+    }
+
+    #[test]
+    fn dependencies_from_targets_single_file_and_stays_sorted() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "import './z'; import './a'; import type { T } from './a';\n",
+        )
+        .expect("write main");
+        fs::write(temp.path().join("src/a.ts"), "export type T = string;\n").expect("write a");
+        fs::write(temp.path().join("src/z.ts"), "export const z = 1;\n").expect("write z");
+        fs::write(
+            temp.path().join("src/other.ts"),
+            "export const other = 1;\n",
+        )
+        .expect("write other");
+
+        let specs = vec![spec("app", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
+
+        let deps = graph.dependencies_from(&temp.path().join("src/main.ts"));
+        assert_eq!(deps.len(), 3);
+
+        let canonical_root = fs::canonicalize(temp.path()).expect("canonical root");
+        let dep_targets = deps
+            .iter()
+            .map(|edge| {
+                crate::deterministic::normalize_path(
+                    edge.to
+                        .strip_prefix(&canonical_root)
+                        .expect("edge target should be under temp root"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            dep_targets,
+            vec!["src/a.ts", "src/a.ts", "src/z.ts"],
+            "dependencies_from should only include outgoing edges for the requested file"
+        );
+
+        let unknown = graph.dependencies_from(Path::new("src/missing.ts"));
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn self_loop_and_emptyish_graph_edge_cases_are_stable() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::write(
+            temp.path().join("src/self.ts"),
+            "import { self } from './self'; export const selfRef = self;\n",
+        )
+        .expect("write self");
+
+        let specs = vec![spec("solo", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
+
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(graph.edge_count(), 1);
+        assert_eq!(
+            graph
+                .dependencies_from(&temp.path().join("src/self.ts"))
+                .len(),
+            1
+        );
+        assert!(graph.find_cycles(CycleScope::Both).is_empty());
+
+        assert!(
+            graph
+                .affected_modules(&[temp.path().join("src/does-not-exist.ts")])
+                .is_empty()
         );
     }
 }

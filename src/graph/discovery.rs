@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use miette::Diagnostic;
 use thiserror::Error;
+use walkdir::Error as WalkDirError;
 use walkdir::WalkDir;
 
 use crate::deterministic::normalize_path;
@@ -21,6 +22,18 @@ pub enum DiscoveryError {
 
 pub type Result<T> = std::result::Result<T, DiscoveryError>;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DiscoveryWarning {
+    pub path: Option<PathBuf>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryResult {
+    pub files: Vec<PathBuf>,
+    pub warnings: Vec<DiscoveryWarning>,
+}
+
 /// Discover all TypeScript/JavaScript source files in deterministic order.
 ///
 /// Included extensions: `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`.
@@ -28,16 +41,25 @@ pub type Result<T> = std::result::Result<T, DiscoveryError>;
 pub fn discover_source_files(
     project_root: &Path,
     exclude_patterns: &[String],
-) -> Result<Vec<PathBuf>> {
+) -> Result<DiscoveryResult> {
     let exclude_matcher = build_globset(exclude_patterns)?;
 
     let mut files = BTreeSet::new();
+    let mut warnings = Vec::new();
 
     for entry in WalkDir::new(project_root)
         .follow_links(true)
+        .sort_by_file_name()
         .into_iter()
-        .filter_map(std::result::Result::ok)
     {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warnings.push(warning_from_walkdir_error(project_root, &error));
+                continue;
+            }
+        };
+
         if !entry.file_type().is_file() {
             continue;
         }
@@ -56,7 +78,26 @@ pub fn discover_source_files(
         files.insert(canonical);
     }
 
-    Ok(files.into_iter().collect())
+    warnings.sort();
+
+    Ok(DiscoveryResult {
+        files: files.into_iter().collect(),
+        warnings,
+    })
+}
+
+fn warning_from_walkdir_error(project_root: &Path, error: &WalkDirError) -> DiscoveryWarning {
+    let path = error.path().map(Path::to_path_buf);
+    let path = path.map(|path| {
+        path.strip_prefix(project_root)
+            .map(Path::to_path_buf)
+            .unwrap_or(path)
+    });
+
+    DiscoveryWarning {
+        path,
+        message: error.to_string(),
+    }
 }
 
 fn build_globset(patterns: &[String]) -> Result<GlobSet> {
@@ -111,8 +152,9 @@ mod tests {
         fs::write(temp.path().join("src/ignored/skip.ts"), "export {}\n").expect("write skip");
         fs::write(temp.path().join("README.md"), "not a source file\n").expect("write readme");
 
-        let files =
+        let result =
             discover_source_files(temp.path(), &["**/ignored/**".to_string()]).expect("discover");
+        let files = result.files;
 
         let canonical_root = fs::canonicalize(temp.path()).expect("canonical root");
 
@@ -134,5 +176,30 @@ mod tests {
                 "src/z.ts".to_string(),
             ]
         );
+
+        assert!(result.warnings.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discover_source_files_reports_symlink_loop_as_warning() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src/loop")).expect("mkdir");
+        fs::write(temp.path().join("src/main.ts"), "export {}\n").expect("write main");
+
+        symlink(temp.path().join("src"), temp.path().join("src/loop/back")).expect("symlink");
+
+        let result = discover_source_files(temp.path(), &[]).expect("discover");
+
+        assert_eq!(result.files.len(), 1);
+        assert!(result.warnings.iter().any(|warning| {
+            warning
+                .path
+                .as_ref()
+                .map(|path| path.to_string_lossy().contains("src/loop/back"))
+                .unwrap_or(false)
+        }));
     }
 }
