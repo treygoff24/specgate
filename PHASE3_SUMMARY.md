@@ -3,7 +3,7 @@
 ## Feature Branch
 - **Name**: feature/phase3-integration-glm
 - **Base**: master (commit da13b6d)
-- **Head**: bed31cc
+- **Head**: 2fdeb5a (after review fixes)
 
 ## Worktrees and Deliverables
 
@@ -38,89 +38,65 @@ Files:
 ### 3. worktree/phase3-integration (commit 3895ea0)
 **Delivered**: Comprehensive integration tests and fixtures
 
-Integration Tests (18 tests):
+Integration Tests (24 tests):
 1. Init Command Tests (4 tests)
-   - Creates config and spec files
-   - Respects custom module name
-   - Does not overwrite without force
-   - Force overwrites files
-
 2. Validate Command Tests (3 tests)
-   - Passes with valid specs
-   - Fails with invalid spec version
-   - Reports multiple issues
-
 3. Check Command Determinism Tests (3 tests)
-   - Output is deterministic across runs
-   - Violation order is deterministic
-   - Verdict includes schema version
-
 4. Check Command Exit Code Semantics Tests (4 tests)
-   - Exits 0 on pass
-   - Exits 1 on policy violation
-   - Exits 2 on config error
-   - Warning-only exits 0
-
 5. Baseline Classification Tests (2 tests)
-   - Classifies existing violations
-   - Detects new violations
-
 6. Metrics Mode Tests (2 tests)
-   - Includes timing metadata
-   - Deterministic mode omits metrics
+7. **Diff Mode Tests (6 tests)** - Added in review pass
+   - Diff outputs git-style format
+   - Tab-separated format verification
+   - Diff-new-only filters to new violations
+   - Diff shows baseline with space prefix
+   - Diff includes summary
+   - Diff mode without violations passes
 
 Test Fixtures:
 - tests/fixtures/basic-project/
-  - Clean project with no violations
-  - 2 modules: app, core
 - tests/fixtures/project-with-violation/
-  - Project with boundary violations
-  - app imports core (never_imports constraint)
 - tests/fixtures/multi-module/
-  - Multi-module project structure
 
 ## Merge Commits
 
 1. 09cae18: Merge worktree/phase3-verdict
 2. 7b743f3: Merge worktree/phase3-cli
 3. bed31cc: Merge worktree/phase3-integration
+4. d26068f: fix: resolve clippy warnings
+5. 2fdeb5a: fix: address review findings from tri-frontier pass 1
 
 ## Test Summary
 
-Total Tests: 134 (all passing)
-- Unit tests: 108
-- Integration tests: 18
+Total Tests: 144 (all passing)
+- Unit tests: 112
+- Integration tests: 24
 - Wave2c CLI tests: 8
 
-Coverage:
-✓ check/init/validate command behavior
-✓ Exit-code semantics (0=pass, 1=policy, 2=runtime)
-✓ Determinism test exists and passes
-✓ Baseline classification works correctly
-✓ Metrics mode works correctly
+## Review Fixes Applied
 
-## Phase 3 Requirements Checklist
+### Pass 1 Findings Fixed:
+1. **Clippy warnings (6 issues)** - All resolved
+   - Removed unnecessary cast
+   - Elided needless lifetimes
+   - Used flatten() instead of manual if let
+   - Replaced iter().copied().collect() with to_vec()
+   - Used struct init syntax
+   - Added #[allow(clippy::too_many_arguments)]
 
-✅ Complete integration surfaces:
-  ✅ src/verdict/mod.rs (full VerdictBuilder behavior)
-  ✅ src/verdict/format.rs (NEW)
-  ✅ src/cli/check.rs (NEW)
-  ✅ src/cli/init.rs (NEW)
-  ✅ src/cli/validate.rs (NEW)
-  ✅ tests/integration.rs (NEW)
-  ✅ Fixture directories/files under tests/fixtures
+2. **Fingerprint panic risk** - Added bounds check in format_summary_table
 
-✅ Check/init/validate command behavior implemented
-✅ Exit-code semantics implemented and tested
-✅ Determinism test exists and passes
-✅ Diff mode path in check is implemented (via integration surface)
+3. **Dead `_to_path` variable** - Now used in diff output format
+
+4. **Unreachable DiffMode::None** - Made explicit with unreachable!()
+
+5. **Missing diff tests** - Added 6 integration tests for --diff and --diff-new-only
 
 ## Quality Bar
-✅ cargo fmt: clean
-✅ cargo test -q: green (134 tests pass)
-✅ No partial TODO stubs in phase-3 files
+- cargo fmt: clean
+- cargo clippy: clean (0 warnings)
+- cargo test: green (144 tests pass)
 
-## Pending
-⏳ 3-model review passes (opus-sub, athena, vulcan-high in progress)
-⏳ Fix any review findings
-⏳ Final go/no-go recommendation
+## Review Status
+- Round 1: opus-sub, athena, vulcan-high completed
+- Round 2: opus-sub, athena, vulcan-high in progress
