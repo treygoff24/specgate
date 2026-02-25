@@ -5,8 +5,13 @@ use crate::graph::DependencyGraph;
 use crate::spec::{SpecConfig, SpecFile};
 
 pub mod boundary;
+pub mod circular;
 pub mod dependencies;
 
+pub use circular::{
+    CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
+    evaluate_no_circular_deps,
+};
 pub use dependencies::{
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
     is_test_file,
