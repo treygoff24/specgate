@@ -1,17 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::GlobSet;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use crate::deterministic::normalize_repo_relative;
 use crate::graph::discovery;
 use crate::parser;
 use crate::resolver::{ModuleResolver, ResolvedImport};
 use crate::spec::{Boundaries, SpecConfig, SpecFile};
 
-use super::normalized_string_set;
+use super::{
+    GlobCompileError, compile_optional_globset_strict, matches_test_file, normalized_string_set,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DependencyViolationKind {
@@ -92,7 +93,7 @@ pub fn evaluate_dependency_rules(
         }
 
         let analysis = parser::parse_file(&file)?;
-        let is_test = is_test_file(project_root, &file, &test_matcher);
+        let is_test = matches_test_file(project_root, &file, test_matcher.as_ref());
 
         for specifier in analysis.dependency_specifiers() {
             let ResolvedImport::ThirdParty { package_name } = resolver.resolve(&file, &specifier)
@@ -147,8 +148,7 @@ pub fn evaluate_dependency_rules(
 }
 
 pub fn is_test_file(project_root: &Path, file: &Path, test_patterns: &GlobSet) -> bool {
-    let relative = normalize_repo_relative(project_root, file);
-    test_patterns.is_match(relative)
+    matches_test_file(project_root, file, Some(test_patterns))
 }
 
 fn module_policies(specs: &[SpecFile]) -> BTreeMap<String, DependencyPolicy> {
@@ -170,22 +170,16 @@ fn module_policies(specs: &[SpecFile]) -> BTreeMap<String, DependencyPolicy> {
     policies
 }
 
-fn build_test_globset(patterns: &[String]) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = Glob::new(pattern).map_err(|source| DependencyRuleError::InvalidTestGlob {
-            pattern: pattern.clone(),
-            source,
-        })?;
-        builder.add(glob);
-    }
-
-    builder
-        .build()
-        .map_err(|source| DependencyRuleError::InvalidTestGlob {
+fn build_test_globset(patterns: &[String]) -> Result<Option<GlobSet>> {
+    compile_optional_globset_strict(patterns).map_err(|error| match error {
+        GlobCompileError::InvalidPattern { pattern, source } => {
+            DependencyRuleError::InvalidTestGlob { pattern, source }
+        }
+        GlobCompileError::Build { source } => DependencyRuleError::InvalidTestGlob {
             pattern: "<globset>".to_string(),
             source,
-        })
+        },
+    })
 }
 
 #[cfg(test)]
@@ -194,6 +188,7 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use crate::deterministic::normalize_repo_relative;
     use crate::spec::Boundaries;
 
     use super::*;

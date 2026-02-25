@@ -1,12 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::GlobSet;
 
 use crate::deterministic::normalize_repo_relative;
-use crate::graph::EdgeKind;
-use crate::rules::{Rule, RuleContext, RuleViolation, sort_violations_stable};
+use crate::graph::{DependencyEdge, EdgeKind};
+use crate::rules::{
+    GlobCompileError, Rule, RuleContext, RuleViolation, compile_optional_globset_strict,
+    matches_test_file, sort_violations_stable,
+};
 use crate::spec::{Boundaries, Visibility};
 
 /// Boundary rule engine for importer/provider constraints.
@@ -19,6 +22,20 @@ impl Rule for BoundaryRule {
     }
 }
 
+#[derive(Debug)]
+enum PublicApiMatcher {
+    Disabled,
+    Compiled(GlobSet),
+    Invalid,
+}
+
+#[derive(Debug)]
+struct BoundaryMatcherCache {
+    canonical_root: PathBuf,
+    test_matcher: Option<GlobSet>,
+    public_api_by_module: BTreeMap<String, PublicApiMatcher>,
+}
+
 pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
     let spec_by_module = ctx
         .specs
@@ -26,9 +43,8 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
         .map(|spec| (spec.module.as_str(), spec))
         .collect::<BTreeMap<_, _>>();
 
-    let test_matcher = compile_optional_globset(&ctx.config.test_patterns);
-
     let mut violations = Vec::new();
+    let matcher_cache = build_matcher_cache(ctx, &spec_by_module, &mut violations);
 
     for node in ctx.graph.files() {
         let Some(importer_module) = node.module_id.as_deref() else {
@@ -44,8 +60,11 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
             .as_ref()
             .cloned()
             .unwrap_or_default();
-        let importer_is_test = is_test_file(ctx.project_root, &node.path, test_matcher.as_ref());
-        let ignored_import_specifiers = ignored_import_specifiers(node.analysis.imports.as_slice());
+        let importer_is_test = matches_test_file(
+            ctx.project_root,
+            &node.path,
+            matcher_cache.test_matcher.as_ref(),
+        );
 
         for edge in ctx.graph.dependencies_from(&node.path) {
             let Some(provider_module) = ctx.graph.module_of_file(&edge.to) else {
@@ -66,12 +85,16 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
                 .cloned()
                 .unwrap_or_default();
 
-            if import_is_ignored(&edge.specifier, edge.kind, &ignored_import_specifiers) {
+            if import_is_ignored(&edge, node.analysis.imports.as_slice()) {
                 continue;
             }
 
-            let position = find_import_position(node.analysis.imports.as_slice(), &edge.specifier);
+            let position = import_position(&edge, node.analysis.imports.as_slice());
 
+            // Precedence model:
+            // - Importer-side and provider-side checks each short-circuit internally.
+            // - Both sides are intentionally evaluated for the same edge so callers can
+            //   receive both policy violations when both modules are misconfigured.
             if !importer_is_test || importer_boundaries.enforce_in_tests {
                 check_importer_side(
                     edge.kind,
@@ -79,8 +102,8 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
                     &importer_boundaries,
                     provider_module,
                     &edge.to,
-                    ctx.project_root,
-                    &provider_boundaries,
+                    matcher_cache.public_api_by_module.get(provider_module),
+                    &matcher_cache.canonical_root,
                     position,
                     &node.path,
                     &mut violations,
@@ -107,14 +130,94 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
     violations
 }
 
+fn build_matcher_cache(
+    ctx: &RuleContext<'_>,
+    spec_by_module: &BTreeMap<&str, &crate::spec::SpecFile>,
+    violations: &mut Vec<RuleViolation>,
+) -> BoundaryMatcherCache {
+    let canonical_root =
+        fs::canonicalize(ctx.project_root).unwrap_or_else(|_| ctx.project_root.to_path_buf());
+
+    let test_matcher = match compile_optional_globset_strict(&ctx.config.test_patterns) {
+        Ok(matcher) => matcher,
+        Err(error) => {
+            violations.push(build_violation(
+                "boundary.config.invalid_test_glob",
+                format!(
+                    "invalid config.test_patterns glob pattern: {}",
+                    render_glob_error(&error)
+                ),
+                ctx.project_root,
+                None,
+                None,
+                None,
+                None,
+            ));
+            None
+        }
+    };
+
+    let mut public_api_by_module = BTreeMap::new();
+
+    for (module, spec) in spec_by_module {
+        let boundaries = spec.boundaries.as_ref().cloned().unwrap_or_default();
+        if boundaries.public_api.is_empty() {
+            public_api_by_module.insert((*module).to_string(), PublicApiMatcher::Disabled);
+            continue;
+        }
+
+        match compile_optional_globset_strict(&boundaries.public_api) {
+            Ok(Some(matcher)) => {
+                public_api_by_module
+                    .insert((*module).to_string(), PublicApiMatcher::Compiled(matcher));
+            }
+            Ok(None) => {
+                public_api_by_module.insert((*module).to_string(), PublicApiMatcher::Disabled);
+            }
+            Err(error) => {
+                public_api_by_module.insert((*module).to_string(), PublicApiMatcher::Invalid);
+                let spec_path = spec.spec_path.as_deref().unwrap_or(ctx.project_root);
+                violations.push(build_violation(
+                    "boundary.config.invalid_public_api_glob",
+                    format!(
+                        "module '{}' has invalid boundaries.public_api glob pattern: {}",
+                        module,
+                        render_glob_error(&error)
+                    ),
+                    spec_path,
+                    None,
+                    Some(module),
+                    None,
+                    None,
+                ));
+            }
+        }
+    }
+
+    BoundaryMatcherCache {
+        canonical_root,
+        test_matcher,
+        public_api_by_module,
+    }
+}
+
+fn render_glob_error(error: &GlobCompileError) -> String {
+    match error {
+        GlobCompileError::InvalidPattern { pattern, source } => {
+            format!("'{}' ({})", pattern, source)
+        }
+        GlobCompileError::Build { source } => format!("<globset> ({})", source),
+    }
+}
+
 fn check_importer_side(
     edge_kind: EdgeKind,
     importer_module: &str,
     importer_boundaries: &Boundaries,
     provider_module: &str,
     provider_file: &Path,
-    project_root: &Path,
-    provider_boundaries: &Boundaries,
+    public_api_matcher: Option<&PublicApiMatcher>,
+    canonical_root: &Path,
     position: Option<(u32, u32)>,
     from_file: &Path,
     violations: &mut Vec<RuleViolation>,
@@ -155,17 +258,9 @@ fn check_importer_side(
         }
     }
 
-    if !provider_boundaries.public_api.is_empty() {
-        let canonical_root =
-            fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-        let canonical_target =
-            fs::canonicalize(provider_file).unwrap_or_else(|_| provider_file.to_path_buf());
-        let target_rel = normalize_repo_relative(&canonical_root, &canonical_target);
-        let public_api_matcher = compile_optional_globset(&provider_boundaries.public_api);
-
-        let is_public_api = public_api_matcher
-            .as_ref()
-            .is_some_and(|matcher| matcher.is_match(&target_rel));
+    if let Some(PublicApiMatcher::Compiled(public_api_matcher)) = public_api_matcher {
+        let target_rel = normalize_repo_relative(canonical_root, provider_file);
+        let is_public_api = public_api_matcher.is_match(&target_rel);
 
         if !is_public_api {
             violations.push(build_violation(
@@ -286,65 +381,45 @@ fn is_cross_module_relative(specifier: &str, edge_kind: EdgeKind) -> bool {
     specifier.starts_with("./") || specifier.starts_with("../")
 }
 
-fn import_is_ignored(
-    specifier: &str,
-    edge_kind: EdgeKind,
-    ignored_specifiers: &BTreeSet<String>,
-) -> bool {
-    matches!(
-        edge_kind,
+fn import_is_ignored(edge: &DependencyEdge, imports: &[crate::parser::ImportInfo]) -> bool {
+    if !matches!(
+        edge.kind,
         EdgeKind::RuntimeImport | EdgeKind::TypeOnlyImport
-    ) && ignored_specifiers.contains(specifier)
+    ) {
+        return false;
+    }
+
+    if edge.ignored_by_comment {
+        return true;
+    }
+
+    imports.iter().any(|import| {
+        import.ignore_comment.is_some()
+            && import.specifier == edge.specifier
+            && edge.span_start.zip(edge.span_end) == Some((import.span_start, import.span_end))
+    })
 }
 
-fn ignored_import_specifiers(imports: &[crate::parser::ImportInfo]) -> BTreeSet<String> {
-    imports
-        .iter()
-        .filter(|import| import.ignore_comment.is_some())
-        .map(|import| import.specifier.clone())
-        .collect()
-}
-
-fn find_import_position(
+fn import_position(
+    edge: &DependencyEdge,
     imports: &[crate::parser::ImportInfo],
-    specifier: &str,
 ) -> Option<(u32, u32)> {
-    imports
-        .iter()
-        .find(|import| import.specifier == specifier)
-        .map(|import| (import.line, import.column))
+    edge.line.zip(edge.column).or_else(|| {
+        imports
+            .iter()
+            .find(|import| {
+                import.specifier == edge.specifier
+                    && edge
+                        .span_start
+                        .zip(edge.span_end)
+                        .is_some_and(|span| span == (import.span_start, import.span_end))
+            })
+            .map(|import| (import.line, import.column))
+    })
 }
 
 fn as_set(values: &[String]) -> BTreeSet<&str> {
     values.iter().map(String::as_str).collect()
-}
-
-fn compile_optional_globset(patterns: &[String]) -> Option<GlobSet> {
-    if patterns.is_empty() {
-        return None;
-    }
-
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let Ok(glob) = Glob::new(pattern) else {
-            continue;
-        };
-        builder.add(glob);
-    }
-
-    builder.build().ok()
-}
-
-fn is_test_file(project_root: &Path, file: &Path, test_matcher: Option<&GlobSet>) -> bool {
-    let Some(test_matcher) = test_matcher else {
-        return false;
-    };
-
-    let canonical_root =
-        fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-    let canonical_file = fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let relative = normalize_repo_relative(&canonical_root, &canonical_file);
-    test_matcher.is_match(&relative)
 }
 
 fn build_violation(
@@ -356,8 +431,6 @@ fn build_violation(
     to_module: Option<&str>,
     position: Option<(u32, u32)>,
 ) -> RuleViolation {
-    let (line, column) = position.unwrap_or((0, 0));
-
     RuleViolation {
         rule: rule.to_string(),
         message,
@@ -365,8 +438,8 @@ fn build_violation(
         to_file: to_file.map(Path::to_path_buf),
         from_module: from_module.map(str::to_string),
         to_module: to_module.map(str::to_string),
-        line: Some(line),
-        column: Some(column),
+        line: position.map(|(line, _)| line),
+        column: position.map(|(_, column)| column),
     }
 }
 
@@ -695,6 +768,151 @@ mod tests {
 
         let violations = run_engine(&temp, SpecConfig::default(), specs);
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn ignore_is_scoped_to_single_import_occurrence() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_file(
+            temp.path(),
+            "src/a/main.ts",
+            "// @specgate-ignore: temporary\nimport { b as ignored } from '../b/index';\nimport { b as enforced } from '../b/index';\nexport const x = ignored + enforced;\n",
+        );
+        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    never_imports: vec!["b".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.never_imports");
+        assert_eq!(violations[0].line, Some(3));
+    }
+
+    #[test]
+    fn reports_importer_and_provider_violations_for_same_edge() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_file(
+            temp.path(),
+            "src/a/main.ts",
+            "import { p } from '../provider/index';\nexport const x = p;\n",
+        );
+        write_file(
+            temp.path(),
+            "src/provider/index.ts",
+            "export const p = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    allow_imports_from: vec!["a".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries(
+                "provider",
+                "src/provider/**/*",
+                Boundaries {
+                    deny_imported_by: vec!["a".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        let rules = violations
+            .iter()
+            .map(|violation| violation.rule.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(violations.len(), 2);
+        assert!(rules.contains(&"boundary.allow_imports_from"));
+        assert!(rules.contains(&"boundary.deny_imported_by"));
+    }
+
+    #[test]
+    fn invalid_public_api_glob_is_reported_as_config_violation() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { p } from '../provider/index';\nexport const x = p;\n",
+        );
+        write_file(
+            temp.path(),
+            "src/provider/index.ts",
+            "export const p = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries("app", "src/app/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "provider",
+                "src/provider/**/*",
+                Boundaries {
+                    public_api: vec!["[".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].rule,
+            "boundary.config.invalid_public_api_glob"
+        );
+        assert!(violations[0].message.contains("boundaries.public_api"));
+    }
+
+    #[test]
+    fn uses_edge_position_metadata_for_non_import_edges() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_file(
+            temp.path(),
+            "src/a/main.ts",
+            "export * from '../b/index';\n",
+        );
+        write_file(temp.path(), "src/b/index.ts", "export const b = 1;\n");
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    allow_imports_from: vec!["a".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.allow_imports_from");
+        assert_ne!(
+            (
+                violations[0].line.unwrap_or(0),
+                violations[0].column.unwrap_or(0)
+            ),
+            (0, 0)
+        );
     }
 
     #[test]

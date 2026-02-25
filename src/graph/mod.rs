@@ -41,6 +41,11 @@ pub struct DependencyEdge {
     pub to: PathBuf,
     pub kind: EdgeKind,
     pub specifier: String,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+    pub span_start: Option<u32>,
+    pub span_end: Option<u32>,
+    pub ignored_by_comment: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +93,22 @@ struct EdgeRecord {
     to: PathBuf,
     kind: EdgeKind,
     specifier: String,
+    line: Option<u32>,
+    column: Option<u32>,
+    span_start: Option<u32>,
+    span_end: Option<u32>,
+    ignored_by_comment: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EdgeRequest {
+    kind: EdgeKind,
+    specifier: String,
+    line: Option<u32>,
+    column: Option<u32>,
+    span_start: Option<u32>,
+    span_end: Option<u32>,
+    ignored_by_comment: bool,
 }
 
 pub struct DependencyGraph {
@@ -146,8 +167,8 @@ impl DependencyGraph {
                 edge_requests(&node.analysis, config)
             };
 
-            for (kind, specifier) in requests {
-                let resolved = resolver.resolve(from_path, &specifier);
+            for request in requests {
+                let resolved = resolver.resolve(from_path, &request.specifier);
                 let ResolvedImport::FirstParty { resolved_path, .. } = resolved else {
                     continue;
                 };
@@ -165,8 +186,13 @@ impl DependencyGraph {
                 pending_edges.insert(EdgeRecord {
                     from: from_path.clone(),
                     to: target_path,
-                    kind,
-                    specifier: specifier.clone(),
+                    kind: request.kind,
+                    specifier: request.specifier.clone(),
+                    line: request.line,
+                    column: request.column,
+                    span_start: request.span_start,
+                    span_end: request.span_end,
+                    ignored_by_comment: request.ignored_by_comment,
                 });
             }
         }
@@ -263,6 +289,11 @@ impl DependencyGraph {
                 to: edge_ref.weight().to.clone(),
                 kind: edge_ref.weight().kind,
                 specifier: edge_ref.weight().specifier.clone(),
+                line: edge_ref.weight().line,
+                column: edge_ref.weight().column,
+                span_start: edge_ref.weight().span_start,
+                span_end: edge_ref.weight().span_end,
+                ignored_by_comment: edge_ref.weight().ignored_by_comment,
             })
             .collect::<Vec<_>>();
 
@@ -272,6 +303,10 @@ impl DependencyGraph {
                 .then_with(|| a.to.cmp(&b.to))
                 .then_with(|| a.kind.cmp(&b.kind))
                 .then_with(|| a.specifier.cmp(&b.specifier))
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.column.cmp(&b.column))
+                .then_with(|| a.span_start.cmp(&b.span_start))
+                .then_with(|| a.span_end.cmp(&b.span_end))
         });
 
         edges
@@ -297,6 +332,11 @@ impl DependencyGraph {
                 to: edge_ref.weight().to.clone(),
                 kind: edge_ref.weight().kind,
                 specifier: edge_ref.weight().specifier.clone(),
+                line: edge_ref.weight().line,
+                column: edge_ref.weight().column,
+                span_start: edge_ref.weight().span_start,
+                span_end: edge_ref.weight().span_end,
+                ignored_by_comment: edge_ref.weight().ignored_by_comment,
             })
             .collect::<Vec<_>>();
 
@@ -304,6 +344,10 @@ impl DependencyGraph {
             a.to.cmp(&b.to)
                 .then_with(|| a.kind.cmp(&b.kind))
                 .then_with(|| a.specifier.cmp(&b.specifier))
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.column.cmp(&b.column))
+                .then_with(|| a.span_start.cmp(&b.span_start))
+                .then_with(|| a.span_end.cmp(&b.span_end))
         });
 
         edges
@@ -470,35 +514,72 @@ fn reverse_module_dependency_edges(
     reverse
 }
 
-fn edge_requests(analysis: &FileAnalysis, config: &SpecConfig) -> Vec<(EdgeKind, String)> {
+fn edge_requests(analysis: &FileAnalysis, config: &SpecConfig) -> Vec<EdgeRequest> {
     let mut requests = BTreeSet::new();
 
     for import in &analysis.imports {
-        requests.insert((
-            if import.is_type_only {
+        requests.insert(EdgeRequest {
+            kind: if import.is_type_only {
                 EdgeKind::TypeOnlyImport
             } else {
                 EdgeKind::RuntimeImport
             },
-            import.specifier.clone(),
-        ));
+            specifier: import.specifier.clone(),
+            line: Some(import.line),
+            column: Some(import.column),
+            span_start: Some(import.span_start),
+            span_end: Some(import.span_end),
+            ignored_by_comment: import.ignore_comment.is_some(),
+        });
     }
 
     for re_export in &analysis.re_exports {
-        requests.insert((EdgeKind::ReExport, re_export.specifier.clone()));
+        requests.insert(EdgeRequest {
+            kind: EdgeKind::ReExport,
+            specifier: re_export.specifier.clone(),
+            line: Some(re_export.line),
+            column: Some(re_export.column),
+            span_start: None,
+            span_end: None,
+            ignored_by_comment: false,
+        });
     }
 
     for require_call in &analysis.require_calls {
-        requests.insert((EdgeKind::Require, require_call.specifier.clone()));
+        requests.insert(EdgeRequest {
+            kind: EdgeKind::Require,
+            specifier: require_call.specifier.clone(),
+            line: Some(require_call.line),
+            column: Some(require_call.column),
+            span_start: None,
+            span_end: None,
+            ignored_by_comment: false,
+        });
     }
 
     for dynamic_import in &analysis.dynamic_imports {
-        requests.insert((EdgeKind::DynamicImport, dynamic_import.specifier.clone()));
+        requests.insert(EdgeRequest {
+            kind: EdgeKind::DynamicImport,
+            specifier: dynamic_import.specifier.clone(),
+            line: Some(dynamic_import.line),
+            column: Some(dynamic_import.column),
+            span_start: None,
+            span_end: None,
+            ignored_by_comment: false,
+        });
     }
 
     if matches!(config.jest_mock_mode, JestMockMode::Enforce) {
         for jest_mock in &analysis.jest_mock_calls {
-            requests.insert((EdgeKind::JestMock, jest_mock.specifier.clone()));
+            requests.insert(EdgeRequest {
+                kind: EdgeKind::JestMock,
+                specifier: jest_mock.specifier.clone(),
+                line: Some(jest_mock.line),
+                column: Some(jest_mock.column),
+                span_start: None,
+                span_end: None,
+                ignored_by_comment: false,
+            });
         }
     }
 
@@ -868,6 +949,32 @@ console.log(value, dep);
 
         let unknown = graph.dependencies_from(Path::new("src/missing.ts"));
         assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn preserves_distinct_import_occurrences_for_same_specifier() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "// @specgate-ignore: temporary\nimport { value as ignored } from './dep';\nimport { value as enforced } from './dep';\nconsole.log(ignored, enforced);\n",
+        )
+        .expect("write main");
+        fs::write(temp.path().join("src/dep.ts"), "export const value = 1;\n").expect("write dep");
+
+        let specs = vec![spec("app", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build graph");
+
+        let deps = graph.dependencies_from(&temp.path().join("src/main.ts"));
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].specifier, "./dep");
+        assert_eq!(deps[1].specifier, "./dep");
+        assert!(deps.iter().any(|edge| edge.ignored_by_comment));
+        assert!(deps.iter().any(|edge| !edge.ignored_by_comment));
     }
 
     #[test]

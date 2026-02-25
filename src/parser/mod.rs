@@ -50,6 +50,8 @@ pub struct ImportInfo {
     pub is_type_only: bool,
     pub line: u32,
     pub column: u32,
+    pub span_start: u32,
+    pub span_end: u32,
     pub ignore_comment: Option<IgnoreComment>,
 }
 
@@ -66,6 +68,7 @@ pub struct ReExportInfo {
     pub is_star: bool,
     pub names: Vec<String>,
     pub line: u32,
+    pub column: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,21 +186,24 @@ fn extract_module_declarations(
                     is_type_only: is_import_type_only(decl),
                     line,
                     column,
+                    span_start: decl.span.start,
+                    span_end: decl.span.end,
                     ignore_comment,
                 });
             }
             Statement::ExportAllDeclaration(decl) => {
-                let (line, _column) = mapper.line_col(decl.span.start);
+                let (line, column) = mapper.line_col(decl.span.start);
                 analysis.re_exports.push(ReExportInfo {
                     specifier: decl.source.value.to_string(),
                     is_star: true,
                     names: Vec::new(),
                     line,
+                    column,
                 });
             }
             Statement::ExportNamedDeclaration(decl) => {
                 if let Some(source_literal) = &decl.source {
-                    let (line, _column) = mapper.line_col(decl.span.start);
+                    let (line, column) = mapper.line_col(decl.span.start);
                     let names = decl
                         .specifiers
                         .iter()
@@ -208,6 +214,7 @@ fn extract_module_declarations(
                         is_star: false,
                         names,
                         line,
+                        column,
                     });
                 } else {
                     for specifier in &decl.specifiers {
@@ -908,6 +915,7 @@ fn sort_analysis(analysis: &mut FileAnalysis) {
     analysis.re_exports.sort_by(|a, b| {
         a.line
             .cmp(&b.line)
+            .then_with(|| a.column.cmp(&b.column))
             .then_with(|| a.specifier.cmp(&b.specifier))
             .then_with(|| a.names.cmp(&b.names))
     });

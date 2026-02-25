@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
+
+use crate::deterministic::normalize_repo_relative;
 use crate::graph::DependencyGraph;
 use crate::spec::{SpecConfig, SpecFile};
 
@@ -76,4 +79,51 @@ pub(crate) fn normalized_string_set(values: &[String]) -> BTreeSet<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+#[derive(Debug)]
+pub(crate) enum GlobCompileError {
+    InvalidPattern {
+        pattern: String,
+        source: globset::Error,
+    },
+    Build {
+        source: globset::Error,
+    },
+}
+
+pub(crate) fn compile_optional_globset_strict(
+    patterns: &[String],
+) -> std::result::Result<Option<GlobSet>, GlobCompileError> {
+    if patterns.is_empty() {
+        return Ok(None);
+    }
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        let glob = Glob::new(pattern).map_err(|source| GlobCompileError::InvalidPattern {
+            pattern: pattern.clone(),
+            source,
+        })?;
+        builder.add(glob);
+    }
+
+    let matcher = builder
+        .build()
+        .map_err(|source| GlobCompileError::Build { source })?;
+
+    Ok(Some(matcher))
+}
+
+pub(crate) fn matches_test_file(
+    project_root: &Path,
+    file: &Path,
+    test_matcher: Option<&GlobSet>,
+) -> bool {
+    let Some(test_matcher) = test_matcher else {
+        return false;
+    };
+
+    let relative = normalize_repo_relative(project_root, file);
+    test_matcher.is_match(&relative)
 }
