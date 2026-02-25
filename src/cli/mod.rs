@@ -114,27 +114,27 @@ struct CommonProjectArgs {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
-enum CheckOutputMode {
+pub enum CheckOutputMode {
     Deterministic,
     Metrics,
 }
 
 #[derive(Debug, Clone, Args)]
-struct CheckArgs {
+pub struct CheckArgs {
     #[command(flatten)]
     common: CommonProjectArgs,
     /// Output mode contract (`deterministic` by default; `metrics` includes timing metadata).
     #[arg(long, value_enum, default_value_t = CheckOutputMode::Deterministic)]
-    output_mode: CheckOutputMode,
+    pub output_mode: CheckOutputMode,
     /// Deprecated alias for `--output-mode metrics`.
     #[arg(long)]
-    metrics: bool,
+    pub metrics: bool,
     /// Baseline file path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
-    baseline: PathBuf,
+    pub baseline: PathBuf,
     /// Disable baseline classification even if a baseline file exists.
     #[arg(long)]
-    no_baseline: bool,
+    pub no_baseline: bool,
 }
 
 #[derive(Debug, Clone, Args)]

@@ -108,7 +108,6 @@ fn init_does_not_overwrite_without_force() {
 
     // Modify a file
     let config_path = temp.path().join("specgate.config.yml");
-    let original = fs::read_to_string(&config_path).expect("read config");
     fs::write(&config_path, "modified").expect("write config");
 
     // Second init without force
@@ -302,12 +301,12 @@ fn check_violation_order_is_deterministic() {
 
     let output = parse_json(&result.stdout);
     let violations = output["violations"].as_array().expect("violations array");
-    
+
     // Verify deterministic ordering
     for i in 1..violations.len() {
         let prev = &violations[i - 1];
         let curr = &violations[i];
-        
+
         // Should be sorted by from_file, then line, then column
         let prev_file = prev["from_file"].as_str().expect("from_file string");
         let curr_file = curr["from_file"].as_str().expect("from_file string");
