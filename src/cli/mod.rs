@@ -7,10 +7,11 @@ use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
 use crate::baseline::{
-    DEFAULT_BASELINE_PATH, build_baseline, classify_violations, load_optional_baseline,
-    write_baseline,
+    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
+    classify_violations, load_optional_baseline, write_baseline,
 };
-use crate::deterministic::{normalize_path, normalize_repo_relative};
+use crate::build_info;
+use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
 use crate::graph::DependencyGraph;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver};
 use crate::rules::boundary::evaluate_boundary_rules;
@@ -19,7 +20,9 @@ use crate::rules::{
     RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
 };
 use crate::spec::{self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport};
-use crate::verdict::{self, PolicyViolation, VerdictMetrics, VerdictStatus, build_verdict};
+use crate::verdict::{
+    self, PolicyViolation, VerdictIdentity, VerdictMetrics, VerdictStatus, build_verdict,
+};
 
 pub const EXIT_CODE_PASS: i32 = 0;
 pub const EXIT_CODE_POLICY_VIOLATIONS: i32 = 1;
@@ -153,6 +156,12 @@ struct AnalysisArtifacts {
     graph_edges: usize,
     suppressed_violations: usize,
     edge_pairs: BTreeSet<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+struct GovernanceHashes {
+    config_hash: String,
+    spec_hash: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -370,6 +379,17 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     );
     record_timing(&mut timings, "classify_baseline", classify_start);
 
+    let governance = match compute_governance_hashes(&loaded) {
+        Ok(governance) => governance,
+        Err(error) => {
+            return runtime_error_json(
+                "governance",
+                "failed to compute deterministic governance hashes",
+                vec![error],
+            );
+        }
+    };
+
     let metrics = if args.metrics {
         Some(VerdictMetrics {
             timings_ms: timings,
@@ -379,11 +399,27 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         None
     };
 
+    let output_mode = if args.metrics {
+        "metrics".to_string()
+    } else {
+        "deterministic".to_string()
+    };
+
     let verdict = build_verdict(
         &loaded.project_root,
         &classified,
         artifacts.suppressed_violations,
         metrics,
+        VerdictIdentity {
+            tool_version: build_info::tool_version().to_string(),
+            git_sha: build_info::git_sha().to_string(),
+            config_hash: governance.config_hash,
+            spec_hash: governance.spec_hash,
+            output_mode,
+            spec_files_changed: Vec::new(),
+            rule_deltas: Vec::new(),
+            policy_change_detected: false,
+        },
     );
 
     let exit_code = match verdict.status {
@@ -429,7 +465,27 @@ fn handle_baseline(args: BaselineArgs) -> CliRunResult {
         );
     }
 
-    let baseline = build_baseline(&loaded.project_root, &artifacts.policy_violations);
+    let governance = match compute_governance_hashes(&loaded) {
+        Ok(governance) => governance,
+        Err(error) => {
+            return runtime_error_json(
+                "governance",
+                "failed to compute deterministic governance hashes",
+                vec![error],
+            );
+        }
+    };
+
+    let baseline = build_baseline_with_metadata(
+        &loaded.project_root,
+        &artifacts.policy_violations,
+        BaselineGeneratedFrom {
+            tool_version: build_info::tool_version().to_string(),
+            git_sha: build_info::git_sha().to_string(),
+            config_hash: governance.config_hash,
+            spec_hash: governance.spec_hash,
+        },
+    );
     let baseline_path = resolve_against_root(&loaded.project_root, &args.output);
 
     if let Err(error) = write_baseline(&baseline_path, &baseline) {
@@ -591,7 +647,11 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     let trace_edges = match parse_trace_edges(&loaded.project_root, &trace_json) {
         Ok(edges) => edges,
         Err(error) => {
-            return runtime_error_json("doctor.compare", "failed to parse trace edges", vec![error]);
+            return runtime_error_json(
+                "doctor.compare",
+                "failed to parse trace edges",
+                vec![error],
+            );
         }
     };
 
@@ -962,6 +1022,74 @@ fn resolve_against_root(project_root: &Path, path: &Path) -> PathBuf {
 
 fn record_timing(timings: &mut BTreeMap<String, u128>, key: &str, start: Instant) {
     timings.insert(key.to_string(), start.elapsed().as_millis());
+}
+
+fn compute_governance_hashes(
+    loaded: &LoadedProject,
+) -> std::result::Result<GovernanceHashes, String> {
+    let config_value = serde_json::to_value(&loaded.config)
+        .map_err(|error| format!("failed to serialize config for hashing: {error}"))?;
+
+    let spec_snapshot = loaded
+        .specs
+        .iter()
+        .map(|spec| HashedSpec {
+            module: spec.module.clone(),
+            path: spec
+                .spec_path
+                .as_ref()
+                .map(|path| normalize_repo_relative(&loaded.project_root, path))
+                .unwrap_or_default(),
+            spec: spec.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let spec_value = serde_json::to_value(spec_snapshot)
+        .map_err(|error| format!("failed to serialize specs for hashing: {error}"))?;
+
+    Ok(GovernanceHashes {
+        config_hash: hash_canonical_json(&config_value)
+            .map_err(|error| format!("failed to hash config snapshot: {error}"))?,
+        spec_hash: hash_canonical_json(&spec_value)
+            .map_err(|error| format!("failed to hash spec snapshot: {error}"))?,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct HashedSpec {
+    module: String,
+    path: String,
+    spec: SpecFile,
+}
+
+fn hash_canonical_json(
+    value: &serde_json::Value,
+) -> std::result::Result<String, serde_json::Error> {
+    let canonical = canonicalize_json(value);
+    let rendered = serde_json::to_vec(&canonical)?;
+    Ok(format!("sha256:{}", stable_hash_hex(rendered)))
+}
+
+fn canonicalize_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(canonicalize_json).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+
+            let mut ordered = serde_json::Map::new();
+            for key in keys {
+                if let Some(nested) = map.get(&key) {
+                    ordered.insert(key, canonicalize_json(nested));
+                }
+            }
+
+            serde_json::Value::Object(ordered)
+        }
+        _ => value.clone(),
+    }
 }
 
 #[cfg(test)]

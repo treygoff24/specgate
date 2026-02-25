@@ -1,4 +1,5 @@
 pub mod baseline;
+pub mod build_info;
 pub mod cli;
 pub mod deterministic;
 pub mod graph;

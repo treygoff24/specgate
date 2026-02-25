@@ -3,6 +3,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
+use serde_json::Value;
 use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
@@ -11,6 +12,10 @@ fn write_file(root: &Path, relative_path: &str, content: &str) {
         fs::create_dir_all(parent).expect("mkdir parent");
     }
     fs::write(path, content).expect("write file");
+}
+
+fn parse_json(source: &str) -> Value {
+    serde_json::from_str(source).expect("valid json")
 }
 
 fn write_project(root: &Path) {
@@ -50,6 +55,15 @@ fn check_with_metrics_includes_timing_metadata() {
     assert_eq!(result.exit_code, EXIT_CODE_PASS);
     assert!(result.stdout.contains("\"metrics\""));
     assert!(result.stdout.contains("\"timings_ms\""));
+
+    let parsed = parse_json(&result.stdout);
+    assert_eq!(parsed["output_mode"], "metrics");
+    assert!(parsed["tool_version"].as_str().is_some());
+    assert!(parsed["config_hash"].as_str().is_some());
+    assert!(parsed["spec_hash"].as_str().is_some());
+    assert_eq!(parsed["spec_files_changed"], Value::Array(Vec::new()));
+    assert_eq!(parsed["rule_deltas"], Value::Array(Vec::new()));
+    assert_eq!(parsed["policy_change_detected"], Value::Bool(false));
 }
 
 #[test]
@@ -75,6 +89,32 @@ fn baseline_file_is_stable_and_used_for_report_only() {
     ]);
     assert_eq!(baseline.exit_code, EXIT_CODE_PASS);
 
+    let baseline_file = fs::read_to_string(temp.path().join(".specgate-baseline.json"))
+        .expect("baseline file exists");
+    let baseline_json = parse_json(&baseline_file);
+    assert!(
+        baseline_json["generated_from"]["tool_version"]
+            .as_str()
+            .is_some()
+    );
+    assert!(
+        baseline_json["generated_from"]["git_sha"]
+            .as_str()
+            .is_some()
+    );
+    assert!(
+        baseline_json["generated_from"]["config_hash"]
+            .as_str()
+            .expect("config hash")
+            .starts_with("sha256:")
+    );
+    assert!(
+        baseline_json["generated_from"]["spec_hash"]
+            .as_str()
+            .expect("spec hash")
+            .starts_with("sha256:")
+    );
+
     let first = run([
         "specgate",
         "check",
@@ -91,6 +131,21 @@ fn baseline_file_is_stable_and_used_for_report_only() {
     assert_eq!(first.exit_code, EXIT_CODE_PASS);
     assert_eq!(first.stdout, second.stdout);
     assert!(first.stdout.contains("\"baseline_violations\": 1"));
+
+    let verdict = parse_json(&first.stdout);
+    assert_eq!(verdict["output_mode"], "deterministic");
+    assert!(
+        verdict["config_hash"]
+            .as_str()
+            .expect("config hash")
+            .starts_with("sha256:")
+    );
+    assert!(
+        verdict["spec_hash"]
+            .as_str()
+            .expect("spec hash")
+            .starts_with("sha256:")
+    );
 
     write_file(
         temp.path(),
