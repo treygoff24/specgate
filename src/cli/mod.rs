@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
 use crate::baseline::{
@@ -12,18 +13,22 @@ use crate::baseline::{
 };
 use crate::deterministic::{normalize_path, normalize_repo_relative};
 use crate::graph::DependencyGraph;
-use crate::resolver::{ModuleMapOverlap, ModuleResolver};
+use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
     RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
 };
-use crate::spec::{self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport};
+use crate::spec::{
+    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
+    types::SUPPORTED_SPEC_VERSION,
+};
 use crate::verdict::{self, PolicyViolation, VerdictMetrics, VerdictStatus, build_verdict};
 
 pub const EXIT_CODE_PASS: i32 = 0;
 pub const EXIT_CODE_POLICY_VIOLATIONS: i32 = 1;
 pub const EXIT_CODE_RUNTIME_ERROR: i32 = 2;
+pub const EXIT_CODE_DOCTOR_MISMATCH: i32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliRunResult {
@@ -72,6 +77,8 @@ enum Command {
     Check(CheckArgs),
     /// Validate spec/config files only.
     Validate(CommonProjectArgs),
+    /// Initialize starter config/spec scaffolding.
+    Init(InitArgs),
     /// Diagnostics and parity checks.
     Doctor(DoctorArgs),
     /// Generate a baseline file for current violations.
@@ -85,11 +92,21 @@ struct CommonProjectArgs {
     project_root: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "lower")]
+enum CheckOutputMode {
+    Deterministic,
+    Metrics,
+}
+
 #[derive(Debug, Clone, Args)]
 struct CheckArgs {
     #[command(flatten)]
     common: CommonProjectArgs,
-    /// Include timing metadata in output.
+    /// Output mode contract (`deterministic` by default; `metrics` includes timing metadata).
+    #[arg(long, value_enum, default_value_t = CheckOutputMode::Deterministic)]
+    output_mode: CheckOutputMode,
+    /// Deprecated alias for `--output-mode metrics`.
     #[arg(long)]
     metrics: bool,
     /// Baseline file path.
@@ -107,6 +124,24 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+struct InitArgs {
+    #[command(flatten)]
+    common: CommonProjectArgs,
+    /// Directory where starter `.spec.yml` files are written.
+    #[arg(long, default_value = "modules")]
+    spec_dir: PathBuf,
+    /// Starter module id used in the initial example spec.
+    #[arg(long, default_value = "app")]
+    module: String,
+    /// Starter module boundary glob.
+    #[arg(long, default_value = "src/app/**/*")]
+    module_path: String,
+    /// Overwrite existing scaffold files.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -131,8 +166,20 @@ struct DoctorCompareArgs {
     #[arg(long)]
     tsc_trace: Option<PathBuf>,
     /// Command that emits compatible JSON to stdout.
+    ///
+    /// SECURITY: this command is executed through `sh -lc` and can run arbitrary shell code.
+    /// You must also pass `--allow-shell` to opt into execution.
     #[arg(long)]
     tsc_command: Option<String>,
+    /// Explicit opt-in for running `--tsc-command` through the system shell.
+    #[arg(long)]
+    allow_shell: bool,
+    /// Resolve and compare a single import from a specific file.
+    #[arg(long)]
+    from: Option<PathBuf>,
+    /// Import specifier paired with `--from` for single-edge diagnostics.
+    #[arg(long = "import")]
+    import_specifier: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +239,15 @@ struct BaselineOutput {
 }
 
 #[derive(Debug, Serialize)]
+struct InitOutput {
+    schema_version: String,
+    status: String,
+    project_root: String,
+    created: Vec<String>,
+    skipped_existing: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct DoctorOutput {
     schema_version: String,
     status: String,
@@ -223,6 +279,18 @@ struct DoctorCompareOutput {
     trace_edge_count: usize,
     missing_in_specgate: Vec<String>,
     extra_in_specgate: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focus: Option<DoctorCompareFocusOutput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorCompareFocusOutput {
+    from: String,
+    import_specifier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved_to: Option<String>,
+    resolution_kind: String,
+    in_specgate_graph: bool,
 }
 
 pub fn run<I, T>(args: I) -> CliRunResult
@@ -238,6 +306,7 @@ where
     match cli.command {
         Command::Validate(args) => handle_validate(args),
         Command::Check(args) => handle_check(args),
+        Command::Init(args) => handle_init(args),
         Command::Baseline(args) => handle_baseline(args),
         Command::Doctor(args) => handle_doctor(args),
     }
@@ -370,7 +439,8 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     );
     record_timing(&mut timings, "classify_baseline", classify_start);
 
-    let metrics = if args.metrics {
+    let include_metrics = args.metrics || args.output_mode == CheckOutputMode::Metrics;
+    let metrics = if include_metrics {
         Some(VerdictMetrics {
             timings_ms: timings,
             total_ms: total_start.elapsed().as_millis(),
@@ -392,6 +462,110 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     };
 
     CliRunResult::json(exit_code, &verdict)
+}
+
+fn handle_init(args: InitArgs) -> CliRunResult {
+    let project_root = fs::canonicalize(&args.common.project_root)
+        .unwrap_or_else(|_| args.common.project_root.clone());
+
+    if args.module.trim().is_empty() {
+        return runtime_error_json("init", "module must be non-empty", Vec::new());
+    }
+
+    if let Err(error) = fs::create_dir_all(&project_root) {
+        return runtime_error_json(
+            "init",
+            "failed to prepare project root",
+            vec![format!("{}: {error}", project_root.display())],
+        );
+    }
+
+    let normalized_spec_dir = normalize_path(&args.spec_dir);
+    let config_path = project_root.join("specgate.config.yml");
+    let spec_file_stem = args.module.trim().replace('/', "__");
+    let spec_path = resolve_against_root(
+        &project_root,
+        &args.spec_dir.join(format!("{spec_file_stem}.spec.yml")),
+    );
+
+    let config_content = format!(
+        "spec_dirs:\n  - {}\nexclude: []\ntest_patterns: []\n",
+        normalized_spec_dir
+    );
+
+    let spec_content = format!(
+        "version: \"{}\"\nmodule: \"{}\"\nboundaries:\n  path: \"{}\"\nconstraints: []\n",
+        SUPPORTED_SPEC_VERSION,
+        escape_yaml_double_quoted(args.module.trim()),
+        escape_yaml_double_quoted(args.module_path.trim())
+    );
+
+    let mut created = Vec::new();
+    let mut skipped_existing = Vec::new();
+
+    if let Err(error) = write_scaffold_file(
+        &project_root,
+        &config_path,
+        &config_content,
+        args.force,
+        &mut created,
+        &mut skipped_existing,
+    ) {
+        return runtime_error_json("init", "failed to write scaffold", vec![error]);
+    }
+
+    if let Err(error) = write_scaffold_file(
+        &project_root,
+        &spec_path,
+        &spec_content,
+        args.force,
+        &mut created,
+        &mut skipped_existing,
+    ) {
+        return runtime_error_json("init", "failed to write scaffold", vec![error]);
+    }
+
+    CliRunResult::json(
+        EXIT_CODE_PASS,
+        &InitOutput {
+            schema_version: "2.2".to_string(),
+            status: "ok".to_string(),
+            project_root: normalize_path(&project_root),
+            created,
+            skipped_existing,
+        },
+    )
+}
+
+fn write_scaffold_file(
+    project_root: &Path,
+    path: &Path,
+    content: &str,
+    force: bool,
+    created: &mut Vec<String>,
+    skipped_existing: &mut Vec<String>,
+) -> std::result::Result<(), String> {
+    let relative = normalize_repo_relative(project_root, path);
+
+    if path.exists() && !force {
+        skipped_existing.push(relative);
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create directory {}: {error}", parent.display()))?;
+    }
+
+    fs::write(path, content)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    created.push(relative);
+    Ok(())
+}
+
+fn escape_yaml_double_quoted(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn handle_baseline(args: BaselineArgs) -> CliRunResult {
@@ -562,6 +736,17 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         );
     }
 
+    let focus = match build_doctor_compare_focus(&loaded, &artifacts, &args) {
+        Ok(focus) => focus,
+        Err(error) => {
+            return runtime_error_json(
+                "doctor.compare",
+                "invalid compare focus options",
+                vec![error],
+            );
+        }
+    };
+
     let trace_source = match load_trace_source(&loaded.project_root, &args) {
         Ok(trace_source) => trace_source,
         Err(error) => {
@@ -573,16 +758,19 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         }
     };
 
+    let compare_specgate_edges = filter_edges_for_focus(&artifacts.edge_pairs, focus.as_ref());
+
     let Some(trace_json) = trace_source.payload else {
         let output = DoctorCompareOutput {
             schema_version: "2.2".to_string(),
             status: "skipped".to_string(),
             configured: trace_source.configured,
             reason: trace_source.reason,
-            specgate_edge_count: artifacts.edge_pairs.len(),
+            specgate_edge_count: compare_specgate_edges.len(),
             trace_edge_count: 0,
             missing_in_specgate: Vec::new(),
             extra_in_specgate: Vec::new(),
+            focus: focus.as_ref().map(|focus| focus.output.clone()),
         };
 
         return CliRunResult::json(EXIT_CODE_PASS, &output);
@@ -591,18 +779,23 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     let trace_edges = match parse_trace_edges(&loaded.project_root, &trace_json) {
         Ok(edges) => edges,
         Err(error) => {
-            return runtime_error_json("doctor.compare", "failed to parse trace edges", vec![error]);
+            return runtime_error_json(
+                "doctor.compare",
+                "failed to parse trace edges",
+                vec![error],
+            );
         }
     };
 
-    let missing_in_specgate = trace_edges
-        .difference(&artifacts.edge_pairs)
+    let compare_trace_edges = filter_edges_for_focus(&trace_edges, focus.as_ref());
+
+    let missing_in_specgate = compare_trace_edges
+        .difference(&compare_specgate_edges)
         .map(|(from, to)| format!("{from} -> {to}"))
         .collect::<Vec<_>>();
 
-    let extra_in_specgate = artifacts
-        .edge_pairs
-        .difference(&trace_edges)
+    let extra_in_specgate = compare_specgate_edges
+        .difference(&compare_trace_edges)
         .map(|(from, to)| format!("{from} -> {to}"))
         .collect::<Vec<_>>();
 
@@ -617,19 +810,96 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         status: status.to_string(),
         configured: true,
         reason: trace_source.reason,
-        specgate_edge_count: artifacts.edge_pairs.len(),
-        trace_edge_count: trace_edges.len(),
+        specgate_edge_count: compare_specgate_edges.len(),
+        trace_edge_count: compare_trace_edges.len(),
         missing_in_specgate,
         extra_in_specgate,
+        focus: focus.as_ref().map(|focus| focus.output.clone()),
     };
 
     let exit_code = if status == "mismatch" {
-        EXIT_CODE_POLICY_VIOLATIONS
+        EXIT_CODE_DOCTOR_MISMATCH
     } else {
         EXIT_CODE_PASS
     };
 
     CliRunResult::json(exit_code, &output)
+}
+
+#[derive(Debug, Clone)]
+struct DoctorCompareFocus {
+    edge: Option<(String, String)>,
+    output: DoctorCompareFocusOutput,
+}
+
+fn build_doctor_compare_focus(
+    loaded: &LoadedProject,
+    artifacts: &AnalysisArtifacts,
+    args: &DoctorCompareArgs,
+) -> std::result::Result<Option<DoctorCompareFocus>, String> {
+    match (&args.from, &args.import_specifier) {
+        (None, None) => Ok(None),
+        (Some(_), None) | (None, Some(_)) => {
+            Err("`--from` and `--import` must be provided together".to_string())
+        }
+        (Some(from), Some(import_specifier)) => {
+            let from_file = resolve_against_root(&loaded.project_root, from);
+            let from_normalized = normalize_repo_relative(&loaded.project_root, &from_file);
+
+            let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
+                .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
+            let explanation = resolver.explain_resolution(&from_file, import_specifier);
+
+            let (edge, resolved_to, resolution_kind) = match explanation.result {
+                ResolvedImport::FirstParty { resolved_path, .. } => {
+                    let to = normalize_repo_relative(&loaded.project_root, &resolved_path);
+                    (
+                        Some((from_normalized.clone(), to.clone())),
+                        Some(to),
+                        "first_party".to_string(),
+                    )
+                }
+                ResolvedImport::ThirdParty { package_name } => {
+                    (None, Some(package_name), "third_party".to_string())
+                }
+                ResolvedImport::Unresolvable { .. } => (None, None, "unresolvable".to_string()),
+            };
+
+            let in_specgate_graph = edge
+                .as_ref()
+                .is_some_and(|edge| artifacts.edge_pairs.contains(edge));
+
+            Ok(Some(DoctorCompareFocus {
+                edge,
+                output: DoctorCompareFocusOutput {
+                    from: from_normalized,
+                    import_specifier: import_specifier.clone(),
+                    resolved_to,
+                    resolution_kind,
+                    in_specgate_graph,
+                },
+            }))
+        }
+    }
+}
+
+fn filter_edges_for_focus(
+    edges: &BTreeSet<(String, String)>,
+    focus: Option<&DoctorCompareFocus>,
+) -> BTreeSet<(String, String)> {
+    if let Some(focus) = focus {
+        if let Some(edge) = &focus.edge {
+            return edges
+                .iter()
+                .filter(|candidate| *candidate == edge)
+                .cloned()
+                .collect();
+        }
+
+        return BTreeSet::new();
+    }
+
+    edges.clone()
 }
 
 #[derive(Debug)]
@@ -645,7 +915,7 @@ fn load_trace_source(
 ) -> std::result::Result<TraceSource, String> {
     if let Some(trace_path) = &args.tsc_trace {
         let resolved = resolve_against_root(project_root, trace_path);
-        let source = std::fs::read_to_string(&resolved).map_err(|error| {
+        let source = fs::read_to_string(&resolved).map_err(|error| {
             format!("failed to read trace file {}: {error}", resolved.display())
         })?;
 
@@ -660,6 +930,12 @@ fn load_trace_source(
     }
 
     if let Some(command) = &args.tsc_command {
+        if !args.allow_shell {
+            return Err(
+                "`--tsc-command` executes via `sh -lc`; pass `--allow-shell` to opt in".to_string(),
+            );
+        }
+
         let executable = command.split_whitespace().next().unwrap_or_default();
         if executable.is_empty() {
             return Ok(TraceSource {
@@ -716,13 +992,21 @@ fn load_trace_source(
 }
 
 fn is_command_available(command: &str) -> bool {
-    std::process::Command::new("sh")
-        .arg("-lc")
-        .arg(format!("command -v {command} >/dev/null 2>&1"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    for directory in std::env::split_paths(&path_var) {
+        if directory.join(command).is_file() {
+            return true;
+        }
+    }
+
+    false
 }
+
+const TRACE_JSON_MAX_DEPTH: usize = 256;
+const TRACE_JSON_MAX_VISITED_NODES: usize = 1_000_000;
 
 fn parse_trace_edges(
     project_root: &Path,
@@ -732,38 +1016,58 @@ fn parse_trace_edges(
         .map_err(|error| format!("trace JSON parse error: {error}"))?;
 
     let mut edges = BTreeSet::new();
-    collect_trace_edges(project_root, &value, &mut edges);
+    collect_trace_edges_iterative(project_root, &value, &mut edges)?;
     Ok(edges)
 }
 
-fn collect_trace_edges(
+fn collect_trace_edges_iterative(
     project_root: &Path,
-    value: &serde_json::Value,
+    root: &serde_json::Value,
     edges: &mut BTreeSet<(String, String)>,
-) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_trace_edges(project_root, item, edges);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            if let (Some(from), Some(to)) = (
-                map.get("from").and_then(serde_json::Value::as_str),
-                map.get("to").and_then(serde_json::Value::as_str),
-            ) {
-                edges.insert((
-                    normalize_trace_path(project_root, from),
-                    normalize_trace_path(project_root, to),
-                ));
-            }
+) -> std::result::Result<(), String> {
+    let mut stack = vec![(root, 0usize)];
+    let mut visited = 0usize;
 
-            for nested in map.values() {
-                collect_trace_edges(project_root, nested, edges);
-            }
+    while let Some((value, depth)) = stack.pop() {
+        visited = visited.saturating_add(1);
+        if visited > TRACE_JSON_MAX_VISITED_NODES {
+            return Err(format!(
+                "trace JSON exceeds maximum traversed nodes ({TRACE_JSON_MAX_VISITED_NODES})"
+            ));
         }
-        _ => {}
+
+        if depth > TRACE_JSON_MAX_DEPTH {
+            return Err(format!(
+                "trace JSON exceeds maximum supported nesting depth ({TRACE_JSON_MAX_DEPTH})"
+            ));
+        }
+
+        match value {
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    stack.push((item, depth + 1));
+                }
+            }
+            serde_json::Value::Object(map) => {
+                if let (Some(from), Some(to)) = (
+                    map.get("from").and_then(serde_json::Value::as_str),
+                    map.get("to").and_then(serde_json::Value::as_str),
+                ) {
+                    edges.insert((
+                        normalize_trace_path(project_root, from),
+                        normalize_trace_path(project_root, to),
+                    ));
+                }
+
+                for nested in map.values() {
+                    stack.push((nested, depth + 1));
+                }
+            }
+            _ => {}
+        }
     }
+
+    Ok(())
 }
 
 fn normalize_trace_path(project_root: &Path, raw: &str) -> String {
@@ -1175,9 +1479,55 @@ mod tests {
             temp.path().to_str().expect("utf8 path"),
             "--tsc-command",
             "tsc --generateTrace .specgate-trace --noEmit",
+            "--allow-shell",
         ]);
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"skipped\""));
+    }
+
+    #[test]
+    fn check_output_mode_metrics_includes_timings() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project(temp.path());
+
+        let result = run([
+            "specgate",
+            "check",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--output-mode",
+            "metrics",
+            "--no-baseline",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        assert!(result.stdout.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn init_creates_scaffold_and_then_skips_existing_files() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let first = run([
+            "specgate",
+            "init",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+        ]);
+        assert_eq!(first.exit_code, EXIT_CODE_PASS);
+        assert!(temp.path().join("specgate.config.yml").exists());
+        assert!(temp.path().join("modules/app.spec.yml").exists());
+        assert!(first.stdout.contains("\"created\""));
+
+        let second = run([
+            "specgate",
+            "init",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+        ]);
+        assert_eq!(second.exit_code, EXIT_CODE_PASS);
+        assert!(second.stdout.contains("\"skipped_existing\""));
+        assert!(second.stdout.contains("specgate.config.yml"));
     }
 }
