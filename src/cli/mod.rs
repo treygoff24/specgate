@@ -16,7 +16,8 @@ use crate::resolver::{ModuleMapOverlap, ModuleResolver};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
-    RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
+    RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
+    is_canonical_import_rule_id,
 };
 use crate::spec::{self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport};
 use crate::verdict::{self, PolicyViolation, VerdictMetrics, VerdictStatus, build_verdict};
@@ -591,7 +592,11 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     let trace_edges = match parse_trace_edges(&loaded.project_root, &trace_json) {
         Ok(edges) => edges,
         Err(error) => {
-            return runtime_error_json("doctor.compare", "failed to parse trace edges", vec![error]);
+            return runtime_error_json(
+                "doctor.compare",
+                "failed to parse trace edges",
+                vec![error],
+            );
         }
     };
 
@@ -793,6 +798,72 @@ fn load_project(project_root: &Path) -> std::result::Result<LoadedProject, Strin
     })
 }
 
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+    }
+}
+
+fn dependency_violation_severity(rule_id: &str) -> Severity {
+    debug_assert!(
+        matches!(
+            rule_id,
+            DEPENDENCY_FORBIDDEN_RULE_ID | DEPENDENCY_NOT_ALLOWED_RULE_ID
+        ),
+        "unexpected dependency rule id '{rule_id}'"
+    );
+
+    Severity::Error
+}
+
+fn rule_ids_match(constraint_rule: &str, violation_rule: &str) -> bool {
+    if is_canonical_import_rule_id(constraint_rule) || is_canonical_import_rule_id(violation_rule) {
+        return is_canonical_import_rule_id(constraint_rule)
+            && is_canonical_import_rule_id(violation_rule);
+    }
+
+    constraint_rule == violation_rule
+}
+
+fn severity_for_constraint_rule(spec: &SpecFile, rule_id: &str) -> Option<Severity> {
+    spec.constraints
+        .iter()
+        .filter(|constraint| rule_ids_match(&constraint.rule, rule_id))
+        .map(|constraint| constraint.severity)
+        .min_by_key(|severity| severity_rank(*severity))
+}
+
+fn boundary_constraint_module<'a>(violation: &'a RuleViolation) -> Option<&'a str> {
+    let rule = violation.rule.as_str();
+
+    match rule {
+        "boundary.never_imports" | "boundary.allow_imports_from" | "boundary.public_api" => {
+            violation.from_module.as_deref()
+        }
+        "boundary.deny_imported_by"
+        | "boundary.allow_imported_by"
+        | "boundary.visibility.internal"
+        | "boundary.visibility.private" => violation.to_module.as_deref(),
+        _ if is_canonical_import_rule_id(rule) => violation.to_module.as_deref(),
+        _ => None,
+    }
+}
+
+fn boundary_violation_severity(
+    violation: &RuleViolation,
+    spec_by_module: &BTreeMap<&str, &SpecFile>,
+) -> Severity {
+    let Some(module_id) = boundary_constraint_module(violation) else {
+        return Severity::Error;
+    };
+
+    spec_by_module
+        .get(module_id)
+        .and_then(|spec| severity_for_constraint_rule(spec, &violation.rule))
+        .unwrap_or(Severity::Error)
+}
+
 fn analyze_project(loaded: &LoadedProject) -> std::result::Result<AnalysisArtifacts, String> {
     let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
         .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
@@ -832,19 +903,28 @@ fn analyze_project(loaded: &LoadedProject) -> std::result::Result<AnalysisArtifa
     };
 
     let mut policy_violations = Vec::new();
+    let spec_by_module = loaded
+        .specs
+        .iter()
+        .map(|spec| (spec.module.as_str(), spec))
+        .collect::<BTreeMap<_, _>>();
 
     let boundary_violations = evaluate_boundary_rules(&ctx)
         .into_iter()
-        .map(|violation| PolicyViolation {
-            rule: violation.rule,
-            severity: Severity::Error,
-            message: violation.message,
-            from_file: violation.from_file,
-            to_file: violation.to_file,
-            from_module: violation.from_module,
-            to_module: violation.to_module,
-            line: violation.line,
-            column: violation.column,
+        .map(|violation| {
+            let severity = boundary_violation_severity(&violation, &spec_by_module);
+
+            PolicyViolation {
+                rule: violation.rule,
+                severity,
+                message: violation.message,
+                from_file: violation.from_file,
+                to_file: violation.to_file,
+                from_module: violation.from_module,
+                to_module: violation.to_module,
+                line: violation.line,
+                column: violation.column,
+            }
         })
         .collect::<Vec<_>>();
     policy_violations.extend(boundary_violations);
@@ -854,10 +934,7 @@ fn analyze_project(loaded: &LoadedProject) -> std::result::Result<AnalysisArtifa
         .map_err(|error| format!("failed to evaluate dependency rules: {error}"))?
         .into_iter()
         .map(|violation| {
-            let severity = match violation.rule.as_str() {
-                DEPENDENCY_FORBIDDEN_RULE_ID | DEPENDENCY_NOT_ALLOWED_RULE_ID => Severity::Error,
-                _ => Severity::Error,
-            };
+            let severity = dependency_violation_severity(violation.rule.as_str());
 
             PolicyViolation {
                 rule: violation.rule,
@@ -968,6 +1045,7 @@ fn record_timing(timings: &mut BTreeMap<String, u128>, key: &str, start: Instant
 mod tests {
     use std::fs;
 
+    use serde_json::Value;
     use tempfile::TempDir;
 
     use super::*;
@@ -998,6 +1076,10 @@ mod tests {
             "specgate.config.yml",
             "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
         );
+    }
+
+    fn parse_json(stdout: &str) -> Value {
+        serde_json::from_str(stdout).expect("cli output json")
     }
 
     #[test]
@@ -1110,6 +1192,75 @@ mod tests {
         assert_eq!(one.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
         assert_eq!(one.stdout, two.stdout);
         assert!(!one.stdout.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn boundary_constraint_severity_is_propagated_to_verdict() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project(temp.path());
+
+        write_file(
+            temp.path(),
+            "modules/app.spec.yml",
+            "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints:\n  - rule: boundary.never_imports\n    severity: warning\n",
+        );
+        write_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { core } from '../core/index';\nexport const app = core;\n",
+        );
+
+        let result = run([
+            "specgate",
+            "check",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--no-baseline",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let output = parse_json(&result.stdout);
+        assert_eq!(output["status"], "pass");
+        assert_eq!(output["summary"]["new_error_violations"], 0);
+        assert_eq!(output["summary"]["new_warning_violations"], 1);
+        assert_eq!(output["violations"][0]["rule"], "boundary.never_imports");
+        assert_eq!(output["violations"][0]["severity"], "warning");
+    }
+
+    #[test]
+    fn canonical_import_alias_constraint_maps_to_canonical_rule_id() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project(temp.path());
+
+        write_file(
+            temp.path(),
+            "modules/core.spec.yml",
+            "version: \"2.2\"\nmodule: core\nimport_id: '@app/core'\nboundaries:\n  path: src/core/**/*\n  enforce_canonical_imports: true\nconstraints:\n  - rule: boundary.canonical_imports\n    severity: warning\n",
+        );
+        write_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { core } from '../core/index';\nexport const app = core;\n",
+        );
+
+        let result = run([
+            "specgate",
+            "check",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--no-baseline",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let output = parse_json(&result.stdout);
+        assert_eq!(output["status"], "pass");
+        assert_eq!(output["summary"]["new_error_violations"], 0);
+        assert_eq!(output["summary"]["new_warning_violations"], 1);
+        assert_eq!(
+            output["violations"][0]["rule"],
+            crate::rules::BOUNDARY_CANONICAL_IMPORT_RULE_ID
+        );
+        assert_eq!(output["violations"][0]["severity"], "warning");
     }
 
     #[test]
