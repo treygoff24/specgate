@@ -209,6 +209,11 @@ impl DependencyGraph {
         &self.discovery_warnings
     }
 
+    /// Canonical project root used by this graph.
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+
     /// Return all graph files in deterministic path order.
     pub fn files(&self) -> Vec<&FileNode> {
         self.file_index

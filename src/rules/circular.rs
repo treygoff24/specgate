@@ -1,11 +1,13 @@
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
-use crate::graph::{CycleComponent, CycleScope, DependencyGraph};
+use crate::deterministic::normalize_repo_relative;
+use crate::graph::{CycleComponent, DependencyGraph};
 use crate::spec::{Severity, SpecFile};
 
 pub const NO_CIRCULAR_DEPS_RULE_ID: &str = "no-circular-deps";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CircularScopeParam {
     Internal,
     External,
@@ -23,14 +25,6 @@ impl CircularScopeParam {
             "external" => Self::External,
             "both" => Self::Both,
             _ => Self::Both,
-        }
-    }
-
-    fn as_cycle_scope(self) -> CycleScope {
-        match self {
-            Self::Internal => CycleScope::Internal,
-            Self::External => CycleScope::External,
-            Self::Both => CycleScope::Both,
         }
     }
 
@@ -57,15 +51,27 @@ pub struct CircularDependencyViolation {
     pub component_modules: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct PrecomputedCycleSets {
+    internal: Vec<CycleComponent>,
+    external: Vec<CycleComponent>,
+    both: Vec<CycleComponent>,
+}
+
 /// Evaluate all `no-circular-deps` constraints across loaded specs.
 ///
-/// Each configured constraint emits one violation per matching SCC cycle component.
+/// Each unique configured constraint emits one violation per matching SCC cycle component.
 /// Severity + optional custom message are sourced directly from the constraint.
 pub fn evaluate_no_circular_deps(
     specs: &[SpecFile],
     graph: &DependencyGraph,
 ) -> Vec<CircularDependencyViolation> {
-    let mut violations = Vec::new();
+    // High-priority perf behavior:
+    // compute SCC cycles once, then reuse pre-filtered sets per scope for all constraints.
+    let cycles = precompute_cycle_sets(graph);
+
+    // De-duplicate equivalent constraints to avoid repeated identical violations.
+    let mut unique_constraints = BTreeMap::new();
 
     for spec in specs {
         for constraint in &spec.constraints {
@@ -74,22 +80,38 @@ pub fn evaluate_no_circular_deps(
             }
 
             let scope = CircularScopeParam::from_params(&constraint.params);
-            let cycles = graph.find_cycles(scope.as_cycle_scope());
-
-            for component in cycles {
-                violations.push(CircularDependencyViolation {
-                    module: spec.module.clone(),
-                    rule: NO_CIRCULAR_DEPS_RULE_ID.to_string(),
-                    severity: constraint.severity,
-                    message: constraint
-                        .message
-                        .clone()
-                        .unwrap_or_else(|| default_message(scope, &component)),
+            unique_constraints
+                .entry((
+                    spec.module.clone(),
                     scope,
-                    component_files: component.files,
-                    component_modules: component.modules,
-                });
-            }
+                    severity_rank(constraint.severity),
+                    constraint.message.clone(),
+                ))
+                .or_insert(constraint.severity);
+        }
+    }
+
+    let mut violations = Vec::new();
+
+    for ((module, scope, _severity_rank, custom_message), severity) in unique_constraints {
+        let scoped_cycles = match scope {
+            CircularScopeParam::Internal => &cycles.internal,
+            CircularScopeParam::External => &cycles.external,
+            CircularScopeParam::Both => &cycles.both,
+        };
+
+        for component in scoped_cycles {
+            violations.push(CircularDependencyViolation {
+                module: module.clone(),
+                rule: NO_CIRCULAR_DEPS_RULE_ID.to_string(),
+                severity,
+                message: custom_message
+                    .clone()
+                    .unwrap_or_else(|| default_message(scope, component, graph.project_root())),
+                scope,
+                component_files: component.files.clone(),
+                component_modules: component.modules.clone(),
+            });
         }
     }
 
@@ -103,7 +125,43 @@ pub fn evaluate_no_circular_deps(
             .then_with(|| a.message.cmp(&b.message))
     });
 
+    violations.dedup_by(|left, right| {
+        left.module == right.module
+            && left.rule == right.rule
+            && left.severity == right.severity
+            && left.message == right.message
+            && left.scope == right.scope
+            && left.component_files == right.component_files
+            && left.component_modules == right.component_modules
+    });
+
     violations
+}
+
+fn precompute_cycle_sets(graph: &DependencyGraph) -> PrecomputedCycleSets {
+    let both = graph
+        .strongly_connected_components()
+        .into_iter()
+        .filter(CycleComponent::is_cycle)
+        .collect::<Vec<_>>();
+
+    let internal = both
+        .iter()
+        .filter(|component| component.is_internal())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let external = both
+        .iter()
+        .filter(|component| !component.is_internal())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    PrecomputedCycleSets {
+        internal,
+        external,
+        both,
+    }
 }
 
 fn severity_rank(severity: Severity) -> u8 {
@@ -113,11 +171,15 @@ fn severity_rank(severity: Severity) -> u8 {
     }
 }
 
-fn default_message(scope: CircularScopeParam, component: &CycleComponent) -> String {
+fn default_message(
+    scope: CircularScopeParam,
+    component: &CycleComponent,
+    project_root: &Path,
+) -> String {
     let files = component
         .files
         .iter()
-        .map(|file| file.to_string_lossy().to_string())
+        .map(|file| normalize_repo_relative(project_root, file))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -229,6 +291,14 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(files, vec!["src/alpha/a.ts", "src/alpha/b.ts"]);
+
+        let root_display = root.to_string_lossy();
+        assert!(violations[0].message.contains("src/alpha/a.ts"));
+        assert!(violations[0].message.contains("src/alpha/b.ts"));
+        assert!(
+            !violations[0].message.contains(root_display.as_ref()),
+            "default circular message should not include absolute repo paths"
+        );
     }
 
     #[test]
@@ -297,6 +367,22 @@ mod tests {
                 vec!["src/alpha/a.ts", "src/alpha/b.ts"],
                 vec!["src/beta/x.ts", "src/gamma/y.ts"],
             ]
+        );
+    }
+
+    #[test]
+    fn repeated_equivalent_constraints_are_deduped() {
+        let (_temp, graph, mut specs) = setup_cycle_fixture();
+
+        add_constraint(&mut specs[0], "both", Severity::Error, None);
+        add_constraint(&mut specs[0], "both", Severity::Error, None);
+
+        let violations = evaluate_no_circular_deps(&specs, &graph);
+        assert_eq!(violations.len(), 2);
+        assert!(
+            violations
+                .iter()
+                .all(|violation| violation.module == "gamma")
         );
     }
 }
