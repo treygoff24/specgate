@@ -532,3 +532,177 @@ fn check_deterministic_omits_metrics() {
     let output = parse_json(&result.stdout);
     assert!(output["metrics"].is_null());
 }
+
+// ============================================================================
+// DIFF MODE TESTS
+// ============================================================================
+
+#[test]
+fn check_diff_outputs_git_style_format() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+        "--no-baseline",
+    ]);
+
+    // Diff mode should output plain text, not JSON
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+    assert!(!result.stdout.starts_with('{'));
+    assert!(result.stdout.starts_with('+'));
+}
+
+#[test]
+fn check_diff_uses_tab_separated_format() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    // Each line should have tab-separated fields
+    let lines: Vec<&str> = result.stdout.lines().collect();
+    let violation_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with('+')).collect();
+    assert!(!violation_lines.is_empty());
+
+    // Check format: +path\tline\tcol\tseverity\trule\tmodule_from\tmodule_to\tto_path\tmessage
+    for line in &violation_lines {
+        let parts: Vec<&str> = line.split('\t').collect();
+        assert!(parts.len() >= 8, "Expected at least 8 tab-separated fields");
+        assert!(parts[0].starts_with('+'));
+    }
+}
+
+#[test]
+fn check_diff_new_only_filters_to_new_violations() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    // Generate baseline for existing violation
+    run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    // Add new violation
+    write_file(
+        temp.path(),
+        "src/app/another.ts",
+        "import { core } from '../core/index';\nexport const another = core;\n",
+    );
+
+    // Check with diff-new-only
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+        "--diff-new-only",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    // Should only show new violations (prefixed with +)
+    let lines: Vec<&str> = result.stdout.lines().collect();
+    let new_violation_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with('+')).collect();
+    let baseline_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with(' ')).collect();
+
+    // Should have exactly 1 new violation
+    assert_eq!(new_violation_lines.len(), 1);
+    // Should have no baseline violations shown in new-only mode
+    assert_eq!(baseline_lines.len(), 0);
+}
+
+#[test]
+fn check_diff_shows_baseline_with_space_prefix() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    // Generate baseline
+    run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    // Add new violation
+    write_file(
+        temp.path(),
+        "src/app/another.ts",
+        "import { core } from '../core/index';\nexport const another = core;\n",
+    );
+
+    // Check with full diff mode
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let lines: Vec<&str> = result.stdout.lines().collect();
+    let new_violation_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with('+')).collect();
+    let baseline_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with(' ')).collect();
+
+    // Should have 1 new and 1 baseline violation
+    assert_eq!(new_violation_lines.len(), 1);
+    assert_eq!(baseline_lines.len(), 1);
+}
+
+#[test]
+fn check_diff_includes_summary() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+        "--no-baseline",
+    ]);
+
+    // Should include Summary line at the end
+    assert!(result.stdout.contains("Summary:"));
+    assert!(result.stdout.contains("total"));
+}
+
+#[test]
+fn check_diff_mode_without_violations_passes() {
+    let temp = TempDir::new().expect("tempdir");
+    create_basic_project(temp.path());
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--diff",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(result.stdout.contains("Summary:"));
+    assert!(result.stdout.contains("0 total"));
+}

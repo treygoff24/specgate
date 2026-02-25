@@ -571,7 +571,11 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
             .cloned()
             .collect(),
         DiffMode::Full => classified,
-        DiffMode::None => classified,
+        DiffMode::None => {
+            // This branch is unreachable because handle_check guards against
+            // calling handle_check_with_diff when diff_mode is None.
+            unreachable!("handle_check_with_diff called with DiffMode::None")
+        }
     };
 
     // Format output using diff formatter

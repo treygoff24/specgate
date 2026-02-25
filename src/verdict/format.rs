@@ -67,11 +67,11 @@ pub fn format_violation_diff(project_root: &Path, entry: &FingerprintedViolation
     };
 
     let from_path = normalize_repo_relative(project_root, &violation.from_file);
-    let _to_path = violation
+    let to_path = violation
         .to_file
         .as_ref()
         .map(|p| normalize_repo_relative(project_root, p))
-        .unwrap_or_default();
+        .unwrap_or_else(|| "-".to_string());
 
     let line_info = violation
         .line
@@ -91,7 +91,7 @@ pub fn format_violation_diff(project_root: &Path, entry: &FingerprintedViolation
     let module_to = violation.to_module.as_deref().unwrap_or("-");
 
     format!(
-        "{}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         prefix,
         from_path,
         line_info,
@@ -100,6 +100,7 @@ pub fn format_violation_diff(project_root: &Path, entry: &FingerprintedViolation
         violation.rule,
         module_from,
         module_to,
+        to_path,
         violation.message
     )
 }
@@ -113,7 +114,7 @@ pub fn format_summary_table(project_root: &Path, violations: &[FingerprintedViol
 
     for entry in violations {
         let violation = &entry.violation;
-        let fp_short = &entry.fingerprint[..12];
+        let fp_short = &entry.fingerprint[..12.min(entry.fingerprint.len())];
         let severity = match violation.severity {
             Severity::Error => "ERROR",
             Severity::Warning => "WARN",
