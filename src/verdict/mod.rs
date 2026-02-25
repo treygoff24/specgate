@@ -84,9 +84,29 @@ pub struct VerdictMetrics {
     pub total_ms: u128,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerdictIdentity {
+    pub tool_version: String,
+    pub git_sha: String,
+    pub config_hash: String,
+    pub spec_hash: String,
+    pub output_mode: String,
+    pub spec_files_changed: Vec<String>,
+    pub rule_deltas: Vec<String>,
+    pub policy_change_detected: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Verdict {
     pub schema_version: String,
+    pub tool_version: String,
+    pub git_sha: String,
+    pub config_hash: String,
+    pub spec_hash: String,
+    pub output_mode: String,
+    pub spec_files_changed: Vec<String>,
+    pub rule_deltas: Vec<String>,
+    pub policy_change_detected: bool,
     pub status: VerdictStatus,
     pub summary: VerdictSummary,
     pub violations: Vec<VerdictViolation>,
@@ -99,6 +119,7 @@ pub fn build_verdict(
     violations: &[FingerprintedViolation],
     suppressed_violations: usize,
     metrics: Option<VerdictMetrics>,
+    identity: VerdictIdentity,
 ) -> Verdict {
     let mut rendered = violations
         .iter()
@@ -126,6 +147,14 @@ pub fn build_verdict(
 
     Verdict {
         schema_version: "2.2".to_string(),
+        tool_version: identity.tool_version,
+        git_sha: identity.git_sha,
+        config_hash: identity.config_hash,
+        spec_hash: identity.spec_hash,
+        output_mode: identity.output_mode,
+        spec_files_changed: identity.spec_files_changed,
+        rule_deltas: identity.rule_deltas,
+        policy_change_detected: identity.policy_change_detected,
         status,
         summary,
         violations: rendered,
@@ -239,6 +268,19 @@ mod tests {
         }
     }
 
+    fn identity(output_mode: &str) -> VerdictIdentity {
+        VerdictIdentity {
+            tool_version: "0.1.0".to_string(),
+            git_sha: "abc123".to_string(),
+            config_hash: "sha256:config".to_string(),
+            spec_hash: "sha256:spec".to_string(),
+            output_mode: output_mode.to_string(),
+            spec_files_changed: Vec::new(),
+            rule_deltas: Vec::new(),
+            policy_change_detected: false,
+        }
+    }
+
     #[test]
     fn verdict_status_fails_on_new_error_only() {
         let entries = vec![
@@ -254,7 +296,7 @@ mod tests {
             },
         ];
 
-        let verdict = build_verdict(Path::new("."), &entries, 0, None);
+        let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
         assert_eq!(verdict.status, VerdictStatus::Pass);
         assert_eq!(verdict.summary.new_warning_violations, 1);
 
@@ -265,7 +307,13 @@ mod tests {
             disposition: ViolationDisposition::New,
         });
 
-        let failing = build_verdict(Path::new("."), &entries_with_error, 0, None);
+        let failing = build_verdict(
+            Path::new("."),
+            &entries_with_error,
+            0,
+            None,
+            identity("deterministic"),
+        );
         assert_eq!(failing.status, VerdictStatus::Fail);
         assert_eq!(failing.summary.new_error_violations, 1);
     }
@@ -278,11 +326,18 @@ mod tests {
             disposition: ViolationDisposition::New,
         }];
 
-        let verdict = build_verdict(Path::new("."), &entries, 2, None);
+        let verdict = build_verdict(Path::new("."), &entries, 2, None, identity("deterministic"));
         let rendered = serde_json::to_string(&verdict).expect("serialize");
 
         assert!(!rendered.contains("metrics"));
         assert!(rendered.contains("suppressed_violations"));
+        assert!(rendered.contains("\"tool_version\""));
+        assert!(rendered.contains("\"config_hash\""));
+        assert!(rendered.contains("\"spec_hash\""));
+        assert!(rendered.contains("\"output_mode\":\"deterministic\""));
+        assert!(rendered.contains("\"spec_files_changed\":[]"));
+        assert!(rendered.contains("\"rule_deltas\":[]"));
+        assert!(rendered.contains("\"policy_change_detected\":false"));
     }
 
     #[test]
@@ -304,10 +359,12 @@ mod tests {
                 timings_ms: timings,
                 total_ms: 20,
             }),
+            identity("metrics"),
         );
 
         let rendered = serde_json::to_string(&verdict).expect("serialize");
         assert!(rendered.contains("metrics"));
         assert!(rendered.contains("build_graph"));
+        assert!(rendered.contains("\"output_mode\":\"metrics\""));
     }
 }

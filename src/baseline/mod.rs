@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -6,21 +6,47 @@ use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
-use crate::verdict::{FingerprintedViolation, PolicyViolation, ViolationDisposition};
+use crate::verdict::{
+    FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
+};
 
 pub const BASELINE_FILE_VERSION: &str = "1";
 pub const DEFAULT_BASELINE_PATH: &str = ".specgate-baseline.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaselineGeneratedFrom {
+    pub tool_version: String,
+    pub git_sha: String,
+    pub config_hash: String,
+    pub spec_hash: String,
+}
+
+impl Default for BaselineGeneratedFrom {
+    fn default() -> Self {
+        Self {
+            tool_version: build_info::tool_version().to_string(),
+            git_sha: build_info::git_sha().to_string(),
+            config_hash: "sha256:unknown".to_string(),
+            spec_hash: "sha256:unknown".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaselineFile {
     pub version: String,
+    #[serde(default)]
+    pub generated_from: BaselineGeneratedFrom,
     pub entries: Vec<BaselineEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaselineEntry {
     pub fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub positional_fingerprint: Option<String>,
     pub rule: String,
     pub severity: crate::spec::Severity,
     pub message: String,
@@ -41,6 +67,7 @@ impl Default for BaselineFile {
     fn default() -> Self {
         Self {
             version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
             entries: Vec::new(),
         }
     }
@@ -91,38 +118,16 @@ pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
             source,
         })?;
 
-    parsed.entries.sort_by(|a, b| {
-        a.fingerprint
-            .cmp(&b.fingerprint)
-            .then_with(|| a.rule.cmp(&b.rule))
-            .then_with(|| a.from_file.cmp(&b.from_file))
-            .then_with(|| a.to_file.cmp(&b.to_file))
-            .then_with(|| a.line.cmp(&b.line))
-            .then_with(|| a.column.cmp(&b.column))
-            .then_with(|| a.message.cmp(&b.message))
-    });
-    parsed
-        .entries
-        .dedup_by(|left, right| left.fingerprint == right.fingerprint);
+    sort_baseline_entries(&mut parsed.entries);
+    dedup_entries_by_identity(&mut parsed.entries);
 
     Ok(Some(parsed))
 }
 
 pub fn write_baseline(path: &Path, baseline: &BaselineFile) -> Result<()> {
     let mut stable = baseline.clone();
-    stable.entries.sort_by(|a, b| {
-        a.fingerprint
-            .cmp(&b.fingerprint)
-            .then_with(|| a.rule.cmp(&b.rule))
-            .then_with(|| a.from_file.cmp(&b.from_file))
-            .then_with(|| a.to_file.cmp(&b.to_file))
-            .then_with(|| a.line.cmp(&b.line))
-            .then_with(|| a.column.cmp(&b.column))
-            .then_with(|| a.message.cmp(&b.message))
-    });
-    stable
-        .entries
-        .dedup_by(|left, right| left.fingerprint == right.fingerprint);
+    sort_baseline_entries(&mut stable.entries);
+    dedup_entries_by_identity(&mut stable.entries);
 
     let rendered = serde_json::to_string_pretty(&stable)
         .map_err(|source| BaselineError::Serialize { source })?;
@@ -134,42 +139,40 @@ pub fn write_baseline(path: &Path, baseline: &BaselineFile) -> Result<()> {
 }
 
 pub fn build_baseline(project_root: &Path, violations: &[PolicyViolation]) -> BaselineFile {
+    build_baseline_with_metadata(project_root, violations, BaselineGeneratedFrom::default())
+}
+
+pub fn build_baseline_with_metadata(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    generated_from: BaselineGeneratedFrom,
+) -> BaselineFile {
     let mut entries = violations
         .iter()
-        .map(|violation| {
-            let fingerprint = fingerprint_violation(project_root, violation);
-            BaselineEntry {
-                fingerprint,
-                rule: violation.rule.clone(),
-                severity: violation.severity,
-                message: violation.message.clone(),
-                from_file: normalize_repo_relative(project_root, &violation.from_file),
-                to_file: violation
-                    .to_file
-                    .as_ref()
-                    .map(|path| normalize_repo_relative(project_root, path)),
-                from_module: violation.from_module.clone(),
-                to_module: violation.to_module.clone(),
-                line: violation.line,
-                column: violation.column,
-            }
+        .map(|violation| BaselineEntry {
+            fingerprint: fingerprint_violation(project_root, violation),
+            positional_fingerprint: positional_fingerprint_for_violation(violation),
+            rule: violation.rule.clone(),
+            severity: violation.severity,
+            message: violation.message.clone(),
+            from_file: normalize_repo_relative(project_root, &violation.from_file),
+            to_file: violation
+                .to_file
+                .as_ref()
+                .map(|path| normalize_repo_relative(project_root, path)),
+            from_module: violation.from_module.clone(),
+            to_module: violation.to_module.clone(),
+            line: violation.line,
+            column: violation.column,
         })
         .collect::<Vec<_>>();
 
-    entries.sort_by(|a, b| {
-        a.fingerprint
-            .cmp(&b.fingerprint)
-            .then_with(|| a.rule.cmp(&b.rule))
-            .then_with(|| a.from_file.cmp(&b.from_file))
-            .then_with(|| a.to_file.cmp(&b.to_file))
-            .then_with(|| a.line.cmp(&b.line))
-            .then_with(|| a.column.cmp(&b.column))
-            .then_with(|| a.message.cmp(&b.message))
-    });
-    entries.dedup_by(|left, right| left.fingerprint == right.fingerprint);
+    sort_baseline_entries(&mut entries);
+    dedup_entries_by_identity(&mut entries);
 
     BaselineFile {
         version: BASELINE_FILE_VERSION.to_string(),
+        generated_from,
         entries,
     }
 }
@@ -179,24 +182,34 @@ pub fn classify_violations(
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> Vec<FingerprintedViolation> {
-    let fingerprints = baseline
-        .map(|baseline| {
-            baseline
-                .entries
-                .iter()
-                .map(|entry| entry.fingerprint.clone())
-                .collect::<BTreeSet<_>>()
-        })
+    let mut ordered_violations = violations.to_vec();
+    sort_policy_violations(&mut ordered_violations);
+
+    let mut remaining_by_primary = baseline.map(build_baseline_match_index).unwrap_or_default();
+
+    let mut remaining_legacy = baseline
+        .map(build_legacy_fingerprint_counts)
         .unwrap_or_default();
 
-    let mut classified = violations
+    let mut classified = ordered_violations
         .iter()
         .map(|violation| {
             let fingerprint = fingerprint_violation(project_root, violation);
-            let disposition = if fingerprints.contains(&fingerprint) {
-                ViolationDisposition::Baseline
+            let positional_fingerprint = positional_fingerprint_for_violation(violation);
+
+            let disposition = if let Some(remaining) = remaining_by_primary.get_mut(&fingerprint) {
+                if consume_baseline_match(remaining, positional_fingerprint.as_deref()) {
+                    ViolationDisposition::Baseline
+                } else {
+                    ViolationDisposition::New
+                }
             } else {
-                ViolationDisposition::New
+                let legacy_fingerprint = legacy_fingerprint_violation(project_root, violation);
+                if consume_legacy_fingerprint(&mut remaining_legacy, &legacy_fingerprint) {
+                    ViolationDisposition::Baseline
+                } else {
+                    ViolationDisposition::New
+                }
             };
 
             FingerprintedViolation {
@@ -222,7 +235,108 @@ pub fn classify_violations(
     classified
 }
 
+/// Stable content fingerprint for baseline matching and verdict identity.
+///
+/// Intentionally excludes line/column so harmless code movement does not invalidate
+/// baseline matches.
 pub fn fingerprint_violation(project_root: &Path, violation: &PolicyViolation) -> String {
+    let from_file = normalize_repo_relative(project_root, &violation.from_file);
+    let to_file = violation
+        .to_file
+        .as_ref()
+        .map(|path| normalize_repo_relative(project_root, path));
+
+    stable_content_fingerprint(
+        &violation.rule,
+        violation.severity,
+        &violation.message,
+        &from_file,
+        to_file.as_deref(),
+        violation.from_module.as_deref(),
+        violation.to_module.as_deref(),
+    )
+}
+
+fn build_baseline_match_index(baseline: &BaselineFile) -> BTreeMap<String, Vec<Option<String>>> {
+    let mut by_primary = BTreeMap::new();
+
+    for entry in &baseline.entries {
+        let primary = stable_content_fingerprint_for_entry(entry);
+        by_primary
+            .entry(primary)
+            .or_insert_with(Vec::new)
+            .push(positional_fingerprint_for_entry(entry));
+    }
+
+    for remaining in by_primary.values_mut() {
+        remaining.sort();
+    }
+
+    by_primary
+}
+
+fn build_legacy_fingerprint_counts(baseline: &BaselineFile) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for entry in &baseline.entries {
+        *counts.entry(entry.fingerprint.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn stable_content_fingerprint_for_entry(entry: &BaselineEntry) -> String {
+    stable_content_fingerprint(
+        &entry.rule,
+        entry.severity,
+        &entry.message,
+        &entry.from_file,
+        entry.to_file.as_deref(),
+        entry.from_module.as_deref(),
+        entry.to_module.as_deref(),
+    )
+}
+
+fn stable_content_fingerprint(
+    rule: &str,
+    severity: crate::spec::Severity,
+    message: &str,
+    from_file: &str,
+    to_file: Option<&str>,
+    from_module: Option<&str>,
+    to_module: Option<&str>,
+) -> String {
+    stable_fingerprint(&[
+        rule,
+        &format!("{:?}", severity),
+        message,
+        from_file,
+        to_file.unwrap_or_default(),
+        from_module.unwrap_or_default(),
+        to_module.unwrap_or_default(),
+    ])
+}
+
+fn positional_fingerprint_for_violation(violation: &PolicyViolation) -> Option<String> {
+    positional_fingerprint(violation.line, violation.column)
+}
+
+fn positional_fingerprint_for_entry(entry: &BaselineEntry) -> Option<String> {
+    entry
+        .positional_fingerprint
+        .clone()
+        .or_else(|| positional_fingerprint(entry.line, entry.column))
+}
+
+fn positional_fingerprint(line: Option<u32>, column: Option<u32>) -> Option<String> {
+    if line.is_none() && column.is_none() {
+        return None;
+    }
+
+    let line = line.map(|v| v.to_string()).unwrap_or_default();
+    let column = column.map(|v| v.to_string()).unwrap_or_default();
+    Some(stable_fingerprint(&[line.as_str(), column.as_str()]))
+}
+
+fn legacy_fingerprint_violation(project_root: &Path, violation: &PolicyViolation) -> String {
     let from_file = normalize_repo_relative(project_root, &violation.from_file);
     let to_file = violation
         .to_file
@@ -253,6 +367,72 @@ pub fn fingerprint_violation(project_root: &Path, violation: &PolicyViolation) -
         line.as_str(),
         column.as_str(),
     ])
+}
+
+fn consume_baseline_match(
+    remaining: &mut Vec<Option<String>>,
+    positional_fingerprint: Option<&str>,
+) -> bool {
+    if remaining.is_empty() {
+        return false;
+    }
+
+    if let Some(target) = positional_fingerprint {
+        if let Some(idx) = remaining
+            .iter()
+            .position(|candidate| candidate.as_deref() == Some(target))
+        {
+            remaining.remove(idx);
+            return true;
+        }
+    }
+
+    if let Some(idx) = remaining.iter().position(|candidate| candidate.is_none()) {
+        remaining.remove(idx);
+        return true;
+    }
+
+    remaining.remove(0);
+    true
+}
+
+fn consume_legacy_fingerprint(remaining: &mut BTreeMap<String, usize>, fingerprint: &str) -> bool {
+    if let Some(count) = remaining.get_mut(fingerprint)
+        && *count > 0
+    {
+        *count -= 1;
+        return true;
+    }
+
+    false
+}
+
+fn sort_baseline_entries(entries: &mut [BaselineEntry]) {
+    entries.sort_by(|a, b| {
+        stable_content_fingerprint_for_entry(a)
+            .cmp(&stable_content_fingerprint_for_entry(b))
+            .then_with(|| {
+                positional_fingerprint_for_entry(a).cmp(&positional_fingerprint_for_entry(b))
+            })
+            .then_with(|| a.rule.cmp(&b.rule))
+            .then_with(|| a.from_file.cmp(&b.from_file))
+            .then_with(|| a.to_file.cmp(&b.to_file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.column.cmp(&b.column))
+            .then_with(|| a.message.cmp(&b.message))
+    });
+}
+
+fn dedup_entries_by_identity(entries: &mut Vec<BaselineEntry>) {
+    // `dedup_by` keeps the first adjacent entry and drops following duplicates.
+    // After stable sorting this is deterministic, and the field names clarify
+    // which entry is retained vs discarded.
+    entries.dedup_by(|retained_entry, duplicate_entry| {
+        stable_content_fingerprint_for_entry(retained_entry)
+            == stable_content_fingerprint_for_entry(duplicate_entry)
+            && positional_fingerprint_for_entry(retained_entry)
+                == positional_fingerprint_for_entry(duplicate_entry)
+    });
 }
 
 #[cfg(test)]
@@ -294,8 +474,10 @@ mod tests {
 
         let baseline = BaselineFile {
             version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
             entries: vec![BaselineEntry {
                 fingerprint,
+                positional_fingerprint: positional_fingerprint_for_violation(&v),
                 rule: v.rule.clone(),
                 severity: v.severity,
                 message: v.message.clone(),
@@ -314,6 +496,58 @@ mod tests {
     }
 
     #[test]
+    fn baseline_match_survives_line_movement() {
+        let project_root = Path::new(".");
+
+        let mut baseline_violation = violation("A", "src/a.ts");
+        baseline_violation.line = Some(12);
+
+        let baseline = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
+            entries: vec![BaselineEntry {
+                fingerprint: legacy_fingerprint_violation(project_root, &baseline_violation),
+                positional_fingerprint: None,
+                rule: baseline_violation.rule.clone(),
+                severity: baseline_violation.severity,
+                message: baseline_violation.message.clone(),
+                from_file: "src/a.ts".to_string(),
+                to_file: Some("src/provider/index.ts".to_string()),
+                from_module: baseline_violation.from_module.clone(),
+                to_module: baseline_violation.to_module.clone(),
+                line: baseline_violation.line,
+                column: baseline_violation.column,
+            }],
+        };
+
+        let mut moved = violation("A", "src/a.ts");
+        moved.line = Some(40);
+
+        let classified = classify_violations(project_root, &[moved], Some(&baseline));
+        assert_eq!(classified.len(), 1);
+        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+    }
+
+    #[test]
+    fn baseline_matching_uses_positional_discriminator_for_duplicate_counts() {
+        let project_root = Path::new(".");
+
+        let mut existing = violation("A", "src/a.ts");
+        existing.line = Some(10);
+
+        let baseline = build_baseline(project_root, std::slice::from_ref(&existing));
+
+        let mut new_duplicate = violation("A", "src/a.ts");
+        new_duplicate.line = Some(20);
+
+        let classified =
+            classify_violations(project_root, &[existing, new_duplicate], Some(&baseline));
+        assert_eq!(classified.len(), 2);
+        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+        assert_eq!(classified[1].disposition, ViolationDisposition::New);
+    }
+
+    #[test]
     fn build_baseline_is_sorted_and_deduped() {
         let project_root = Path::new(".");
         let violations = vec![
@@ -324,6 +558,27 @@ mod tests {
 
         let baseline = build_baseline(project_root, &violations);
         assert_eq!(baseline.entries.len(), 2);
-        assert!(baseline.entries[0].from_file <= baseline.entries[1].from_file);
+
+        let mut sorted = baseline.entries.clone();
+        sort_baseline_entries(&mut sorted);
+        assert_eq!(baseline.entries, sorted);
+    }
+
+    #[test]
+    fn dedupe_retains_distinct_entries_when_only_position_differs() {
+        let project_root = Path::new(".");
+        let mut at_line_one = violation("A", "src/a.ts");
+        at_line_one.line = Some(1);
+
+        let mut at_line_two = at_line_one.clone();
+        at_line_two.line = Some(2);
+
+        let baseline = build_baseline(project_root, &[at_line_one, at_line_two]);
+        assert_eq!(baseline.entries.len(), 2);
+
+        assert_ne!(
+            baseline.entries[0].positional_fingerprint,
+            baseline.entries[1].positional_fingerprint
+        );
     }
 }
