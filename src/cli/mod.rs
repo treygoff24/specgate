@@ -369,12 +369,19 @@ fn handle_validate(args: CommonProjectArgs) -> CliRunResult {
 }
 
 fn handle_check(args: CheckArgs) -> CliRunResult {
+    // Emit deprecation warning if using deprecated flags
+    let deprecation_warning = args.deprecation_warning();
+
     // Extract diff mode before processing
     let diff_mode = DiffMode::from(&args);
 
     // If diff mode is enabled, use the diff handler
     if diff_mode != DiffMode::None {
-        return handle_check_with_diff(args, diff_mode);
+        let mut result = handle_check_with_diff(args, diff_mode);
+        if let Some(warning) = deprecation_warning {
+            result.stderr = format!("{warning}\n{}", result.stderr);
+        }
+        return result;
     }
 
     let mut timings = BTreeMap::new();
@@ -420,6 +427,30 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         );
     }
 
+    // Handle --since blast-radius mode
+    let blast_radius = if let Some(since_ref) = &args.since {
+        let blast_data = build_blast_radius_data(&loaded);
+        let radius = crate::git_blast::compute_blast_radius(
+            &loaded.project_root,
+            since_ref,
+            &blast_data.module_to_files,
+            &blast_data.file_to_module,
+            &blast_data.importer_graph,
+        );
+
+        if let Some(error) = &radius.error {
+            return runtime_error_json(
+                "git",
+                "failed to compute blast radius",
+                vec![error.clone()],
+            );
+        }
+
+        Some(radius)
+    } else {
+        None
+    };
+
     let baseline_start = Instant::now();
     let baseline = if args.no_baseline {
         None
@@ -438,12 +469,28 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     };
     record_timing(&mut timings, "load_baseline", baseline_start);
 
+    // Filter violations by blast radius if specified
+    let policy_violations = if let Some(radius) = &blast_radius {
+        artifacts
+            .policy_violations
+            .iter()
+            .filter(|v| {
+                let from_file = v
+                    .from_file
+                    .to_str()
+                    .map(|s| normalize_repo_relative(&loaded.project_root, Path::new(s)));
+                let module = v.from_module.as_deref();
+                radius.contains_file(from_file.as_deref().unwrap_or(""), module)
+            })
+            .cloned()
+            .collect()
+    } else {
+        artifacts.policy_violations.clone()
+    };
+
     let classify_start = Instant::now();
-    let classified = classify_violations(
-        &loaded.project_root,
-        &artifacts.policy_violations,
-        baseline.as_ref(),
-    );
+    let classified =
+        classify_violations(&loaded.project_root, &policy_violations, baseline.as_ref());
     record_timing(&mut timings, "classify_baseline", classify_start);
 
     let governance = match compute_governance_hashes(&loaded) {
@@ -469,9 +516,21 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
 
     let output_mode = if include_metrics {
         "metrics".to_string()
+    } else if blast_radius.is_some() {
+        "blast_radius".to_string()
     } else {
         "deterministic".to_string()
     };
+
+    let mut spec_files_changed = Vec::new();
+    if let Some(radius) = &blast_radius {
+        spec_files_changed = radius
+            .changed_files
+            .iter()
+            .filter(|f| f.ends_with(".spec.yml"))
+            .cloned()
+            .collect();
+    }
 
     let verdict = build_verdict(
         &loaded.project_root,
@@ -484,7 +543,7 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             config_hash: governance.config_hash,
             spec_hash: governance.spec_hash,
             output_mode,
-            spec_files_changed: Vec::new(),
+            spec_files_changed,
             rule_deltas: Vec::new(),
             policy_change_detected: false,
         },
@@ -495,7 +554,80 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         VerdictStatus::Fail => EXIT_CODE_POLICY_VIOLATIONS,
     };
 
-    CliRunResult::json(exit_code, &verdict)
+    let mut result = CliRunResult::json(exit_code, &verdict);
+    if let Some(warning) = deprecation_warning {
+        result.stderr = format!("{warning}\n");
+    }
+    result
+}
+
+/// Data needed for blast-radius computation.
+struct BlastRadiusData {
+    module_to_files: BTreeMap<String, BTreeSet<String>>,
+    file_to_module: BTreeMap<String, String>,
+    importer_graph: BTreeMap<String, BTreeSet<String>>,
+}
+
+fn build_blast_radius_data(loaded: &LoadedProject) -> BlastRadiusData {
+    let mut module_to_files: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut file_to_module: BTreeMap<String, String> = BTreeMap::new();
+
+    // Map files to modules based on spec boundaries
+    for spec in &loaded.specs {
+        let module_id = spec.module.clone();
+        let files_set = module_to_files.entry(module_id.clone()).or_default();
+
+        // Include spec file itself
+        if let Some(spec_path) = &spec.spec_path {
+            let relative = normalize_repo_relative(&loaded.project_root, spec_path);
+            files_set.insert(relative.clone());
+            file_to_module.insert(relative, module_id.clone());
+        }
+
+        // Include files matched by boundaries.path
+        if let Some(boundaries) = &spec.boundaries {
+            if let Some(path_glob) = &boundaries.path {
+                if let Ok(glob) = globset::Glob::new(path_glob) {
+                    if let Ok(set) = globset::GlobSetBuilder::new().add(glob).build() {
+                        // Walk project files
+                        for file_entry in walkdir::WalkDir::new(&loaded.project_root)
+                            .follow_links(true)
+                            .into_iter()
+                            .filter_map(std::result::Result::ok)
+                            .filter(|e| e.file_type().is_file())
+                        {
+                            let relative =
+                                normalize_repo_relative(&loaded.project_root, file_entry.path());
+                            if set.is_match(&relative) {
+                                files_set.insert(relative.clone());
+                                file_to_module.insert(relative, module_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build importer graph from specs
+    let mut importer_graph: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for spec in &loaded.specs {
+        if let Some(boundaries) = &spec.boundaries {
+            // allow_imports_from lists modules this module imports from
+            for import_from in &boundaries.allow_imports_from {
+                importer_graph
+                    .entry(import_from.clone())
+                    .or_default()
+                    .insert(spec.module.clone());
+            }
+        }
+    }
+
+    BlastRadiusData {
+        module_to_files,
+        file_to_module,
+        importer_graph,
+    }
 }
 
 /// Enhanced check handler with diff mode support.

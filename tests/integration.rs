@@ -581,7 +581,11 @@ fn check_diff_uses_tab_separated_format() {
     // Check format: +path\tline\tcol\tseverity\trule\tmodule_from\tmodule_to\tto_path\tmessage
     for line in &violation_lines {
         let parts: Vec<&str> = line.split('\t').collect();
-        assert!(parts.len() >= 9, "Expected at least 9 tab-separated fields, got {}", parts.len());
+        assert!(
+            parts.len() >= 9,
+            "Expected at least 9 tab-separated fields, got {}",
+            parts.len()
+        );
         assert!(parts[0].starts_with('+'));
     }
 }

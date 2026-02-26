@@ -1,9 +1,39 @@
+//! Spec language types and version contract.
+//!
+//! ## Version Contract (Wave 0 Lock)
+//!
+//! Specgate enforces strict version compatibility for spec files:
+//!
+//! - **Supported version**: `2.2` (constant: `SUPPORTED_SPEC_VERSION`)
+//! - **Policy**: Exact match required. Versions `2` or `2.0` are NOT accepted.
+//! - **Migration**: Users must update spec files to `version: "2.2"` to use current features.
+//!
+//! ### Why strict matching?
+//!
+//! The spec language is evolving rapidly during foundation phases. Allowing loose
+//! version matching (e.g., `2` matches `2.2`) would mask breaking changes and make
+//! it harder to reason about spec compatibility. We enforce exact matching to:
+//!
+//! 1. Force explicit version updates when specs change
+//! 2. Make version compatibility unambiguous
+//! 3. Enable future support for multiple versions if needed
+//!
+//! ### Future versions
+//!
+//! When `2.3` is released:
+//! - `2.2` specs will continue to work (backward compatible)
+//! - `2.3` features will require `version: "2.3"`
+//! - A compatibility matrix will be documented
+
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Supported spec language version for this foundation phase.
+/// Supported spec language version.
+///
+/// This is the only accepted value for the `version` field in `.spec.yml` files.
+/// See module documentation for version contract details.
 pub const SUPPORTED_SPEC_VERSION: &str = "2.2";
 
 /// A single `.spec.yml` file (one per module).

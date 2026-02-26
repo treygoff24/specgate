@@ -1,6 +1,17 @@
 //! Check command integration surface.
 //!
 //! This module provides diff mode types for the check command.
+//!
+//! ## CLI Semantics (Wave 0 Contract Lock)
+//!
+//! - `--baseline-diff`: Output diff between current and baseline violations (preferred)
+//! - `--baseline-new-only`: Show only new violations in diff output (requires --baseline-diff)
+//! - `--since <git-ref>`: Git blast-radius mode - only check modules/importers affected since ref
+//!
+//! ### Deprecated Flags (aliased with warning)
+//!
+//! - `--diff`: Deprecated alias for `--baseline-diff`
+//! - `--diff-new-only`: Deprecated alias for `--baseline-new-only`
 
 use std::path::PathBuf;
 
@@ -26,11 +37,27 @@ pub struct CheckArgs {
     /// Disable baseline classification.
     #[arg(long)]
     pub no_baseline: bool,
+
+    // Baseline diff mode (preferred naming)
     /// Output diff between current and baseline violations.
     #[arg(long)]
-    pub diff: bool,
+    pub baseline_diff: bool,
     /// Show only new violations in diff output.
-    #[arg(long, requires = "diff")]
+    #[arg(long, requires = "baseline_diff")]
+    pub baseline_new_only: bool,
+
+    // Git blast-radius mode
+    /// Git reference for blast-radius mode. Only check modules and their importers
+    /// that have changed since this ref (e.g., HEAD~1, main, abc123).
+    #[arg(long, value_name = "GIT_REF")]
+    pub since: Option<String>,
+
+    // Deprecated aliases (kept for backwards compatibility)
+    /// Deprecated: Use --baseline-diff instead.
+    #[arg(long, hide = true)]
+    pub diff: bool,
+    /// Deprecated: Use --baseline-new-only instead.
+    #[arg(long, hide = true, requires = "diff")]
     pub diff_new_only: bool,
 }
 
@@ -52,11 +79,40 @@ pub enum DiffMode {
     NewOnly,
 }
 
+impl CheckArgs {
+    /// Returns true if deprecated diff flags are being used.
+    pub fn uses_deprecated_diff_flags(&self) -> bool {
+        self.diff || self.diff_new_only
+    }
+
+    /// Returns deprecation warning message if deprecated flags are used.
+    pub fn deprecation_warning(&self) -> Option<String> {
+        let mut warnings = Vec::new();
+
+        if self.diff {
+            warnings.push("--diff is deprecated; use --baseline-diff");
+        }
+        if self.diff_new_only {
+            warnings.push("--diff-new-only is deprecated; use --baseline-new-only");
+        }
+
+        if warnings.is_empty() {
+            None
+        } else {
+            Some(format!("warning: {}", warnings.join(", ")))
+        }
+    }
+}
+
 impl From<&CheckArgs> for DiffMode {
     fn from(args: &CheckArgs) -> Self {
-        if args.diff_new_only {
+        // Check both new and deprecated flags
+        let wants_full = args.baseline_diff || args.diff;
+        let wants_new_only = args.baseline_new_only || args.diff_new_only;
+
+        if wants_new_only {
             DiffMode::NewOnly
-        } else if args.diff {
+        } else if wants_full {
             DiffMode::Full
         } else {
             DiffMode::None
@@ -76,26 +132,35 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            baseline_diff: false,
+            baseline_new_only: false,
+            since: None,
             diff: false,
             diff_new_only: false,
         };
 
         assert_eq!(DiffMode::from(&args), DiffMode::None);
+        assert!(!args.uses_deprecated_diff_flags());
+        assert!(args.deprecation_warning().is_none());
     }
 
     #[test]
-    fn diff_mode_from_args_full_when_diff_set() {
+    fn diff_mode_from_args_full_when_baseline_diff_set() {
         let args = CheckArgs {
             project_root: PathBuf::from("."),
             output_mode: CheckOutputMode::Deterministic,
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
-            diff: true,
+            baseline_diff: true,
+            baseline_new_only: false,
+            since: None,
+            diff: false,
             diff_new_only: false,
         };
 
         assert_eq!(DiffMode::from(&args), DiffMode::Full);
+        assert!(!args.uses_deprecated_diff_flags());
     }
 
     #[test]
@@ -106,10 +171,75 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            baseline_diff: true,
+            baseline_new_only: true,
+            since: None,
+            diff: false,
+            diff_new_only: false,
+        };
+
+        assert_eq!(DiffMode::from(&args), DiffMode::NewOnly);
+    }
+
+    #[test]
+    fn deprecated_diff_flag_works_with_warning() {
+        let args = CheckArgs {
+            project_root: PathBuf::from("."),
+            output_mode: CheckOutputMode::Deterministic,
+            metrics: false,
+            baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
+            no_baseline: false,
+            baseline_diff: false,
+            baseline_new_only: false,
+            since: None,
+            diff: true,
+            diff_new_only: false,
+        };
+
+        assert_eq!(DiffMode::from(&args), DiffMode::Full);
+        assert!(args.uses_deprecated_diff_flags());
+        let warning = args.deprecation_warning().unwrap();
+        assert!(warning.contains("--diff is deprecated"));
+        assert!(warning.contains("--baseline-diff"));
+    }
+
+    #[test]
+    fn deprecated_new_only_flag_works_with_warning() {
+        let args = CheckArgs {
+            project_root: PathBuf::from("."),
+            output_mode: CheckOutputMode::Deterministic,
+            metrics: false,
+            baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
+            no_baseline: false,
+            baseline_diff: false,
+            baseline_new_only: false,
+            since: None,
             diff: true,
             diff_new_only: true,
         };
 
         assert_eq!(DiffMode::from(&args), DiffMode::NewOnly);
+        assert!(args.uses_deprecated_diff_flags());
+        let warning = args.deprecation_warning().unwrap();
+        assert!(warning.contains("--diff-new-only is deprecated"));
+        assert!(warning.contains("--baseline-new-only"));
+    }
+
+    #[test]
+    fn since_flag_is_optional_string() {
+        let args = CheckArgs {
+            project_root: PathBuf::from("."),
+            output_mode: CheckOutputMode::Deterministic,
+            metrics: false,
+            baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
+            no_baseline: false,
+            baseline_diff: false,
+            baseline_new_only: false,
+            since: Some("HEAD~1".to_string()),
+            diff: false,
+            diff_new_only: false,
+        };
+
+        assert_eq!(args.since, Some("HEAD~1".to_string()));
     }
 }
