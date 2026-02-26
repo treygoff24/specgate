@@ -213,23 +213,26 @@ jobs:
       - name: Install Specgate
         run: cargo install --path .
       
-      - name: Load Baseline
-        run: |
-          if [ -f .specgate-baseline.json ]; then
-            echo "Baseline loaded"
-          fi
-      
       - name: Check (Full on main, Blast-radius on PRs)
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            specgate check --output-mode deterministic
+            specgate check --output-mode metrics | tee .specgate-verdict.json
           else
-            specgate check --since origin/main --output-mode deterministic
+            specgate check --since origin/main --output-mode metrics | tee .specgate-verdict.json
           fi
       
-      - name: Update Baseline (main only)
-        if: github.ref == 'refs/heads/main'
-        run: specgate baseline --output .specgate-baseline.json
+      - name: Upload Specgate verdict artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: specgate-verdict
+          path: .specgate-verdict.json
+```
+
+The workflow above does **not** auto-update baselines. Run baseline regeneration in
+manual maintenance windows only:
+
+```bash
+specgate baseline --output .specgate-baseline.json
 ```
 
 ### Exit Code Handling

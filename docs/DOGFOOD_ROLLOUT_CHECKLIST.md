@@ -19,6 +19,8 @@
 
 1. Enable blast-radius mode for PR checks (`--since origin/main`).
 2. Require `baseline` updates only through PR-approved maintenance windows.
+   - The consumer workflow does not auto-commit baseline files.
+   - Run `specgate baseline --output .specgate-baseline.json` in planned maintenance PRs and commit manually.
 3. Validate no new hard failures from `C02/C06/C07` deferred rule classes.
 4. File issues for explicit unsupported cases rather than local workarounds.
 

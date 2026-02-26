@@ -148,22 +148,26 @@ module|rule|severity|file|line|import_source|resolved_target
 # Load baseline at start
 - name: Load Baseline
   run: |
-    git checkout origin/main -- .specgate-baseline.json 2>/dev/null || true
+    if [ -f .specgate-baseline.json ]; then
+      echo "Using tracked baseline file"
+    fi
 
 # Check with baseline
 - name: Specgate Check
-  run: specgate check
+  run: |
+    if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+      specgate check --output-mode metrics | tee .specgate-verdict.json
+    else
+      specgate check --since origin/main --output-mode metrics | tee .specgate-verdict.json
+    fi
 
-# Update baseline after merge
+# Baseline maintenance is manual
 - name: Update Baseline
   if: github.ref == 'refs/heads/main'
   run: |
-    specgate baseline --output .specgate-baseline.json
-    git config user.name "CI"
-    git config user.email "ci@example.com"
-    git add .specgate-baseline.json
-    git commit -m "chore: update specgate baseline" || true
-    git push
+    echo "Baseline refresh is handled through approved maintenance PRs"
+    echo "Use: specgate baseline --output .specgate-baseline.json"
+    echo "Then commit through normal review flow."
 ```
 
 ### Verdict Fields
@@ -333,10 +337,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && success()
         run: |
           ./target/release/specgate baseline --output .specgate-baseline.json
-          git config user.name "CI Bot"
-          git config user.email "ci@example.com"
-          git add .specgate-baseline.json
-          git commit -m "chore: update specgate baseline [skip ci]" || echo "No baseline changes"
+          echo "Manual baseline maintenance should be handled in dedicated PR windows."
 ```
 
 ---
@@ -370,8 +371,8 @@ Verify:
 
 ## Best Practices
 
-1. **Always use deterministic mode in CI** — No exceptions
-2. **Commit baselines to main branch** — Auto-update after merge
+1. **Use deterministic or metrics mode in CI** — metrics mode is acceptable when collecting telemetry and keeps gate exit-code behavior unchanged
+2. **Do not auto-update baselines from CI** — Refresh baselines only in approved maintenance windows and commit through normal PRs
 3. **Use blast-radius on PRs** — Faster feedback
 4. **Run full check on main** — Catch edge cases
 5. **Gate on Tier A** — Deterministic contract enforcement

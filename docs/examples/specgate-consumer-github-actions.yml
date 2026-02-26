@@ -25,23 +25,56 @@ jobs:
 
       - name: Install Specgate
         run: |
-          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0
+          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc1
 
       - name: Run Specgate check
         id: check
+        shell: bash
+        continue-on-error: true
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            specgate check --since origin/main --output-mode deterministic
-          else
-            specgate check --output-mode deterministic
-          fi
-        continue-on-error: false
+          set -o pipefail
+          verdict_path="${{ github.workspace }}/.specgate-verdict.json"
 
-      - name: Update baseline on main
-        if: github.ref == 'refs/heads/main'
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            specgate check --since origin/main --output-mode metrics | tee "$verdict_path"
+          else
+            specgate check --output-mode metrics | tee "$verdict_path"
+          fi
+
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Upload Specgate verdict artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: specgate-verdict
+          path: ${{ github.workspace }}/.specgate-verdict.json
+          if-no-files-found: warn
+
+      - name: Summarize Specgate telemetry
+        if: always()
         run: |
-          specgate baseline --output .specgate-baseline.json
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add .specgate-baseline.json
-          git commit -m "chore: update specgate baseline" || true
+          {
+            echo "## Specgate Telemetry"
+            echo ""
+            if [ -f "${{ github.workspace }}/.specgate-verdict.json" ]; then
+              python -c "import json,sys; v=json.load(open(sys.argv[1],'r',encoding='utf-8')); s=v.get('summary',{}); m=v.get('metrics',{}); print(f'- new_error_violations: {s.get(\"new_error_violations\", 0)}'); print(f'- baseline_violations: {s.get(\"baseline_violations\", 0)}'); print(f'- stale_baseline_entries: {s.get(\"stale_baseline_entries\", 0)}'); print(f'- metrics.total_ms: {m.get(\"total_ms\", \"n/a\")}')" "${{ github.workspace }}/.specgate-verdict.json" || true
+            else
+              echo "- Specgate verdict artifact was not produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce Specgate gate
+        if: always()
+        run: |
+          exit_code="${{ steps.check.outputs.exit_code }}"
+          if [ -z "$exit_code" ]; then
+            echo "Specgate step did not report an exit code." >&2
+            exit 1
+          fi
+
+          if [ "$exit_code" -ne 0 ]; then
+            exit "$exit_code"
+          fi

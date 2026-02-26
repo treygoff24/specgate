@@ -168,8 +168,11 @@ Quick CI snippet:
 
 ```yaml
 - name: Specgate Check
-  run: specgate check --output-mode deterministic
+  run: specgate check --output-mode metrics | tee .specgate-verdict.json
 ```
+
+The consumer workflow template uploads `.specgate-verdict.json` as the `specgate-verdict`
+artifact and records a concise telemetry summary in `GITHUB_STEP_SUMMARY`.
 
 ### Diagnose Resolver Parity Mismatches
 

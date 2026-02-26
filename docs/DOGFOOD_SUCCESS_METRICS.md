@@ -12,6 +12,13 @@
 - `baseline_violations` should monotonically decrease or stay flat after rollout.
 - `stale_baseline_entries` should be reviewed and reduced at least weekly.
 - `new_error_violations` should drop to zero within the first two dogfood windows.
+- Consumer workflows now export the raw verdict as `.specgate-verdict.json`.
+- The artifact is uploaded as `specgate-verdict` and summarized in `GITHUB_STEP_SUMMARY`.
+- Track these telemetry fields each window:
+  - `summary.new_error_violations`
+  - `summary.baseline_violations`
+  - `summary.stale_baseline_entries`
+  - `metrics.total_ms`
 
 ## Adoption and reliability signals
 
