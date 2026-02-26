@@ -13,12 +13,8 @@ run_step() {
   "$@"
 }
 
-run_step "Running CI gate" ./scripts/ci/mvp_gate.sh
-run_step "Running cargo tests" cargo test --all-targets --locked
-run_step "Running release build" cargo build --release --locked
-
-run_step "Validating required YAML files with Ruby"
-ruby -e '
+validate_yaml_files() {
+  ruby -e '
 require "yaml"
 files = [
   ".github/workflows/mvp-merge-gate.yml",
@@ -31,12 +27,20 @@ files.each do |path|
   puts "  ✓ #{path}"
 end
 '
+}
 
-run_step "Scanning for forbidden patterns"
-forbidden_pattern='No unreleased code changes are currently queued|@stable|channel = "stable"|your-org/specgate'
-if rg -n -E "$forbidden_pattern" .; then
-  echo "Blocked: forbidden pattern found in the repository."
-  exit 1
-fi
+scan_forbidden_patterns() {
+  local forbidden_pattern='No unreleased code changes are currently queued|@stable|channel = "stable"|your-org/specgate'
+  if rg -n -E "$forbidden_pattern" .; then
+    echo "Blocked: forbidden pattern found in the repository."
+    return 1
+  fi
+}
+
+run_step "Running CI gate" ./scripts/ci/mvp_gate.sh
+run_step "Running cargo tests" cargo test --all-targets --locked
+run_step "Running release build" cargo build --release --locked
+run_step "Validating required YAML files with Ruby" validate_yaml_files
+run_step "Scanning for forbidden patterns" scan_forbidden_patterns
 
 printf '\nPreflight checks passed.\n'
