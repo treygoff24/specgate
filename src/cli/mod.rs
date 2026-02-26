@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use crate::baseline::{
     BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations, load_optional_baseline, write_baseline,
+    classify_violations_with_stale, load_optional_baseline, write_baseline,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -35,7 +35,8 @@ use crate::spec::{
     types::SUPPORTED_SPEC_VERSION,
 };
 use crate::verdict::{
-    self, PolicyViolation, VerdictIdentity, VerdictMetrics, VerdictStatus, build_verdict,
+    self, GovernanceContext, PolicyViolation, VerdictIdentity, VerdictMetrics, VerdictStatus,
+    build_verdict_with_governance,
 };
 
 // Re-export from submodules for convenience
@@ -473,8 +474,8 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     };
 
     let classify_start = Instant::now();
-    let classified =
-        classify_violations(&loaded.project_root, &policy_violations, baseline.as_ref());
+    let (classified, stale_baseline_entries) =
+        classify_violations_with_stale(&loaded.project_root, &policy_violations, baseline.as_ref());
     record_timing(&mut timings, "classify_baseline", classify_start);
 
     let governance = match compute_governance_hashes(&loaded) {
@@ -516,7 +517,7 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             .collect();
     }
 
-    let verdict = build_verdict(
+    let verdict = build_verdict_with_governance(
         &loaded.project_root,
         &classified,
         artifacts.suppressed_violations,
@@ -528,6 +529,11 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             spec_hash: governance.spec_hash,
             output_mode,
             spec_files_changed,
+            rule_deltas: Vec::new(),
+            policy_change_detected: false,
+        },
+        GovernanceContext {
+            stale_baseline_entries,
             rule_deltas: Vec::new(),
             policy_change_detected: false,
         },
@@ -732,8 +738,8 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         }
     };
 
-    let classified =
-        classify_violations(&loaded.project_root, &policy_violations, baseline.as_ref());
+    let (classified, stale_baseline_entries) =
+        classify_violations_with_stale(&loaded.project_root, &policy_violations, baseline.as_ref());
 
     // Filter based on diff mode
     let filtered: Vec<_> = match diff_mode {
@@ -763,6 +769,14 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
     let stats = verdict::format::ViolationStats::from_violations(&filtered);
     lines.push(String::new());
     lines.push(format!("Summary: {}", stats.format_human()));
+
+    // Add stale baseline entry count if non-zero
+    if stale_baseline_entries > 0 {
+        lines.push(format!(
+            "Stale baseline entries: {} (consider pruning with `specgate baseline --write`)",
+            stale_baseline_entries
+        ));
+    }
 
     // Determine exit code based on new errors
     let has_new_errors = filtered.iter().any(|v| {
