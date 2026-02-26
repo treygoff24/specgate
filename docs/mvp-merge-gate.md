@@ -20,7 +20,7 @@ A change is merge-ready only when all required checks pass and are categorized c
 3. **Baseline/new-violation policy semantics**
   - Baseline hits remain report-only; newly introduced violations are merge-blocking.
 
-`golden_corpus` remains informational and is used as future-proxy coverage for rules not yet fully enforced.
+`golden_corpus` remains informational and is used as future-proxy coverage for deferred rules not in the enforced merge gate.
 
 ## Gate taxonomy (for this repo)
 
@@ -78,3 +78,6 @@ Failures are reported as one of:
 - [Wave 0 Contract](../WAVE0_CONTRACT.md)
 - [Tier A Fixture Design](tier-a-fixture-design-v1.md)
 - [Implementation Plan §15](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized)
+- [Baseline Policy](BASELINE_POLICY.md)
+- [Dogfood Rollout Checklist](DOGFOOD_ROLLOUT_CHECKLIST.md)
+- [Releasing Guide](../RELEASING.md)

@@ -15,6 +15,7 @@ This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corp
 | Set up CI | [CI Gate Understanding](#ci-gate-understanding) |
 | Understand fixtures | [Tier A vs Golden Corpus](#tier-a-vs-golden-corpus) |
 | See roadmap status | [MVP Status](#mvp-status) |
+| Prepare dogfood rollout | [Dogfood Docs](#dogfood-docs) |
 
 ---
 
@@ -126,7 +127,7 @@ The [Wave 0 Contract](../WAVE0_CONTRACT.md) defines locked semantics that won't 
 **Only `version: "2.2"` is accepted.** This ensures:
 - Explicit version updates when specs change
 - Unambiguous compatibility
-- Foundation for future multi-version support
+- Foundation for future multi-version support (not currently enabled in MVP)
 
 ```yaml
 # ✅ Correct
@@ -271,6 +272,13 @@ Mapping:
 - `C09 → A02` (api-leakage)
 - `C08 → A03` (layer-reversal)
 - `C07 → A04` (registry-canonical)
+- `C06` — deferred to post-MVP; deterministic fixtures still missing
+
+### Explicit limitation note (future rule families)
+
+- `C02`: pattern-aware (`no-pattern`) variants are deferred.
+- `C06`: category-level governance variants are not in Tier A gate.
+- `C07`: unique-export/visibility edge-case variants are deferred.
 
 ---
 
@@ -294,7 +302,15 @@ Mapping:
 2. **P0/P1: Golden expansion** — Broader failure class coverage
 3. **P1: Doctor UX** — `doctor compare` parity diagnostics
 4. **P1: Governance** — `spec_files_changed`, `rule_deltas` readability in human review
-5. **P1: Release hardening** — stale-baseline lifecycle and triage policy
+
+### Dogfood Docs
+
+- [BASELINE_POLICY](BASELINE_POLICY.md) — Baseline update and stale-entry policy.
+- [DOGFOOD_ROLLOUT_CHECKLIST](DOGFOOD_ROLLOUT_CHECKLIST.md) — Rollout readiness.
+- [DOGFOOD_SUCCESS_METRICS](DOGFOOD_SUCCESS_METRICS.md) — Adoption and reliability targets.
+- [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md) — Stable/beta channel rules.
+- [Consumer GitHub Actions workflow](examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
+- [Releasing Guide](../RELEASING.md) — How to ship and promote releases.
 
 See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) for details.
 

@@ -23,7 +23,8 @@ Specgate solves these with:
 - **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
 - **Informational checks:** local metrics-mode runs, optional `doctor compare` explorations, and additional non-gate fixture collections.
 
-`golden_corpus` (`tests/golden_corpus.rs`) remains informational/future-proxy coverage and is not part of the merge gate.
+`golden_corpus` (`tests/golden_corpus.rs`) remains informational and is intentionally
+outside the merge gate as future-proxy coverage for deferred rule families.
 
 ---
 
@@ -85,6 +86,11 @@ specgate check --output-mode metrics
 ---
 
 ## Baseline Fingerprinting
+
+## Baseline policy reference
+
+- See [BASELINE_POLICY.md](BASELINE_POLICY.md) for canonical stale-entry and refresh behavior.
+- In this release stage, stale baseline hits are tracked for triage and do not hard-fail the merge gate.
 
 ### What It Does
 
@@ -381,3 +387,6 @@ Verify:
 - [Wave 0 Contract](../WAVE0_CONTRACT.md) — Locked semantics
 - [Tier A Fixture Design](tier-a-fixture-design-v1.md) — Gate specification
 - [Implementation Plan](specgate-implementation-plan-v1.1.md) — MVP status
+- [Baseline policy](BASELINE_POLICY.md) — Baseline ownership and stale-entry guidance
+- [Releasing guide](../RELEASING.md) — Release mechanics
+- [Dogfood rollout checklist](DOGFOOD_ROLLOUT_CHECKLIST.md) — Pilot readiness

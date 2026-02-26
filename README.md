@@ -43,6 +43,14 @@ See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the f
 | [Tier A Fixture Design](docs/tier-a-fixture-design-v1.md) | Deterministic CI gate contract |
 | [Implementation Plan](docs/specgate-implementation-plan-v1.1.md) | Full MVP roadmap and status |
 | [Wave 0 Contract](WAVE0_CONTRACT.md) | Locked CLI semantics and version policy |
+| [Consumer Workflow Example](docs/examples/specgate-consumer-github-actions.yml) | Copy-paste GitHub Actions wiring |
+| [Baseline Policy](docs/BASELINE_POLICY.md) | Baseline lifecycle and stale-entry policy |
+| [Dogfood Rollout Checklist](docs/DOGFOOD_ROLLOUT_CHECKLIST.md) | Pre-launch onboarding checklist |
+| [Dogfood Success Metrics](docs/DOGFOOD_SUCCESS_METRICS.md) | Success criteria for dogfood adoption |
+| [Dogfood Release Channel](docs/DOGFOOD_RELEASE_CHANNEL.md) | Stable/beta channel strategy |
+| [Releasing Guide](RELEASING.md) | Release process and ownership |
+| [Release Notes](RELEASE_NOTES.md) | Current MVP closeout highlights |
+| [Changelog](CHANGELOG.md) | Versioned change log |
 
 ## Key Concepts
 
@@ -82,7 +90,7 @@ See [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) for complete CI patte
 - ✅ Merge gate command contract and operator runbook alignment
 
 ### Remaining
-- 🔄 Release hardening and stale-baseline lifecycle policy
+- 🔄 Explicitly deferred rule families (pattern-aware `C02`, governance-only `C06`, friend-surface `C07`) remain roadmap items
 - 🔄 Golden corpus expansion
 - 🔄 Governance readability and review ergonomics
 
@@ -106,4 +114,4 @@ cargo test golden_corpus
 
 ## License
 
-[Specify license here]
+MIT License. See [LICENSE](LICENSE).

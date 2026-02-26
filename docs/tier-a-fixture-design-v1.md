@@ -150,7 +150,19 @@ Test harness:
 - `C09 -> A02`
 - `C08 -> A03`
 - `C07 -> A04` (+ A06 for cycle hardening)
-- `C06 -> A05` (category-level governance, P1)
+- `C06` is deferred to post-MVP and remains informative-only until deterministic
+  dependency fixtures are added.
 
 Promotion rule:
 - Tier B case moves to Tier A only after intro/fix become deterministic exact-contract fixtures on current engine behavior.
+
+## Deferred capability mapping (explicit)
+
+These rule variants are not enforced by the current dogfood merge gate and remain
+future work:
+
+- `C02` pattern-aware no-pattern checks (A01 only enforces direct ingress bypass in
+  deterministic fixtures).
+- `C06` category-level/dependency governance variants.
+- `C07` unique-export and visibility edge cases where matcher semantics are not yet
+  fully deterministic under the current fixture constraints.
