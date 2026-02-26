@@ -1,0 +1,6 @@
+version: "2.2"
+module: utils
+boundaries:
+  path: src/**/*
+  # Note: Duplicate key detection requires a future 'no-pattern' rule
+constraints: []

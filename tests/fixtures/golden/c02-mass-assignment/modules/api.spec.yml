@@ -1,0 +1,15 @@
+version: "2.2"
+module: api
+boundaries:
+  path: src/**/*
+  # Note: Mass-assignment detection requires a future 'no-pattern' rule
+  # This fixture demonstrates the intended behavior for when that rule is added
+  # 
+  # Proposed rule:
+  # constraints:
+  #   - rule: no-pattern
+  #     params:
+  #       pattern: "CallExpression[callee.property.name='update'] ObjectExpression:has(SpreadElement)"
+  #       message: "Raw object spread in .update() - use explicit field allowlist"
+  #     severity: error
+constraints: []

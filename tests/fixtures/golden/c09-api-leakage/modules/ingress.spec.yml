@@ -1,0 +1,7 @@
+version: "2.2"
+module: ingress
+boundaries:
+  path: src/**/*
+  public_api:
+    - "src/webhookIngress.ts"
+constraints: []

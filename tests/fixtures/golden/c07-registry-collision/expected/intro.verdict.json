@@ -1,0 +1,5 @@
+{
+  "status": "pass",
+  "violations": [],
+  "notes": "Future enhancement - boundary.unique_export rule not yet implemented"
+}
