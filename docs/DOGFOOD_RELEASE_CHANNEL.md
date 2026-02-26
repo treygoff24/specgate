@@ -26,11 +26,11 @@
 - Use resilient release asset fetches with retries and bounded connect/overall timeouts.
 - In fallback mode, install from source with an isolated root (`--root "$RUNNER_TEMP/specgate-install/cargo-root" --force`) and add `cargo-root/bin` to `PATH` to avoid runner-path ambiguity.
 - Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are not available, with the hardened root/path behavior above.
-- Example release tag for initial dogfood: `v0.1.0-rc2`.
+- Example release tag for initial dogfood: `v0.1.0-rc3`.
 - Release verification contract for that tag is `.github/workflows/release-asset-verify.yml`, run after publish:
   - pass requires checksum verification for all published artifacts
   - pass requires `specgate --version` smoke checks for each target artifact
-- For `v0.1.0-rc2` and subsequent dogfood releases, only promote after that workflow is green.
+- For `v0.1.0-rc3` and subsequent dogfood releases, only promote after that workflow is green.
 
 ## Upgrade policy
 

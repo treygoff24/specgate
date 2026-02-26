@@ -54,8 +54,8 @@ See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the f
 
 ## Install options
 
-- Preferred path: download the release tarball + `.sha256` for your tag (example `v0.1.0-rc2`) and run the checksum check before using `specgate`.
-- Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc2`.
+- Preferred path: download the release tarball + `.sha256` for your tag (example `v0.1.0-rc3`) and run the checksum check before using `specgate`.
+- Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3`.
 - See the full copy-paste command flow in [Getting Started](docs/getting-started.md#minute-0-2-build-and-install).
 
 ## Key Concepts
