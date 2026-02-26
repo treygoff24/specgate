@@ -45,9 +45,10 @@ This creates:
 Generated `specgate.config.yml`:
 
 ```yaml
-version: "1.0"
-project_root: "."
-spec_pattern: "modules/*.spec.yml"
+spec_dirs:
+  - "modules"
+exclude: []
+test_patterns: []
 ```
 
 ### Minute 6-10: Create Your First Spec
