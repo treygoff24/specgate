@@ -21,9 +21,9 @@
 
 ---
 
-## Build Execution Status Refresh (2026-02-25)
+## Build Execution Status Refresh (2026-02-25, post-swarm integration)
 
-This section updates the plan against actual repository history and test results.
+This section updates the plan against final merged `master` history and validation results.
 
 ### Milestone Completion (verified)
 
@@ -41,17 +41,28 @@ This section updates the plan against actual repository history and test results
 - [x] **Reviewer hardening pass completed**
   - `7a7fab8` — `test(tier-a): harden A03/A06 near-miss contracts and null to_module`
   - Added precision checks for near-miss variants and explicit `to_module: null` assertion for A06 cycle contract.
+- [x] **All swarm lanes merged and pushed to `master`**
+  - Final integrated head: `341ebc39728390ee1e163da4ab14efbb8ba8f219`.
+  - Landed lane branches / commits:
+    - `feature/mvp-gate-ci` (includes `2c3187d`)
+    - `feature/golden-corpus-expansion` (`edcff68`, `6528deb`)
+    - `feature/governance-hardening` (`7379cc8`)
+    - `feature/doctor-ux-parity` (`89459b1`)
+    - `feature/docs-consolidation` (`126bc38`, `502ad8a`)
 
 ### Current verification snapshot
 
-- `cargo test`: **PASS** on `master`
-  - 123 unit + 12 contract fixtures + 10 golden corpus + 28 integration + 1 Tier A + 8 wave2c CLI.
-- Contract/docs alignment: Wave 0 semantics represented in `WAVE0_CONTRACT.md` and covered by tests.
+- Final merged `master` validation: **PASS**
+  - `cargo fmt --check`
+  - `cargo clippy --all-targets -- -D warnings`
+  - `cargo test` (129 unit + 12 contract fixtures + 14 golden corpus + 28 integration + 2 mvp_gate_baseline + 1 Tier A + 10 wave2c CLI)
+  - `./scripts/ci/mvp_gate.sh`
+- Branch state: `master` clean and aligned with `origin/master` at `341ebc39728390ee1e163da4ab14efbb8ba8f219`.
 
 ### MVP completion estimate
 
-- **~80% complete for MVP hard gate readiness**.
-- Core engine + contract-critical semantics are in place; remaining work is mostly productization hardening, CI wiring, and trust/governance polish.
+- **~95% complete for MVP hard gate readiness (integration scope complete).**
+- Core MVP scope is implemented and validated on merged `master`; remaining work is release/operations hardening, policy finalization, and adoption follow-through.
 
 ---
 
@@ -388,53 +399,58 @@ Add integration fixtures for:
 
 ## 15. Remaining Work (Prioritized)
 
-1. **MVP merge gate definition + CI wiring (P0)**
-   - Add a single documented "MVP-ready" gate that combines:
-     - contract fixtures,
-     - golden corpus,
-     - Tier A deterministic gate,
-     - baseline/new-violation behavior.
-   - Ensure CI exposes clear fail reasons (`policy` vs `runtime` vs `contract drift`).
+1. **Release-candidate hardening and reproducibility evidence (P0)**
+   - Cut an MVP release candidate from `341ebc39728390ee1e163da4ab14efbb8ba8f219` with attached gate artifacts.
+   - Run clean-room verification (fresh clone + documented command path) to confirm onboarding/reproducibility.
 
-2. **Golden corpus expansion beyond scaffold (P0/P1)**
-   - Current top-5 corpus scaffold is merged and passing.
-   - Expand to broader failure classes and map each case to one explicit rule contract.
-   - Keep intro/fix pairs stable and reproducible.
+2. **Baseline lifecycle policy finalization (P0/P1)**
+   - Resolve stale-baseline policy (`warn` vs `fail`, auto-prune vs manual review) and codify it in CI/docs.
+   - Define operator runbook cadence for baseline refresh and stale-entry triage.
 
-3. **Doctor UX parity and operator trust tooling (P1)**
-   - Finalize `doctor compare` ergonomics and mismatch diagnostics for monorepos/project refs.
-   - Tighten guidance quality so users can resolve parity issues without source-diving.
+3. **Doctor parity depth for monorepos/project references (P1)**
+   - Add focused fixtures covering project references and complex path alias overlaps.
+   - Keep mismatch hints high-signal so parity diffs can be resolved without source spelunking.
 
-4. **Governance hardening completeness (P1)**
-   - Ensure spec-change governance fields (`spec_files_changed`, `rule_deltas`, `policy_change_detected`) are consistently surfaced in diff-aware workflows.
-   - Document suppression lifecycle and stale baseline hygiene policy.
+4. **Governance UX polish in diff workflows (P1)**
+   - Improve readability of `spec_files_changed` / `rule_deltas` in human output for review-time decisions.
+   - Ensure policy-change context is obvious in both local and CI surfaces.
 
-5. **Docs consolidation and adoption path (P1)**
-   - Unify contract docs (`WAVE0_CONTRACT.md`), fixture design docs, and this implementation plan into one operator-facing onboarding path.
+5. **Operator adoption closeout (P1)**
+   - Validate end-to-end onboarding docs against a new-user walkthrough.
+   - Publish concise "MVP gate + baseline hygiene" guidance as the default operational path.
+
+### Tomorrow pickup checklist
+
+- [ ] Tag `v0.1.0-rc1` (or equivalent) from `341ebc39728390ee1e163da4ab14efbb8ba8f219` after quick smoke verification.
+- [ ] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`).
+- [ ] Decide stale baseline policy and document enforce/warn behavior in one canonical location.
+- [ ] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
+- [ ] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
+- [ ] Draft release notes summarizing landed lanes, rule-impacting changes, and operator action items.
 
 ---
 
 ## 16. Learned During Build / Plan Additions
 
-1. **Precision requires explicit near-miss fixtures, not just fail/pass fixtures.**
-   - Added near-miss expansion in Tier A hardening to protect against false positives.
-   - Plan addition: every Tier A case should include at least one near-miss variant.
+1. **Merge-train delivery worked because each lane shipped one trust boundary end-to-end.**
+   - CI gate, corpus expansion, governance, doctor UX, and docs each landed as independently testable slices.
+   - Plan addition: keep future waves lane-scoped with explicit merge commits + SHA traceability in this plan.
 
-2. **Null semantics must be contract-tested for deterministic JSON consumers.**
-   - A06 now requires explicit `to_module: null` (key present + null value), not omitted field.
-   - Plan addition: represent nullable contract fields explicitly and lock with tests.
+2. **Deterministic confidence requires both broad corpus and strict gate mechanics.**
+   - Tier A strict determinism + expanded golden corpus caught regressions that smaller fixture sets would miss.
+   - Plan addition: every new rule path should add at least one intro/fix pair and one near-miss precision case.
 
-3. **Determinism gates need harness-level strictness, not just ad-hoc spot checks.**
-   - Tier A strict deterministic gate plus fixture-level assertions proved valuable.
-   - Plan addition: keep deterministic gate as required pre-merge check for contract-sensitive changes.
+3. **Baseline usefulness depends on stale-entry hygiene, not just hit/new classification.**
+   - Stale tracking landed, but policy decisions (enforcement threshold/cadence) are still operator-critical.
+   - Plan addition: treat baseline hygiene as an operational control with explicit owner and review cadence.
 
-4. **Semantic docs + tests must co-evolve in the same wave.**
-   - Wave 0 lock succeeded because CLI semantics, docs, and tests were merged together.
-   - Plan addition: treat semantic changes as incomplete until doc + contract fixture + integration coverage land together.
+4. **Parity diagnostics must optimize for remediation speed, not raw resolver detail.**
+   - `doctor compare` became materially more useful once output centered on focused mismatch verdicts and hints.
+   - Plan addition: new parity work should be judged by "time-to-fix" in real monorepo cases.
 
-5. **Git-aware blast-radius and baseline semantics are high-leverage trust features.**
-   - They move Specgate from static checker to practical CI gate by reducing noise while preserving safety.
-   - Plan addition: prioritize operator clarity around these two workflows in user docs and examples.
+5. **Docs are part of the enforcement surface.**
+   - Consolidated docs and gate runbook reduced ambiguity in what "MVP-ready" means.
+   - Plan addition: no gate or policy change should merge without same-wave operator docs updates.
 
 ---
 
@@ -444,4 +460,4 @@ Add integration fixtures for:
 2. Baseline lifecycle policy: auto-prune stale fingerprints vs manual review gate?
 3. `doctor compare` implementation detail: parse `tsc --traceResolution` text robustly in monorepos with project references.
 
-These do not block v1.1 implementation start.
+These do not block current MVP gate operation, but should be resolved before broader rollout.
