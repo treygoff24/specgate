@@ -25,7 +25,7 @@ jobs:
 
       - name: Install Specgate
         run: |
-          cargo install --locked --git https://github.com/your-org/specgate --tag v0.1.0
+          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0
 
       - name: Run Specgate check
         id: check
