@@ -1,0 +1,5 @@
+version: "2.2"
+module: worker
+boundaries:
+  path: src/worker/**/*
+constraints: []

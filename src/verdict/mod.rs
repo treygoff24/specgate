@@ -67,7 +67,6 @@ pub struct VerdictViolation {
     pub to_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_module: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub to_module: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,

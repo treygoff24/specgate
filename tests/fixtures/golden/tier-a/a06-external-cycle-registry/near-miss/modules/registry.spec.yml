@@ -1,0 +1,9 @@
+version: "2.2"
+module: registry
+boundaries:
+  path: src/registry/**/*
+constraints:
+  - rule: no-circular-deps
+    severity: error
+    params:
+      scope: external
