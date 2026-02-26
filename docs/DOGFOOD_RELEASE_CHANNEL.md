@@ -22,8 +22,10 @@
 - Default install path for released versions is the prebuilt release artifact (fast path):
   - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz`
   - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz.sha256`
-- Verify checksum before unpacking, then run `specgate`.
-- Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are not available.
+- Verify checksum before unpacking, then assert the extracted `specgate` binary exists and is executable before adding it to `PATH`.
+- Use resilient release asset fetches with retries and bounded connect/overall timeouts.
+- In fallback mode, install from source with an isolated root (`--root "$RUNNER_TEMP/specgate-install/cargo-root" --force`) and add `cargo-root/bin` to `PATH` to avoid runner-path ambiguity.
+- Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are not available, with the hardened root/path behavior above.
 - Example release tag for initial dogfood: `v0.1.0-rc1`.
 
 ## Upgrade policy
