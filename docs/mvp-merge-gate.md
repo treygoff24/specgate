@@ -1,89 +1,70 @@
-# MVP Merge Gate
+# MVP Merge Gate (CI)
 
 **One operator-facing definition of “safe to merge” for Specgate.**
 
-This document turns plan section 15(1) into a copy/paste CI gate.
+This repository defines a single MVP-ready gate for contract-sensitive changes.
+
+- Workflow: `.github/workflows/mvp-merge-gate.yml`
+- Runner script: `scripts/ci/mvp_gate.sh`
 
 ---
 
-## What the MVP Gate Must Prove
+## What the Gate Must Prove
 
-A change is merge-ready when all four checks are run and interpreted consistently:
+A change is merge-ready only when all required checks pass and are categorized consistently:
 
-1. **Wave 0 contract stability**
-   - `cargo test contract_fixtures`
-   - Proves locked CLI/version semantics still hold.
-2. **Tier A deterministic rule gate**
-   - `cargo test tier_a_golden`
-   - Proves intro/fix exactness and deterministic ordering for P0 fixtures.
-3. **Golden corpus safety signal**
-   - `cargo test golden_corpus`
-   - Tracks broader behavior classes and regression signal.
-4. **Real project policy check with baseline/new split**
-   - `specgate check --output-mode deterministic`
-   - Proves operator-facing CI behavior (`baseline_hits` vs `new_violations`).
+1. **Runtime/setup health**
+   - Formatting/lint/tooling commands execute successfully.
+2. **Wave 0 + deterministic contract stability**
+   - `contract_fixtures`, `golden_corpus`, and `tier_a_golden` stay green.
+3. **Baseline/new-violation policy semantics**
+   - Baseline hits remain report-only; newly introduced violations are merge-blocking.
 
 ---
 
-## First Working CI Sequence (Copy/Paste)
+## Required Gate Command Sequence
+
+The gate runs this exact sequence:
 
 ```bash
-# 1) Contract lock
-cargo test contract_fixtures
-
-# 2) Deterministic merge gate
-cargo test tier_a_golden
-
-# 3) Broader regression signal
-cargo test golden_corpus
-
-# 4) Repository policy check (byte-identical output mode)
-./target/release/specgate check --output-mode deterministic
-```
-
-For PR performance, use blast radius:
-
-```bash
-./target/release/specgate check --since origin/main --output-mode deterministic
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --test contract_fixtures
+cargo test --test golden_corpus
+cargo test --test tier_a_golden
+cargo test --test mvp_gate_baseline
 ```
 
 ---
 
-## Failure Reason Mapping (Required for CI Clarity)
+## Pass/Fail Criteria and Failure Mapping
 
-Map failures into one of these buckets:
+The gate passes only when **all** commands above pass.
 
-- **Contract drift**
-  - Trigger: `contract_fixtures` or `tier_a_golden` fails
-  - Meaning: semantic contract changed or determinism regressed
-- **Policy failure**
-  - Trigger: `specgate check` exits `1`
-  - Meaning: new policy violations were introduced
+Failures are reported as one of:
+
 - **Runtime/setup failure**
-  - Trigger: `specgate check` exits `2` or test harness/runtime error
-  - Meaning: tooling/config/environment issue, not policy semantics
+  - Formatting, linting, toolchain, or command execution failures.
+- **Contract drift**
+  - Any failure in `contract_fixtures`, `golden_corpus`, or `tier_a_golden`.
+- **Policy failure**
+  - Baseline behavior checks fail in `mvp_gate_baseline`.
 
 ---
 
-## Baseline Behavior in Gate Decisions
+## Baseline Behavior Covered by Gate
 
-Use baseline to suppress known debt while still blocking new risk:
+`mvp_gate_baseline` enforces both required semantics:
 
-- `baseline_hits` = known violations (reported)
-- `new_violations` = newly introduced violations (merge-blocking)
-
-Generate/update baseline:
-
-```bash
-./target/release/specgate baseline --write .specgate-baseline.json
-```
+1. Existing baseline violations are report-only (`check` exits `0`).
+2. New violations after baseline generation fail policy gate (`check` exits `1`).
 
 ---
 
-## Relationship to Other Docs
+## Related Docs
 
-- [Operator Guide](OPERATOR_GUIDE.md) — onboarding narrative
-- [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) — detailed CI patterns
-- [Wave 0 Contract](../WAVE0_CONTRACT.md) — locked semantic surface
-- [Tier A Fixture Design](tier-a-fixture-design-v1.md) — deterministic gate spec
-- [Implementation Plan §15](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) — roadmap context
+- [Operator Guide](OPERATOR_GUIDE.md)
+- [CI Gate Understanding](CI-GATE-UNDERSTANDING.md)
+- [Wave 0 Contract](../WAVE0_CONTRACT.md)
+- [Tier A Fixture Design](tier-a-fixture-design-v1.md)
+- [Implementation Plan §15](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized)

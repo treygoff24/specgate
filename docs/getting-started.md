@@ -151,6 +151,12 @@ cargo test golden_corpus
 
 Start with [MVP Merge Gate](mvp-merge-gate.md), then use [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) for full pipeline options.
 
+Run the gate locally before pushing:
+
+```bash
+./scripts/ci/mvp_gate.sh
+```
+
 Quick CI snippet:
 
 ```yaml
