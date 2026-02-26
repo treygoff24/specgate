@@ -340,7 +340,7 @@ fn stable_content_fingerprint(
 ) -> String {
     stable_fingerprint(&[
         rule,
-        &format!("{:?}", severity),
+        &format!("{severity:?}"),
         message,
         from_file,
         to_file.unwrap_or_default(),

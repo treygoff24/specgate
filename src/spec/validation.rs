@@ -121,8 +121,7 @@ pub fn validate_specs(specs: &[SpecFile]) -> ValidationReport {
                 Some(previous_module) if previous_module != &spec.module => report.push_error(
                     spec,
                     format!(
-                        "canonical import id '{}' already declared by module '{}'",
-                        canonical_id, previous_module
+                        "canonical import id '{canonical_id}' already declared by module '{previous_module}'"
                     ),
                 ),
                 _ => {
@@ -195,10 +194,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
         for overlap in allow_set.intersection(&deny_set) {
             report.push_warning(
                 spec,
-                format!(
-                    "module '{}' is in both allow_imports_from and never_imports",
-                    overlap
-                ),
+                format!("module '{overlap}' is in both allow_imports_from and never_imports"),
             );
         }
 
@@ -216,10 +212,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
         for overlap in allow_imported_by_set.intersection(&deny_imported_by_set) {
             report.push_warning(
                 spec,
-                format!(
-                    "module '{}' is in both allow_imported_by and deny_imported_by",
-                    overlap
-                ),
+                format!("module '{overlap}' is in both allow_imported_by and deny_imported_by"),
             );
         }
 

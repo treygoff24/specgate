@@ -793,8 +793,7 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
     // Add stale baseline entry count if non-zero
     if stale_baseline_entries > 0 {
         lines.push(format!(
-            "Stale baseline entries: {} (consider pruning with `specgate baseline --output`)",
-            stale_baseline_entries
+            "Stale baseline entries: {stale_baseline_entries} (consider pruning with `specgate baseline --output`)"
         ));
     }
 

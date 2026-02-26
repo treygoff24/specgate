@@ -209,9 +209,9 @@ fn build_matcher_cache(
 fn render_glob_error(error: &GlobCompileError) -> String {
     match error {
         GlobCompileError::InvalidPattern { pattern, source } => {
-            format!("'{}' ({})", pattern, source)
+            format!("'{pattern}' ({source})")
         }
-        GlobCompileError::Build { source } => format!("<globset> ({})", source),
+        GlobCompileError::Build { source } => format!("<globset> ({source})"),
     }
 }
 
@@ -272,8 +272,7 @@ fn check_importer_side(
             violations.push(build_violation(
                 "boundary.public_api",
                 format!(
-                    "module '{importer_module}' imported non-public file '{}' from '{provider_module}'",
-                    target_rel
+                    "module '{importer_module}' imported non-public file '{target_rel}' from '{provider_module}'",
                 ),
                 from_file,
                 Some(provider_file),

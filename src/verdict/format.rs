@@ -33,9 +33,9 @@ pub fn format_violation_human(project_root: &Path, entry: &FingerprintedViolatio
     };
 
     let module_context = match (&violation.from_module, &violation.to_module) {
-        (Some(from), Some(to)) => format!(" [{} -> {}]", from, to),
-        (Some(from), None) => format!(" [{}]", from),
-        (None, Some(to)) => format!(" [-> {}]", to),
+        (Some(from), Some(to)) => format!(" [{from} -> {to}]"),
+        (Some(from), None) => format!(" [{from}]"),
+        (None, Some(to)) => format!(" [-> {to}]"),
         (None, None) => String::new(),
     };
 
@@ -73,13 +73,10 @@ pub fn format_violation_diff(project_root: &Path, entry: &FingerprintedViolation
         .map(|p| normalize_repo_relative(project_root, p))
         .unwrap_or_else(|| "-".to_string());
 
-    let line_info = violation
-        .line
-        .map(|l| format!(":{}", l))
-        .unwrap_or_default();
+    let line_info = violation.line.map(|l| format!(":{l}")).unwrap_or_default();
     let col_info = violation
         .column
-        .map(|c| format!(":{}", c))
+        .map(|c| format!(":{c}"))
         .unwrap_or_default();
 
     let severity = match violation.severity {
