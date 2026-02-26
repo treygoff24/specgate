@@ -24,25 +24,15 @@ subsequent cadence toward broader adoption.
 Before cutting a release:
 
 1. Clean workspace and run the canonical gate script:
-   - `./scripts/ci/mvp_gate.sh`
+   - `bash scripts/release/preflight.sh`
 2. Confirm docs links resolve and the canonical docs references are current.
 3. Confirm `LICENSE` matches the SPDX declaration (`MIT` in `Cargo.toml`).
 4. Confirm no unresolved placeholders remain in touched docs.
 
-Gate command baselines used by `mvp_gate.sh` (locked + strict):
+The preflight script wraps the baseline command checks (formatted for brevity):
 
 ```bash
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --lib
-cargo test --locked --test contract_fixtures
-cargo test --locked --test golden_corpus_gate
-cargo test --locked --test tier_a_golden
-cargo test --locked --test integration
-cargo test --locked --test wave2c_cli_integration
-cargo test --locked --test mvp_gate_baseline
-./scripts/ci/mvp_gate.sh
-rg -n "TODO|placeholder|TBD|not wired" README.md docs/*.md
+bash scripts/release/preflight.sh
 ```
 
 ## Release note requirements
