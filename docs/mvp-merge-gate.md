@@ -16,13 +16,16 @@ A change is merge-ready only when all required checks pass and are categorized c
 1. **Runtime/setup health**
    - Formatting/lint/tooling commands execute successfully.
 2. **Wave 0 + deterministic contract stability**
-   - `contract_fixtures`, `golden_corpus`, and `tier_a_golden` stay green.
+  - `contract_fixtures`, `golden_corpus_gate`, and `tier_a_golden` stay green.
 3. **Baseline/new-violation policy semantics**
-   - Baseline hits remain report-only; newly introduced violations are merge-blocking.
+  - Baseline hits remain report-only; newly introduced violations are merge-blocking.
+
+`golden_corpus` remains informational and is used as future-proxy coverage for rules not yet fully enforced.
 
 ## Gate taxonomy (for this repo)
 
-- **Gating:** all commands in this document's sequence (`contract_fixtures`, `golden_corpus`, `tier_a_golden`, `mvp_gate_baseline`) must pass for CI merge.
+- **Gating:** all commands in this document's sequence (`contract_fixtures`, `golden_corpus_gate`, `integration`, `wave2c_cli_integration`, `tier_a_golden`, `mvp_gate_baseline`) must pass for CI merge.
+- **Informational:** `golden_corpus` (`tests/golden_corpus.rs`) tracks future-proxy coverage and is not enforced by merge gate.
 - **Informational:** diagnostics (`doctor compare`), metrics-mode tuning, and non-gating fixture experiments.
 
 ---
@@ -35,8 +38,10 @@ The gate runs this exact sequence:
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --test contract_fixtures
-cargo test --test golden_corpus
+cargo test --test golden_corpus_gate
 cargo test --test tier_a_golden
+cargo test --test integration
+cargo test --test wave2c_cli_integration
 cargo test --test mvp_gate_baseline
 ```
 
@@ -51,7 +56,7 @@ Failures are reported as one of:
 - **Runtime/setup failure**
   - Formatting, linting, toolchain, or command execution failures.
 - **Contract drift**
-  - Any failure in `contract_fixtures`, `golden_corpus`, or `tier_a_golden`.
+  - Any failure in `contract_fixtures`, `golden_corpus_gate`, `integration`, `wave2c_cli_integration`, or `tier_a_golden`.
 - **Policy failure**
   - Baseline behavior checks fail in `mvp_gate_baseline`.
 

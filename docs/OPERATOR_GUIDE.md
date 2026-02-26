@@ -242,7 +242,7 @@ Tier A fixtures are:
 - **CI-gating** — Must pass for merge
 
 Gating vs informational:
-- **Gating (current):** `cargo test --test contract_fixtures`, `cargo test --test golden_corpus`, `cargo test --test tier_a_golden`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
+- **Gating (current):** `cargo test --test contract_fixtures`, `cargo test --test golden_corpus_gate`, `cargo test --test tier_a_golden`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
 - **Informational:** Extra fixture runs and ad-hoc validation beyond this required sequence.
 
 **P0 Fixtures:**
@@ -262,7 +262,7 @@ See [Tier A Fixture Design](tier-a-fixture-design-v1.md) for the full specificat
 **Location:** `tests/fixtures/golden/c01-*`, `c02-*`, etc.
 
 Golden corpus fixtures are:
-- **Gating (current):** required in `mvp-merge-gate.sh` for this repo revision
+- **Informational:** `tests/golden_corpus.rs` tracks future-proxy coverage and is not enforced by merge gate.
 - **Broader coverage** — More failure classes
 - **Tier B** — Candidates for Tier A promotion
 

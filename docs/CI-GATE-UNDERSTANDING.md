@@ -20,8 +20,10 @@ Specgate solves these with:
 
 ## Gate taxonomy
 
-- **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden corpus, tier-A gate, baseline behavior).
+- **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
 - **Informational checks:** local metrics-mode runs, optional `doctor compare` explorations, and additional non-gate fixture collections.
+
+`golden_corpus` (`tests/golden_corpus.rs`) remains informational/future-proxy coverage and is not part of the merge gate.
 
 ---
 
