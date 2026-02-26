@@ -98,8 +98,9 @@ fn parse_json(raw: &str) -> Value {
 
 fn load_expected_verdict(fixture: &TierAFixture, variant: &str) -> Value {
     let path = expected_verdict_path(fixture, variant);
+    let path_display = path.display();
     let raw = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        .unwrap_or_else(|error| panic!("failed to read {path_display}: {error}"));
     parse_json(&raw)
 }
 
@@ -158,12 +159,12 @@ fn normalize_optional_module_field(
     index: usize,
     field: &str,
 ) -> Value {
+    let fixture_id = fixture.id;
     match raw {
         Value::String(value) => Value::String(value.clone()),
         Value::Null => Value::Null,
         other => panic!(
-            "{} {} violation {} has invalid {} value {}; expected string|null",
-            fixture.id, variant, index, field, other
+            "{fixture_id} {variant} violation {index} has invalid {field} value {other}; expected string|null"
         ),
     }
 }
@@ -179,10 +180,10 @@ fn canonical_violation_contract(
         .iter()
         .enumerate()
         .map(|(index, violation)| {
+            let fixture_id = fixture.id;
             let object = violation.as_object().unwrap_or_else(|| {
                 panic!(
-                    "{} {} violation {} must be object",
-                    fixture.id, variant, index
+                    "{fixture_id} {variant} violation {index} must be object"
                 )
             });
 
@@ -190,23 +191,20 @@ fn canonical_violation_contract(
                 .get("rule")
                 .unwrap_or_else(|| {
                     panic!(
-                        "{} {} violation {} missing required field rule",
-                        fixture.id, variant, index
+                        "{fixture_id} {variant} violation {index} missing required field rule"
                     )
                 })
                 .as_str()
                 .unwrap_or_else(|| {
                     panic!(
-                        "{} {} violation {} field rule must be string",
-                        fixture.id, variant, index
+                        "{fixture_id} {variant} violation {index} field rule must be string"
                     )
                 });
 
             let from_module = normalize_optional_module_field(
                 object.get("from_module").unwrap_or_else(|| {
                     panic!(
-                        "{} {} violation {} missing required field from_module",
-                        fixture.id, variant, index
+                        "{fixture_id} {variant} violation {index} missing required field from_module"
                     )
                 }),
                 fixture,
@@ -217,8 +215,7 @@ fn canonical_violation_contract(
             let to_module = normalize_optional_module_field(
                 object.get("to_module").unwrap_or_else(|| {
                     panic!(
-                        "{} {} violation {} missing required field to_module",
-                        fixture.id, variant, index
+                        "{fixture_id} {variant} violation {index} missing required field to_module"
                     )
                 }),
                 fixture,
@@ -256,21 +253,17 @@ fn canonical_violation_contract(
 }
 
 fn assert_expected_verdict_shape(fixture: &TierAFixture, variant: &str, verdict: &Value) {
+    let fixture_id = fixture.id;
     let status = verdict["status"]
         .as_str()
-        .unwrap_or_else(|| panic!("{} expected/{} status must be string", fixture.id, variant));
+        .unwrap_or_else(|| panic!("{fixture_id} expected/{variant} status must be string"));
     assert!(
         status == "pass" || status == "fail",
-        "{} expected/{} status must be pass|fail",
-        fixture.id,
-        variant
+        "{fixture_id} expected/{variant} status must be pass|fail"
     );
 
     let expected_count = verdict["expected_count"].as_u64().unwrap_or_else(|| {
-        panic!(
-            "{} expected/{} expected_count must be integer",
-            fixture.id, variant
-        )
+        panic!("{fixture_id} expected/{variant} expected_count must be integer")
     });
     let violations_len = verdict["violations"]
         .as_array()
@@ -278,8 +271,7 @@ fn assert_expected_verdict_shape(fixture: &TierAFixture, variant: &str, verdict:
         .len();
     assert_eq!(
         expected_count as usize, violations_len,
-        "{} expected/{} expected_count must equal violations length",
-        fixture.id, variant
+        "{fixture_id} expected/{variant} expected_count must equal violations length"
     );
 }
 
@@ -288,6 +280,7 @@ fn assert_a06_expected_to_module_explicit_null(
     verdict: &Value,
     variant: &str,
 ) {
+    let fixture_id = fixture.id;
     if fixture.id != A06_FIXTURE_ID {
         return;
     }
@@ -297,10 +290,7 @@ fn assert_a06_expected_to_module_explicit_null(
         .iter()
         .find(|violation| violation["rule"].as_str() == Some("no-circular-deps"))
         .unwrap_or_else(|| {
-            panic!(
-                "{} expected/{} missing no-circular-deps violation",
-                fixture.id, variant
-            )
+            panic!("{fixture_id} expected/{variant} missing no-circular-deps violation")
         });
 
     let object = circular
@@ -308,15 +298,11 @@ fn assert_a06_expected_to_module_explicit_null(
         .expect("a06 expected violation must be object");
     assert!(
         object.contains_key("to_module"),
-        "{} expected/{} must explicitly include to_module key",
-        fixture.id,
-        variant
+        "{fixture_id} expected/{variant} must explicitly include to_module key"
     );
     assert!(
         object["to_module"].is_null(),
-        "{} expected/{} no-circular-deps to_module must be null",
-        fixture.id,
-        variant
+        "{fixture_id} expected/{variant} no-circular-deps to_module must be null"
     );
 }
 
@@ -326,6 +312,7 @@ fn assert_a06_actual_to_module_explicit_null(
     variant: &str,
     run_index: usize,
 ) {
+    let fixture_id = fixture.id;
     if fixture.id != A06_FIXTURE_ID {
         return;
     }
@@ -335,10 +322,7 @@ fn assert_a06_actual_to_module_explicit_null(
         .iter()
         .find(|violation| violation["rule"].as_str() == Some("no-circular-deps"))
         .unwrap_or_else(|| {
-            panic!(
-                "{} {} run {} missing no-circular-deps violation",
-                fixture.id, variant, run_index
-            )
+            panic!("{fixture_id} {variant} run {run_index} missing no-circular-deps violation")
         });
 
     let object = circular
@@ -346,17 +330,11 @@ fn assert_a06_actual_to_module_explicit_null(
         .expect("a06 actual violation must be object");
     assert!(
         object.contains_key("to_module"),
-        "{} {} run {} no-circular-deps must include to_module key",
-        fixture.id,
-        variant,
-        run_index
+        "{fixture_id} {variant} run {run_index} no-circular-deps must include to_module key"
     );
     assert!(
         object["to_module"].is_null(),
-        "{} {} run {} no-circular-deps to_module must be null",
-        fixture.id,
-        variant,
-        run_index
+        "{fixture_id} {variant} run {run_index} no-circular-deps to_module must be null"
     );
 }
 
@@ -378,38 +356,35 @@ fn list_files(root: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn assert_no_specgate_ignore(fixture: &TierAFixture, variant: &str) {
+    let fixture_id = fixture.id;
     let src_root = variant_dir(fixture, variant).join("src");
     let mut files = Vec::new();
     list_files(&src_root, &mut files);
 
     for file in files {
+        let file_display = file.display();
         let content = fs::read_to_string(&file).expect("read source file");
         assert!(
             !content.contains("@specgate-ignore"),
-            "{} {} contains disallowed @specgate-ignore in {}",
-            fixture.id,
-            variant,
-            file.display()
+            "{fixture_id} {variant} contains disallowed @specgate-ignore in {file_display}"
         );
     }
 }
 
 fn assert_contract_files_exist(fixture: &TierAFixture) {
+    let fixture_id = fixture.id;
     let root = fixture_dir(fixture);
     assert!(
         root.join("fixture.meta.yml").exists(),
-        "{} missing fixture.meta.yml",
-        fixture.id
+        "{fixture_id} missing fixture.meta.yml"
     );
     assert!(
         expected_verdict_path(fixture, "intro").exists(),
-        "{} missing expected/intro.verdict.json",
-        fixture.id
+        "{fixture_id} missing expected/intro.verdict.json"
     );
     assert!(
         expected_verdict_path(fixture, "fix").exists(),
-        "{} missing expected/fix.verdict.json",
-        fixture.id
+        "{fixture_id} missing expected/fix.verdict.json"
     );
 }
 
@@ -448,8 +423,7 @@ fn assert_tier_a_fixture_catalog_is_authorized() {
         .map(|id| (id.clone(),))
     {
         panic!(
-            "tier-a fixture exclusion list is stale: {} is listed in intentional exclusions but directory is missing",
-            missing_exclusion
+            "tier-a fixture exclusion list is stale: {missing_exclusion} is listed in intentional exclusions but directory is missing"
         );
     }
 
@@ -458,27 +432,23 @@ fn assert_tier_a_fixture_catalog_is_authorized() {
         let details = unexpected
             .into_iter()
             .map(|id| {
-                format!(
-                    "{} (add to fixtures() or intentional_tier_a_exclusions() with reason)",
-                    id
-                )
+                format!("{id} (add to fixtures() or intentional_tier_a_exclusions() with reason)")
             })
             .collect::<Vec<_>>()
             .join(", ");
-        panic!("tier-a fixture directory drift detected for: {}", details);
+        panic!("tier-a fixture directory drift detected for: {details}");
     }
 
     for (excluded_id, reason) in exclusions.iter() {
         assert!(
             actual.contains(excluded_id),
-            "explicit tier-a exclusion is missing: {} => {}",
-            excluded_id,
-            reason
+            "explicit tier-a exclusion is missing: {excluded_id} => {reason}"
         );
     }
 }
 
 fn assert_intro_contract_and_determinism(fixture: &TierAFixture) {
+    let fixture_id = fixture.id;
     let expected_intro = load_expected_verdict(fixture, "intro");
     assert_expected_verdict_shape(fixture, "intro", &expected_intro);
     assert_a06_expected_to_module_explicit_null(fixture, &expected_intro, "intro");
@@ -488,8 +458,7 @@ fn assert_intro_contract_and_determinism(fixture: &TierAFixture) {
         .expect("expected intro status");
     assert_eq!(
         expected_status, "fail",
-        "{} expected/intro status must be fail",
-        fixture.id
+        "{fixture_id} expected/intro status must be fail"
     );
 
     let expected_count = expected_intro["expected_count"]
@@ -504,32 +473,29 @@ fn assert_intro_contract_and_determinism(fixture: &TierAFixture) {
     for run_index in 0..3 {
         let (result, verdict) = run_check(&intro_root);
         assert_eq!(
-            result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
-            "{} intro run {} should fail with policy violations; stdout={}, stderr={}",
-            fixture.id, run_index, result.stdout, result.stderr
+            result.exit_code,
+            EXIT_CODE_POLICY_VIOLATIONS,
+            "{fixture_id} intro run {run_index} should fail with policy violations; stdout={stdout}, stderr={stderr}",
+            stdout = result.stdout,
+            stderr = result.stderr
         );
 
         assert_eq!(
             verdict["status"],
             Value::String(expected_status.to_string()),
-            "{} intro run {} should match expected intro status",
-            fixture.id,
-            run_index
+            "{fixture_id} intro run {run_index} should match expected intro status"
         );
 
         let actual_violations = canonical_violation_contract(&verdict, fixture, "intro");
         assert_eq!(
             actual_violations.len(),
             expected_count,
-            "{} intro run {} should match expected intro violation count",
-            fixture.id,
-            run_index
+            "{fixture_id} intro run {run_index} should match expected intro violation count"
         );
 
         assert_eq!(
             actual_violations, expected_violations,
-            "{} intro run {} should match expected intro violation contract",
-            fixture.id, run_index
+            "{fixture_id} intro run {run_index} should match expected intro violation contract"
         );
 
         assert_a06_actual_to_module_explicit_null(fixture, &verdict, "intro", run_index);
@@ -539,17 +505,16 @@ fn assert_intro_contract_and_determinism(fixture: &TierAFixture) {
 
     assert_eq!(
         signatures[0], signatures[1],
-        "{} intro violations should be deterministic across run 1 and 2",
-        fixture.id
+        "{fixture_id} intro violations should be deterministic across run 1 and 2"
     );
     assert_eq!(
         signatures[1], signatures[2],
-        "{} intro violations should be deterministic across run 2 and 3",
-        fixture.id
+        "{fixture_id} intro violations should be deterministic across run 2 and 3"
     );
 }
 
 fn assert_fix_contract(fixture: &TierAFixture) {
+    let fixture_id = fixture.id;
     let expected_fix = load_expected_verdict(fixture, "fix");
     assert_expected_verdict_shape(fixture, "fix", &expected_fix);
 
@@ -558,8 +523,7 @@ fn assert_fix_contract(fixture: &TierAFixture) {
         .expect("expected fix status");
     assert_eq!(
         expected_status, "pass",
-        "{} expected/fix status must be pass",
-        fixture.id
+        "{fixture_id} expected/fix status must be pass"
     );
 
     let expected_count = expected_fix["expected_count"]
@@ -570,69 +534,63 @@ fn assert_fix_contract(fixture: &TierAFixture) {
     let (result, verdict) = run_check(&variant_dir(fixture, "fix"));
 
     assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
-        "{} fix should pass; stdout={}, stderr={}",
-        fixture.id, result.stdout, result.stderr
+        result.exit_code,
+        EXIT_CODE_PASS,
+        "{fixture_id} fix should pass; stdout={stdout}, stderr={stderr}",
+        stdout = result.stdout,
+        stderr = result.stderr
     );
     assert_eq!(
         verdict["status"],
         Value::String(expected_status.to_string()),
-        "{} fix should match expected/fix status",
-        fixture.id
+        "{fixture_id} fix should match expected/fix status"
     );
 
     let actual_violations = canonical_violation_contract(&verdict, fixture, "fix");
     assert_eq!(
         actual_violations.len(),
         expected_count,
-        "{} fix should match expected/fix violation count",
-        fixture.id
+        "{fixture_id} fix should match expected/fix violation count"
     );
     assert_eq!(
         actual_violations, expected_violations,
-        "{} fix should match expected/fix violation contract",
-        fixture.id
+        "{fixture_id} fix should match expected/fix violation contract"
     );
 }
 
 fn assert_optional_near_miss_contract(fixture: &TierAFixture) {
+    let fixture_id = fixture.id;
     if let Some(variant) = fixture.near_miss_variant {
         let variant_root = variant_dir(fixture, variant);
         assert!(
             variant_root.exists(),
-            "{} {} variant directory must exist",
-            fixture.id,
-            variant
+            "{fixture_id} {variant} variant directory must exist"
         );
         assert!(
             variant_root.join("specgate.config.yml").exists(),
-            "{} {} missing specgate.config.yml",
-            fixture.id,
-            variant
+            "{fixture_id} {variant} missing specgate.config.yml"
         );
 
         let (result, verdict) = run_check(&variant_root);
 
         assert_eq!(
-            result.exit_code, EXIT_CODE_PASS,
-            "{} {} should pass as near-miss precision check; stdout={}, stderr={}",
-            fixture.id, variant, result.stdout, result.stderr
+            result.exit_code,
+            EXIT_CODE_PASS,
+            "{fixture_id} {variant} should pass as near-miss precision check; stdout={stdout}, stderr={stderr}",
+            stdout = result.stdout,
+            stderr = result.stderr
         );
         assert_eq!(
             verdict["status"],
             Value::String("pass".to_string()),
-            "{} {} should produce pass status",
-            fixture.id,
-            variant
+            "{fixture_id} {variant} should produce pass status"
         );
 
         let actual_violations = canonical_violation_contract(&verdict, fixture, variant);
         assert_eq!(
             actual_violations.len(),
             0,
-            "{} {} should have zero violations",
-            fixture.id,
-            variant
+            "{fixture_id} {variant} should have zero violations"
         );
     }
 }

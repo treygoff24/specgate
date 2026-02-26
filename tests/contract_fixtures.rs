@@ -49,7 +49,7 @@ fn allow_imports_from_enforces_exact_module_matching() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
@@ -58,7 +58,6 @@ boundaries:
     - "core/db"
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -67,13 +66,12 @@ constraints: []
         "modules/core__api.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: core/api
 boundaries:
   path: src/core/api/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -82,13 +80,12 @@ constraints: []
         "modules/core__db.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: core/db
 boundaries:
   path: src/core/db/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -145,7 +142,7 @@ fn allow_imports_from_rejects_non_allowlisted_modules() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
@@ -153,7 +150,6 @@ boundaries:
     - "core/api"
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -162,13 +158,12 @@ constraints: []
         "modules/core__api.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: core/api
 boundaries:
   path: src/core/api/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -177,13 +172,12 @@ constraints: []
         "modules/external__lib.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: external/lib
 boundaries:
   path: src/external/lib/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -248,13 +242,12 @@ fn empty_allow_imports_from_allows_all() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -263,13 +256,12 @@ constraints: []
         "modules/lib.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: lib
 boundaries:
   path: src/lib/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -328,7 +320,7 @@ fn public_api_enforces_internal_visibility() {
         "modules/core.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: core
 boundaries:
   path: src/core/**/*
@@ -339,7 +331,6 @@ constraints:
   - rule: boundary.public_api
     severity: error
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -348,13 +339,12 @@ constraints:
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -427,7 +417,7 @@ fn public_api_allows_public_paths() {
         "modules/core.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: core
 boundaries:
   path: src/core/**/*
@@ -438,7 +428,6 @@ constraints:
   - rule: boundary.public_api
     severity: error
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -447,13 +436,12 @@ constraints:
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -658,13 +646,12 @@ fn deprecated_diff_flag_emits_warning() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -685,10 +672,10 @@ constraints: []
     ]);
 
     // Should still work (as alias) but emit warning
+    let stderr = result.stderr.as_str();
     assert!(
         result.stderr.contains("--diff is deprecated"),
-        "should emit deprecation warning for --diff: stderr was {:?}",
-        result.stderr
+        "should emit deprecation warning for --diff: stderr was {stderr:?}"
     );
 }
 
@@ -702,13 +689,12 @@ fn baseline_diff_flag_works_without_warning() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
@@ -729,10 +715,10 @@ constraints: []
     ]);
 
     // Should NOT emit deprecation warning
+    let stderr = result.stderr.as_str();
     assert!(
         !result.stderr.contains("deprecated"),
-        "should not emit deprecation warning for --baseline-diff: stderr was {:?}",
-        result.stderr
+        "should not emit deprecation warning for --baseline-diff: stderr was {stderr:?}"
     );
 }
 
@@ -793,13 +779,12 @@ fn version_2_2_is_accepted() {
         "modules/app.spec.yml",
         &format!(
             r#"
-version: "{}"
+version: "{SUPPORTED_SPEC_VERSION}"
 module: app
 boundaries:
   path: src/app/**/*
 constraints: []
 "#,
-            SUPPORTED_SPEC_VERSION
         ),
     );
 
