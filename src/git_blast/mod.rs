@@ -76,6 +76,15 @@ pub fn compute_blast_radius(
     file_to_module: &BTreeMap<String, String>,
     importer_graph: &BTreeMap<String, BTreeSet<String>>,
 ) -> BlastRadius {
+    if let Err(error) = validate_git_ref(project_root, since_ref) {
+        return BlastRadius {
+            changed_files: BTreeSet::new(),
+            affected_modules: BTreeSet::new(),
+            affected_with_importers: BTreeSet::new(),
+            error: Some(error),
+        };
+    }
+
     // Get changed files from git
     let changed_files = match get_changed_files(project_root, since_ref) {
         Ok(files) => files,
@@ -120,7 +129,13 @@ pub fn compute_blast_radius(
 /// Get files changed since a git reference.
 fn get_changed_files(project_root: &Path, since_ref: &str) -> Result<BTreeSet<String>, String> {
     let output = Command::new("git")
-        .args(["diff", "--name-only", "--diff-filter=ACMRT", since_ref])
+        .args([
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMRT",
+            since_ref,
+            "--",
+        ])
         .current_dir(project_root)
         .output()
         .map_err(|e| format!("failed to execute git: {e}"))?;

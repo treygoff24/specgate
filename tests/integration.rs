@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use serde_json::Value;
 use tempfile::TempDir;
@@ -21,6 +22,45 @@ fn write_file(root: &Path, relative_path: &str, content: &str) {
 
 fn parse_json(source: &str) -> Value {
     serde_json::from_str(source).expect("valid json")
+}
+
+fn init_git_repo(root: &Path) {
+    let status = Command::new("git")
+        .arg("init")
+        .current_dir(root)
+        .status()
+        .expect("git init");
+    assert!(status.success());
+
+    let status = Command::new("git")
+        .args(["config", "user.name", "Specgate Test"])
+        .current_dir(root)
+        .status()
+        .expect("git config user.name");
+    assert!(status.success());
+
+    let status = Command::new("git")
+        .args(["config", "user.email", "ci@example.com"])
+        .current_dir(root)
+        .status()
+        .expect("git config user.email");
+    assert!(status.success());
+}
+
+fn git_add_and_commit(root: &Path, message: &str) {
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(root)
+        .status()
+        .expect("git add");
+    assert!(status.success());
+
+    let status = Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(root)
+        .status()
+        .expect("git commit");
+    assert!(status.success());
 }
 
 fn create_basic_project(root: &Path) {
@@ -709,4 +749,316 @@ fn check_diff_mode_without_violations_passes() {
     assert_eq!(result.exit_code, EXIT_CODE_PASS);
     assert!(result.stdout.contains("Summary:"));
     assert!(result.stdout.contains("0 total"));
+}
+
+// =============================================================================
+// --since BLAST-RADIUS INTEGRATION TESTS
+// =============================================================================
+
+#[test]
+fn check_since_includes_transitive_importers_without_allowlist() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        "version: \"2.2\"\nmodule: core\nboundaries:\n  path: src/core/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/feature.spec.yml",
+        "version: \"2.2\"\nmodule: feature\nboundaries:\n  path: src/feature/**/*\n  never_imports:\n    - forbidden\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - forbidden\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/forbidden.spec.yml",
+        "version: \"2.2\"\nmodule: forbidden\nboundaries:\n  path: src/forbidden/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/core/index.ts", "export const core = 1;\n");
+    write_file(
+        temp.path(),
+        "src/feature/index.ts",
+        "import { core } from '../core/index';\nexport const feature = core;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/feature/bad.ts",
+        "import { forbidden } from '../forbidden/index';\nexport const featureBad = forbidden;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/index.ts",
+        "import { feature } from '../feature/index';\nexport const app = feature;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/bad.ts",
+        "import { forbidden } from '../forbidden/index';\nexport const appBad = forbidden;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/forbidden/index.ts",
+        "export const forbidden = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    init_git_repo(temp.path());
+    git_add_and_commit(temp.path(), "chore: initial commit");
+
+    write_file(temp.path(), "src/core/index.ts", "export const core = 2;\n");
+    git_add_and_commit(temp.path(), "chore: touch core");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--since",
+        "HEAD~1",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "fail");
+
+    let violation_files = output["violations"]
+        .as_array()
+        .expect("violations array")
+        .iter()
+        .map(|violation| violation["from_file"].as_str().expect("from_file"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        violation_files.len(),
+        2,
+        "transitive importers should be checked"
+    );
+    assert!(
+        violation_files.contains(&"src/feature/bad.ts"),
+        "feature importer should be included"
+    );
+    assert!(
+        violation_files.contains(&"src/app/bad.ts"),
+        "app transitive importer should be included"
+    );
+}
+
+#[test]
+fn check_since_does_not_use_allowlist_edges_without_real_imports() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        "version: \"2.2\"\nmodule: core\nboundaries:\n  path: src/core/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/feature.spec.yml",
+        "version: \"2.2\"\nmodule: feature\nboundaries:\n  path: src/feature/**/*\n  allow_imports_from:\n    - core\n  never_imports:\n    - forbidden\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/forbidden.spec.yml",
+        "version: \"2.2\"\nmodule: forbidden\nboundaries:\n  path: src/forbidden/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    write_file(temp.path(), "src/core/index.ts", "export const core = 1;\n");
+    write_file(
+        temp.path(),
+        "src/feature/index.ts",
+        "import { forbidden } from '../forbidden/index';\nexport const feature = forbidden;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/forbidden/index.ts",
+        "export const forbidden = 1;\n",
+    );
+
+    init_git_repo(temp.path());
+    git_add_and_commit(temp.path(), "chore: initial commit");
+
+    write_file(temp.path(), "src/core/index.ts", "export const core = 2;\n");
+    git_add_and_commit(temp.path(), "chore: touch core");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--since",
+        "HEAD~1",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "pass");
+    assert_eq!(
+        output["violations"]
+            .as_array()
+            .expect("violations array")
+            .len(),
+        0,
+        "no transitive include should occur without real import edge"
+    );
+}
+
+#[test]
+fn check_since_works_with_baseline_diff_mode() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        "version: \"2.2\"\nmodule: core\nboundaries:\n  path: src/core/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/feature.spec.yml",
+        "version: \"2.2\"\nmodule: feature\nboundaries:\n  path: src/feature/**/*\n  never_imports:\n    - forbidden\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/forbidden.spec.yml",
+        "version: \"2.2\"\nmodule: forbidden\nboundaries:\n  path: src/forbidden/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/unrelated.spec.yml",
+        "version: \"2.2\"\nmodule: unrelated\nboundaries:\n  path: src/unrelated/**/*\n  never_imports:\n    - forbidden\nconstraints: []\n",
+    );
+
+    write_file(temp.path(), "src/core/index.ts", "export const core = 1;\n");
+    write_file(
+        temp.path(),
+        "src/feature/index.ts",
+        "import { core } from '../core/index';\nexport const feature = core;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/feature/bad.ts",
+        "import { forbidden } from '../forbidden/index';\nexport const featureBad = forbidden;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/index.ts",
+        "import { feature } from '../feature/index';\nexport const app = feature;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/unrelated/bad.ts",
+        "import { forbidden } from '../forbidden/index';\nexport const unrelatedBad = forbidden;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/forbidden/index.ts",
+        "export const forbidden = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    init_git_repo(temp.path());
+    git_add_and_commit(temp.path(), "chore: initial commit");
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    write_file(temp.path(), "src/core/index.ts", "export const core = 2;\n");
+    git_add_and_commit(temp.path(), "chore: touch core");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--baseline-diff",
+        "--since",
+        "HEAD~1",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let lines: Vec<&str> = result.stdout.lines().collect();
+    let diff_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with('+') || line.starts_with(' '))
+        .collect();
+
+    assert_eq!(
+        diff_lines.len(),
+        1,
+        "only one baseline violation should survive blast-radius filtering"
+    );
+    assert!(
+        diff_lines
+            .iter()
+            .any(|line| line.contains("src/feature/bad.ts")),
+        "applicable feature violation should remain in radius"
+    );
+    assert!(
+        !diff_lines
+            .iter()
+            .any(|line| line.contains("src/unrelated/bad.ts")),
+        "unrelated baseline violation should be filtered by --since"
+    );
+}
+
+#[test]
+fn check_since_rejects_invalid_or_path_like_refs() {
+    let temp = TempDir::new().expect("tempdir");
+
+    create_basic_project(temp.path());
+    init_git_repo(temp.path());
+    git_add_and_commit(temp.path(), "chore: initial commit");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--since",
+        "src/app/main.ts",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "error");
+    let details = output["details"].as_array().expect("details");
+    assert!(details.iter().any(|detail| {
+        detail
+            .as_str()
+            .expect("string detail")
+            .contains("invalid git reference")
+    }));
 }

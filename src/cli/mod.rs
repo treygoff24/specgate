@@ -428,29 +428,13 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     }
 
     // Handle --since blast-radius mode
-    let blast_radius = if let Some(since_ref) = &args.since {
-        let blast_data = build_blast_radius_data(&loaded);
-        let radius = crate::git_blast::compute_blast_radius(
-            &loaded.project_root,
-            since_ref,
-            &blast_data.module_to_files,
-            &blast_data.file_to_module,
-            &blast_data.importer_graph,
-        );
-
-        if let Some(error) = &radius.error {
-            return runtime_error_json(
-                "git",
-                "failed to compute blast radius",
-                vec![error.clone()],
-            );
-        }
-
-        Some(radius)
-    } else {
-        None
-    };
-
+    let blast_radius =
+        match build_blast_radius(&loaded, args.since.as_deref(), &artifacts.edge_pairs) {
+            Ok(radius) => radius,
+            Err(error) => {
+                return runtime_error_json("git", "failed to compute blast radius", vec![error]);
+            }
+        };
     let baseline_start = Instant::now();
     let baseline = if args.no_baseline {
         None
@@ -568,7 +552,35 @@ struct BlastRadiusData {
     importer_graph: BTreeMap<String, BTreeSet<String>>,
 }
 
-fn build_blast_radius_data(loaded: &LoadedProject) -> BlastRadiusData {
+fn build_blast_radius(
+    loaded: &LoadedProject,
+    since_ref: Option<&str>,
+    edge_pairs: &BTreeSet<(String, String)>,
+) -> std::result::Result<Option<crate::git_blast::BlastRadius>, String> {
+    let Some(since_ref) = since_ref else {
+        return Ok(None);
+    };
+
+    let blast_data = build_blast_radius_data(loaded, edge_pairs);
+    let radius = crate::git_blast::compute_blast_radius(
+        &loaded.project_root,
+        since_ref,
+        &blast_data.module_to_files,
+        &blast_data.file_to_module,
+        &blast_data.importer_graph,
+    );
+
+    if let Some(error) = &radius.error {
+        return Err(error.clone());
+    }
+
+    Ok(Some(radius))
+}
+
+fn build_blast_radius_data(
+    loaded: &LoadedProject,
+    edge_pairs: &BTreeSet<(String, String)>,
+) -> BlastRadiusData {
     let mut module_to_files: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut file_to_module: BTreeMap<String, String> = BTreeMap::new();
 
@@ -609,18 +621,23 @@ fn build_blast_radius_data(loaded: &LoadedProject) -> BlastRadiusData {
         }
     }
 
-    // Build importer graph from specs
     let mut importer_graph: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for spec in &loaded.specs {
-        if let Some(boundaries) = &spec.boundaries {
-            // allow_imports_from lists modules this module imports from
-            for import_from in &boundaries.allow_imports_from {
-                importer_graph
-                    .entry(import_from.clone())
-                    .or_default()
-                    .insert(spec.module.clone());
-            }
+    for (from_file, to_file) in edge_pairs {
+        let Some(from_module) = file_to_module.get(from_file) else {
+            continue;
+        };
+        let Some(to_module) = file_to_module.get(to_file) else {
+            continue;
+        };
+
+        if from_module == to_module {
+            continue;
         }
+
+        importer_graph
+            .entry(to_module.clone())
+            .or_default()
+            .insert(from_module.clone());
     }
 
     BlastRadiusData {
@@ -673,6 +690,32 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         );
     }
 
+    let blast_radius =
+        match build_blast_radius(&loaded, args.since.as_deref(), &artifacts.edge_pairs) {
+            Ok(radius) => radius,
+            Err(error) => {
+                return runtime_error_json("git", "failed to compute blast radius", vec![error]);
+            }
+        };
+
+    let policy_violations = if let Some(radius) = &blast_radius {
+        artifacts
+            .policy_violations
+            .iter()
+            .filter(|v| {
+                let from_file = v
+                    .from_file
+                    .to_str()
+                    .map(|s| normalize_repo_relative(&loaded.project_root, Path::new(s)));
+                let module = v.from_module.as_deref();
+                radius.contains_file(from_file.as_deref().unwrap_or(""), module)
+            })
+            .cloned()
+            .collect()
+    } else {
+        artifacts.policy_violations.clone()
+    };
+
     let baseline = if args.no_baseline {
         None
     } else {
@@ -689,11 +732,8 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         }
     };
 
-    let classified = classify_violations(
-        &loaded.project_root,
-        &artifacts.policy_violations,
-        baseline.as_ref(),
-    );
+    let classified =
+        classify_violations(&loaded.project_root, &policy_violations, baseline.as_ref());
 
     // Filter based on diff mode
     let filtered: Vec<_> = match diff_mode {
