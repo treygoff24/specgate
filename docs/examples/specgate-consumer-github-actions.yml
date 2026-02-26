@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: Install Specgate (prefer release binary with checksum, fallback to cargo install)
         run: |

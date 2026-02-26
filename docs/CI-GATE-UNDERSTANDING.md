@@ -308,7 +308,7 @@ jobs:
           fetch-depth: 0  # Required for blast-radius
       
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
       
       - name: Build Specgate
         run: cargo build --release
