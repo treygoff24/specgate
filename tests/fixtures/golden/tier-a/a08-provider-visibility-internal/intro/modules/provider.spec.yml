@@ -1,0 +1,10 @@
+version: "2.2"
+module: provider
+boundaries:
+  path: src/provider/**/*
+  visibility: internal
+  friend_modules:
+    - trusted-friend
+constraints:
+  - rule: boundary.visibility.internal
+    severity: error

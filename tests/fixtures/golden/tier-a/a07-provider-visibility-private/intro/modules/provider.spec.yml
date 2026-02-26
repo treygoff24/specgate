@@ -1,0 +1,8 @@
+version: "2.2"
+module: provider
+boundaries:
+  path: src/provider/**/*
+  visibility: private
+constraints:
+  - rule: boundary.visibility.private
+    severity: error

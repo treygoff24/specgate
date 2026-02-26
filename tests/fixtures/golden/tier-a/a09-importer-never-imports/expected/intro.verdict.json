@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "boundary.never_imports",
+      "from_module": "consumer",
+      "to_module": "provider"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+id: a07-provider-visibility-private
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.visibility.private
+expected_count: 1

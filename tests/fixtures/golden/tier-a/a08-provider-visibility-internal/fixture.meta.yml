@@ -1,0 +1,5 @@
+id: a08-provider-visibility-internal
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.visibility.internal
+expected_count: 1

@@ -1,0 +1,5 @@
+id: a10-provider-deny-imported-by
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.deny_imported_by
+expected_count: 1

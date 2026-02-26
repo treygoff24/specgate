@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "dependency.not_allowed",
+      "from_module": "api-client",
+      "to_module": null
+    }
+  ]
+}

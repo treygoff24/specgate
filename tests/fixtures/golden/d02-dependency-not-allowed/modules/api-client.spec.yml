@@ -1,0 +1,8 @@
+version: "2.2"
+module: api-client
+description: API client module
+boundaries:
+  path: "src/**/*.ts"
+  allowed_dependencies:
+    - axios
+    - node-fetch
