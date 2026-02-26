@@ -1,0 +1,5 @@
+version: "2.2"
+module: core
+boundaries:
+  path: src/core/**/*
+constraints: []

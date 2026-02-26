@@ -2,6 +2,7 @@ pub mod baseline;
 pub mod build_info;
 pub mod cli;
 pub mod deterministic;
+pub mod git_blast;
 pub mod graph;
 pub mod parser;
 pub mod resolver;

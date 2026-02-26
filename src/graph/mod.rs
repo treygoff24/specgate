@@ -693,8 +693,10 @@ console.log(value, dep);
 
         resolver.clear_cache();
 
-        let mut config_enforce = SpecConfig::default();
-        config_enforce.jest_mock_mode = JestMockMode::Enforce;
+        let config_enforce = SpecConfig {
+            jest_mock_mode: JestMockMode::Enforce,
+            ..Default::default()
+        };
 
         let graph_enforce = DependencyGraph::build(temp.path(), &mut resolver, &config_enforce)
             .expect("build graph enforce");

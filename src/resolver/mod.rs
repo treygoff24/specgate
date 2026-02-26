@@ -301,11 +301,7 @@ impl ModuleResolver {
 }
 
 fn sorted_globset_matches(globset: &GlobSet, candidate: &str) -> Vec<usize> {
-    let mut matches = globset
-        .matches(candidate)
-        .iter()
-        .copied()
-        .collect::<Vec<_>>();
+    let mut matches = globset.matches(candidate).to_vec();
     matches.sort_unstable();
     matches
 }
