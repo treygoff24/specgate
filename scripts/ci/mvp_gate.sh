@@ -76,7 +76,7 @@ echo "4. cargo test --test golden_corpus_gate"
     echo
     echo "Pass criteria met:"
     echo "- No runtime/setup failures"
-    echo "- No contract drift in contract fixtures, golden corpus, or Tier A deterministic gate"
+    echo "- No contract drift in contract fixtures, golden_corpus_gate, tier_a_golden, integration, or wave2c_cli_integration"
     echo "- Baseline behavior checks passed (baseline hits report-only; new violations fail policy gate)"
   else
     echo "### Result: ❌ FAIL"
