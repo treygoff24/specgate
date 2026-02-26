@@ -1,0 +1,5 @@
+version: "2.2"
+module: provider
+boundaries:
+  path: src/provider/**/*
+constraints: []

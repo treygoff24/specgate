@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "dependency.forbidden",
+      "from_module": "app",
+      "to_module": null
+    }
+  ]
+}

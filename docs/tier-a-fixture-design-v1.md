@@ -79,6 +79,32 @@ For each fixture variant (`intro`, `fix`):
 
 ## P1 (Add after P0 stabilizes)
 
+### A07 — provider-visibility-private
+- **Rule:** `boundary.visibility.private`
+- **Intro:** consumer imports from module marked as private visibility.
+- **Fix:** removes import; respects private boundary.
+- **Why:** enforces hard module isolation for internal/private APIs.
+
+### A08 — provider-visibility-internal
+- **Rule:** `boundary.visibility.internal`
+- **Intro:** non-friend module imports from internal-visibility provider.
+- **Fix:** routes through friend module or avoids import.
+- **Why:** guards internal APIs from unauthorized cross-team/module access.
+
+### A09 — importer-never-imports
+- **Rule:** `boundary.never_imports`
+- **Intro:** importer imports from module it declared as never-importable.
+- **Fix:** removes forbidden import.
+- **Why:** explicit importer-side deny list for strict module boundaries.
+
+### A10 — provider-deny-imported-by
+- **Rule:** `boundary.deny_imported_by`
+- **Intro:** module imports from provider that explicitly denies it.
+- **Fix:** routes through allowed intermediary or avoids import.
+- **Why:** explicit provider-side deny list for access control.
+
+**Note:** A11 (forbidden-dependency) was created but excluded from Tier A gate because it requires npm dependencies (package.json + node_modules), breaking the deterministic, self-contained Tier A criteria. Dependency rules are tested by D01/D02 in regular golden corpus.
+
 ### A05 — forbidden-dependency-in-sensitive-module
 - **Rule:** `dependency.forbidden` (single pinned rule; no dual-rule ambiguity)
 - **Intro:** sensitive module imports forbidden dependency (use deterministic resolvable target, e.g. `node:fs`, or explicit local package fixture).

@@ -1,0 +1,5 @@
+id: a11-forbidden-dependency
+tier: A
+maps_from_tier_b: null
+target_rule: dependency.forbidden
+expected_count: 1

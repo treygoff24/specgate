@@ -1,0 +1,6 @@
+version: "2.2"
+module: app
+boundaries:
+  path: src/**/*
+  forbidden_dependencies:
+    - lodash

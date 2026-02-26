@@ -1,0 +1,9 @@
+version: "2.2"
+module: provider
+boundaries:
+  path: src/provider/**/*
+  deny_imported_by:
+    - consumer
+constraints:
+  - rule: boundary.deny_imported_by
+    severity: error

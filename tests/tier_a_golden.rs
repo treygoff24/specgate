@@ -43,6 +43,26 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "a06-external-cycle-registry",
             near_miss_variant: Some("near-miss"),
         },
+        TierAFixture {
+            id: "a07-provider-visibility-private",
+            near_miss_variant: None,
+        },
+        TierAFixture {
+            id: "a08-provider-visibility-internal",
+            near_miss_variant: None,
+        },
+        TierAFixture {
+            id: "a09-importer-never-imports",
+            near_miss_variant: None,
+        },
+        TierAFixture {
+            id: "a10-provider-deny-imported-by",
+            near_miss_variant: None,
+        },
+        // NOTE: a11-forbidden-dependency excluded from tier-a because it requires
+        // npm dependencies (package.json + node_modules) which breaks the deterministic,
+        // self-contained tier-a gate criteria. Dependency rules are covered by d01/d02
+        // in the regular golden_corpus tests.
     ]
 }
 

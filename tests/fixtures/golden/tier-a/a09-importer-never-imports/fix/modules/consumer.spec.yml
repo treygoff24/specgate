@@ -1,0 +1,9 @@
+version: "2.2"
+module: consumer
+boundaries:
+  path: src/consumer/**/*
+  never_imports:
+    - provider
+constraints:
+  - rule: boundary.never_imports
+    severity: error

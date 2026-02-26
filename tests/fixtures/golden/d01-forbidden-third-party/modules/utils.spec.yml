@@ -1,0 +1,8 @@
+version: "2.2"
+module: utils
+description: Utility functions module
+boundaries:
+  path: "src/**/*.ts"
+  forbidden_dependencies:
+    - lodash
+    - underscore

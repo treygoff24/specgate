@@ -1,0 +1,5 @@
+id: a09-importer-never-imports
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.never_imports
+expected_count: 1
