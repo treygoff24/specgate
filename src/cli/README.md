@@ -17,6 +17,8 @@ Implemented commands:
 `doctor compare` notes:
 - mismatch is diagnostic (not policy) and returns dedicated exit code `3`
 - supports focused compare for a single import via `--from <file> --import <specifier>`
+- focused output includes `specgate_resolution`, `tsc_trace_resolution`, `parity_verdict` (`MATCH`/`DIFF`), and `actionable_mismatch_hint`
+- `--tsc-trace` accepts JSON edge payloads or raw `tsc --traceResolution` text
 - `--tsc-command` executes via `sh -lc` and requires explicit `--allow-shell`
 
 Exit code contract:

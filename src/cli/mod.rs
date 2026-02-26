@@ -23,6 +23,7 @@ use crate::baseline::{
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
 use crate::graph::DependencyGraph;
+use crate::resolver::classify::extract_package_name;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
@@ -155,7 +156,7 @@ enum DoctorCommand {
 struct DoctorCompareArgs {
     #[command(flatten)]
     common: CommonProjectArgs,
-    /// JSON file containing trace edges (supports { edges: [{from,to}] } or [{from,to}]).
+    /// Trace payload file: JSON edge data or raw `tsc --traceResolution` output text.
     #[arg(long)]
     tsc_trace: Option<PathBuf>,
     /// Command that emits compatible JSON to stdout.
@@ -272,6 +273,7 @@ struct DoctorOverlapOutput {
 struct DoctorCompareOutput {
     schema_version: String,
     status: String,
+    parity_verdict: String,
     configured: bool,
     reason: Option<String>,
     specgate_edge_count: usize,
@@ -279,7 +281,24 @@ struct DoctorCompareOutput {
     missing_in_specgate: Vec<String>,
     extra_in_specgate: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    actionable_mismatch_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    specgate_resolution: Option<DoctorCompareResolutionOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tsc_trace_resolution: Option<DoctorCompareResolutionOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     focus: Option<DoctorCompareFocusOutput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorCompareResolutionOutput {
+    source: String,
+    result_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_name: Option<String>,
+    trace: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -290,6 +309,7 @@ struct DoctorCompareFocusOutput {
     resolved_to: Option<String>,
     resolution_kind: String,
     in_specgate_graph: bool,
+    specgate_trace: Vec<String>,
 }
 
 pub fn run<I, T>(args: I) -> CliRunResult
@@ -1114,25 +1134,32 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     };
 
     let compare_specgate_edges = filter_edges_for_focus(&artifacts.edge_pairs, focus.as_ref());
+    let specgate_resolution = focus
+        .as_ref()
+        .map(|focus| focus.specgate_resolution.clone());
 
-    let Some(trace_json) = trace_source.payload else {
+    let Some(trace_source_payload) = trace_source.payload else {
         let output = DoctorCompareOutput {
             schema_version: "2.2".to_string(),
             status: "skipped".to_string(),
+            parity_verdict: "SKIPPED".to_string(),
             configured: trace_source.configured,
             reason: trace_source.reason,
             specgate_edge_count: compare_specgate_edges.len(),
             trace_edge_count: 0,
             missing_in_specgate: Vec::new(),
             extra_in_specgate: Vec::new(),
+            actionable_mismatch_hint: None,
+            specgate_resolution,
+            tsc_trace_resolution: None,
             focus: focus.as_ref().map(|focus| focus.output.clone()),
         };
 
         return CliRunResult::json(EXIT_CODE_PASS, &output);
     };
 
-    let trace_edges = match parse_trace_edges(&loaded.project_root, &trace_json) {
-        Ok(edges) => edges,
+    let parsed_trace = match parse_trace_data(&loaded.project_root, &trace_source_payload) {
+        Ok(trace) => trace,
         Err(error) => {
             return runtime_error_json(
                 "doctor.compare",
@@ -1142,7 +1169,7 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         }
     };
 
-    let compare_trace_edges = filter_edges_for_focus(&trace_edges, focus.as_ref());
+    let compare_trace_edges = filter_edges_for_focus(&parsed_trace.edges, focus.as_ref());
 
     let missing_in_specgate = compare_trace_edges
         .difference(&compare_specgate_edges)
@@ -1160,15 +1187,32 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         "mismatch"
     };
 
+    let tsc_trace_resolution = focus
+        .as_ref()
+        .map(|focus| derive_tsc_focus_resolution(&parsed_trace, focus));
+
+    let actionable_mismatch_hint = build_actionable_mismatch_hint(
+        status,
+        focus.as_ref(),
+        specgate_resolution.as_ref(),
+        tsc_trace_resolution.as_ref(),
+        &missing_in_specgate,
+        &extra_in_specgate,
+    );
+
     let output = DoctorCompareOutput {
         schema_version: "2.2".to_string(),
         status: status.to_string(),
+        parity_verdict: parity_verdict_for_status(status).to_string(),
         configured: true,
         reason: trace_source.reason,
         specgate_edge_count: compare_specgate_edges.len(),
         trace_edge_count: compare_trace_edges.len(),
         missing_in_specgate,
         extra_in_specgate,
+        actionable_mismatch_hint,
+        specgate_resolution,
+        tsc_trace_resolution,
         focus: focus.as_ref().map(|focus| focus.output.clone()),
     };
 
@@ -1185,6 +1229,7 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
 struct DoctorCompareFocus {
     edge: Option<(String, String)>,
     output: DoctorCompareFocusOutput,
+    specgate_resolution: DoctorCompareResolutionOutput,
 }
 
 fn build_doctor_compare_focus(
@@ -1204,10 +1249,11 @@ fn build_doctor_compare_focus(
             let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
                 .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
             let explanation = resolver.explain_resolution(&from_file, import_specifier);
+            let specgate_trace = explanation.steps.clone();
 
-            let (edge, resolved_to, resolution_kind) = match explanation.result {
+            let (edge, resolved_to, resolution_kind) = match &explanation.result {
                 ResolvedImport::FirstParty { resolved_path, .. } => {
-                    let to = normalize_repo_relative(&loaded.project_root, &resolved_path);
+                    let to = normalize_repo_relative(&loaded.project_root, resolved_path);
                     (
                         Some((from_normalized.clone(), to.clone())),
                         Some(to),
@@ -1215,7 +1261,7 @@ fn build_doctor_compare_focus(
                     )
                 }
                 ResolvedImport::ThirdParty { package_name } => {
-                    (None, Some(package_name), "third_party".to_string())
+                    (None, Some(package_name.clone()), "third_party".to_string())
                 }
                 ResolvedImport::Unresolvable { .. } => (None, None, "unresolvable".to_string()),
             };
@@ -1223,6 +1269,12 @@ fn build_doctor_compare_focus(
             let in_specgate_graph = edge
                 .as_ref()
                 .is_some_and(|edge| artifacts.edge_pairs.contains(edge));
+
+            let specgate_resolution = doctor_resolution_from_specgate(
+                &loaded.project_root,
+                &explanation.result,
+                specgate_trace.clone(),
+            );
 
             Ok(Some(DoctorCompareFocus {
                 edge,
@@ -1232,7 +1284,9 @@ fn build_doctor_compare_focus(
                     resolved_to,
                     resolution_kind,
                     in_specgate_graph,
+                    specgate_trace,
                 },
+                specgate_resolution,
             }))
         }
     }
@@ -1362,23 +1416,51 @@ fn is_command_available(command: &str) -> bool {
 
 const TRACE_JSON_MAX_DEPTH: usize = 256;
 const TRACE_JSON_MAX_VISITED_NODES: usize = 1_000_000;
+const TRACE_STEPS_MAX_LINES: usize = 48;
 
-fn parse_trace_edges(
-    project_root: &Path,
-    trace_json: &str,
-) -> std::result::Result<BTreeSet<(String, String)>, String> {
-    let value: serde_json::Value = serde_json::from_str(trace_json)
-        .map_err(|error| format!("trace JSON parse error: {error}"))?;
-
-    let mut edges = BTreeSet::new();
-    collect_trace_edges_iterative(project_root, &value, &mut edges)?;
-    Ok(edges)
+#[derive(Debug, Clone)]
+struct ParsedTraceData {
+    edges: BTreeSet<(String, String)>,
+    resolutions: Vec<TraceResolutionRecord>,
 }
 
-fn collect_trace_edges_iterative(
+#[derive(Debug, Clone)]
+struct TraceResolutionRecord {
+    from: String,
+    import_specifier: String,
+    result_kind: String,
+    resolved_to: Option<String>,
+    package_name: Option<String>,
+    trace: Vec<String>,
+}
+
+fn parse_trace_data(
+    project_root: &Path,
+    trace_source: &str,
+) -> std::result::Result<ParsedTraceData, String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trace_source) {
+        let mut edges = BTreeSet::new();
+        let mut resolutions = Vec::new();
+        collect_trace_data_iterative(project_root, &value, &mut edges, &mut resolutions)?;
+        return Ok(ParsedTraceData { edges, resolutions });
+    }
+
+    let parsed_text = parse_tsc_trace_text_records(project_root, trace_source);
+    if parsed_text.edges.is_empty() && parsed_text.resolutions.is_empty() {
+        return Err(
+            "trace parse error: expected JSON edge payload or `tsc --traceResolution` text output"
+                .to_string(),
+        );
+    }
+
+    Ok(parsed_text)
+}
+
+fn collect_trace_data_iterative(
     project_root: &Path,
     root: &serde_json::Value,
     edges: &mut BTreeSet<(String, String)>,
+    resolutions: &mut Vec<TraceResolutionRecord>,
 ) -> std::result::Result<(), String> {
     let mut stack = vec![(root, 0usize)];
     let mut visited = 0usize;
@@ -1414,6 +1496,43 @@ fn collect_trace_edges_iterative(
                     ));
                 }
 
+                if let (Some(from), Some(import_specifier)) = (
+                    map.get("from").and_then(serde_json::Value::as_str),
+                    json_string_field(map, &["import", "import_specifier", "specifier"]),
+                ) {
+                    let resolved_to = json_string_field(map, &["resolved_to", "resolvedTo", "to"])
+                        .map(|raw| normalize_trace_path(project_root, raw));
+                    let package_name = json_string_field(map, &["package_name", "packageName"])
+                        .map(str::to_string);
+                    let result_kind = json_string_field(map, &["result_kind", "resolution_kind"])
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            infer_trace_result_kind(resolved_to.as_deref(), package_name.as_deref())
+                        });
+
+                    let trace = map
+                        .get("trace")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .take(TRACE_STEPS_MAX_LINES)
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+
+                    resolutions.push(TraceResolutionRecord {
+                        from: normalize_trace_path(project_root, from),
+                        import_specifier: import_specifier.to_string(),
+                        result_kind,
+                        resolved_to,
+                        package_name,
+                        trace,
+                    });
+                }
+
                 for nested in map.values() {
                     stack.push((nested, depth + 1));
                 }
@@ -1425,12 +1544,332 @@ fn collect_trace_edges_iterative(
     Ok(())
 }
 
+#[derive(Debug)]
+struct PendingTraceResolution {
+    from: String,
+    import_specifier: String,
+    trace: Vec<String>,
+    resolved_to: Option<String>,
+}
+
+fn parse_tsc_trace_text_records(project_root: &Path, trace_text: &str) -> ParsedTraceData {
+    let mut edges = BTreeSet::new();
+    let mut resolutions = Vec::new();
+    let mut pending: Option<PendingTraceResolution> = None;
+
+    for raw_line in trace_text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some((import_specifier, from)) = parse_tsc_start_line(line) {
+            if let Some(previous) = pending.take() {
+                finalize_pending_resolution(previous, &mut edges, &mut resolutions);
+            }
+
+            pending = Some(PendingTraceResolution {
+                from: normalize_trace_path(project_root, &from),
+                import_specifier,
+                trace: vec![line.to_string()],
+                resolved_to: None,
+            });
+            continue;
+        }
+
+        let Some(current) = pending.as_mut() else {
+            continue;
+        };
+
+        if current.trace.len() < TRACE_STEPS_MAX_LINES {
+            current.trace.push(line.to_string());
+        }
+
+        if let Some((resolved_specifier, resolved_to)) = parse_tsc_success_line(line) {
+            if resolved_specifier == current.import_specifier {
+                current.resolved_to = Some(normalize_trace_path(project_root, &resolved_to));
+                if let Some(resolved) = pending.take() {
+                    finalize_pending_resolution(resolved, &mut edges, &mut resolutions);
+                }
+            }
+            continue;
+        }
+
+        if let Some(unresolved_specifier) = parse_tsc_not_resolved_line(line) {
+            if unresolved_specifier == current.import_specifier {
+                if let Some(unresolved) = pending.take() {
+                    finalize_pending_resolution(unresolved, &mut edges, &mut resolutions);
+                }
+            }
+        }
+    }
+
+    if let Some(remaining) = pending.take() {
+        finalize_pending_resolution(remaining, &mut edges, &mut resolutions);
+    }
+
+    ParsedTraceData { edges, resolutions }
+}
+
+fn finalize_pending_resolution(
+    pending: PendingTraceResolution,
+    edges: &mut BTreeSet<(String, String)>,
+    resolutions: &mut Vec<TraceResolutionRecord>,
+) {
+    let package_name = match pending.resolved_to.as_deref() {
+        Some(target) if path_contains_node_modules(target) => {
+            Some(extract_package_name(&pending.import_specifier).to_string())
+        }
+        _ => None,
+    };
+
+    let result_kind =
+        infer_trace_result_kind(pending.resolved_to.as_deref(), package_name.as_deref());
+
+    if result_kind == "first_party" {
+        if let Some(to) = &pending.resolved_to {
+            edges.insert((pending.from.clone(), to.clone()));
+        }
+    }
+
+    let mut trace = pending.trace;
+    if trace.is_empty() {
+        trace.push("no resolution trace lines captured".to_string());
+    }
+
+    resolutions.push(TraceResolutionRecord {
+        from: pending.from,
+        import_specifier: pending.import_specifier,
+        result_kind,
+        resolved_to: pending.resolved_to,
+        package_name,
+        trace,
+    });
+}
+
+fn json_string_field<'a>(
+    map: &'a serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| map.get(*key).and_then(serde_json::Value::as_str))
+}
+
+fn infer_trace_result_kind(resolved_to: Option<&str>, package_name: Option<&str>) -> String {
+    if package_name.is_some() {
+        return "third_party".to_string();
+    }
+
+    match resolved_to {
+        Some(target) if path_contains_node_modules(target) => "third_party".to_string(),
+        Some(_) => "first_party".to_string(),
+        None => "unresolvable".to_string(),
+    }
+}
+
+fn parse_tsc_start_line(line: &str) -> Option<(String, String)> {
+    let (_, remainder) = line.split_once("Resolving module '")?;
+    let (import_specifier, remainder) = remainder.split_once("' from '")?;
+    let (from, _) = remainder.split_once('\'')?;
+    Some((import_specifier.to_string(), from.to_string()))
+}
+
+fn parse_tsc_success_line(line: &str) -> Option<(String, String)> {
+    let (_, remainder) = line.split_once("Module name '")?;
+    let (import_specifier, remainder) = remainder.split_once("' was successfully resolved to '")?;
+    let (resolved_to, _) = remainder.split_once('\'')?;
+    Some((import_specifier.to_string(), resolved_to.to_string()))
+}
+
+fn parse_tsc_not_resolved_line(line: &str) -> Option<String> {
+    let (_, remainder) = line.split_once("Module name '")?;
+    let (import_specifier, _) = remainder.split_once("' was not resolved")?;
+    Some(import_specifier.to_string())
+}
+
+fn path_contains_node_modules(raw: &str) -> bool {
+    Path::new(raw)
+        .components()
+        .any(|component| component.as_os_str() == "node_modules")
+}
+
 fn normalize_trace_path(project_root: &Path, raw: &str) -> String {
     let path = Path::new(raw);
     if path.is_absolute() {
-        normalize_repo_relative(project_root, path)
+        let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        normalize_repo_relative(project_root, &canonical)
     } else {
         normalize_path(path)
+    }
+}
+
+fn doctor_resolution_from_specgate(
+    project_root: &Path,
+    result: &ResolvedImport,
+    trace: Vec<String>,
+) -> DoctorCompareResolutionOutput {
+    match result {
+        ResolvedImport::FirstParty {
+            resolved_path,
+            module_id: _,
+        } => DoctorCompareResolutionOutput {
+            source: "specgate".to_string(),
+            result_kind: "first_party".to_string(),
+            resolved_to: Some(normalize_repo_relative(project_root, resolved_path)),
+            package_name: None,
+            trace,
+        },
+        ResolvedImport::ThirdParty { package_name } => DoctorCompareResolutionOutput {
+            source: "specgate".to_string(),
+            result_kind: "third_party".to_string(),
+            resolved_to: None,
+            package_name: Some(package_name.clone()),
+            trace,
+        },
+        ResolvedImport::Unresolvable { reason, .. } => {
+            let mut trace = trace;
+            trace.push(format!("resolution error: {reason}"));
+            DoctorCompareResolutionOutput {
+                source: "specgate".to_string(),
+                result_kind: "unresolvable".to_string(),
+                resolved_to: None,
+                package_name: None,
+                trace,
+            }
+        }
+    }
+}
+
+fn derive_tsc_focus_resolution(
+    parsed_trace: &ParsedTraceData,
+    focus: &DoctorCompareFocus,
+) -> DoctorCompareResolutionOutput {
+    if let Some(record) = parsed_trace.resolutions.iter().rev().find(|record| {
+        record.from == focus.output.from && record.import_specifier == focus.output.import_specifier
+    }) {
+        return DoctorCompareResolutionOutput {
+            source: "tsc_trace".to_string(),
+            result_kind: record.result_kind.clone(),
+            resolved_to: record.resolved_to.clone(),
+            package_name: record.package_name.clone(),
+            trace: if record.trace.is_empty() {
+                vec!["matched trace record without explicit step lines".to_string()]
+            } else {
+                record.trace.clone()
+            },
+        };
+    }
+
+    if let Some(expected_edge) = &focus.edge {
+        if parsed_trace.edges.contains(expected_edge) {
+            return DoctorCompareResolutionOutput {
+                source: "tsc_trace".to_string(),
+                result_kind: "first_party".to_string(),
+                resolved_to: Some(expected_edge.1.clone()),
+                package_name: None,
+                trace: vec![
+                    "no explicit trace stanza matched `--from/--import`; inferred from edge parity"
+                        .to_string(),
+                ],
+            };
+        }
+    }
+
+    if let Some((_, to)) = parsed_trace
+        .edges
+        .iter()
+        .find(|(from, _)| *from == focus.output.from)
+    {
+        return DoctorCompareResolutionOutput {
+            source: "tsc_trace".to_string(),
+            result_kind: "first_party".to_string(),
+            resolved_to: Some(to.clone()),
+            package_name: None,
+            trace: vec![
+                "trace did not carry import-specifier context; using first edge from the same source file"
+                    .to_string(),
+            ],
+        };
+    }
+
+    DoctorCompareResolutionOutput {
+        source: "tsc_trace".to_string(),
+        result_kind: "not_observed".to_string(),
+        resolved_to: None,
+        package_name: None,
+        trace: vec![
+            "no matching edge or trace stanza found for `--from/--import` in the supplied trace"
+                .to_string(),
+        ],
+    }
+}
+
+fn parity_verdict_for_status(status: &str) -> &'static str {
+    match status {
+        "match" => "MATCH",
+        "mismatch" => "DIFF",
+        _ => "SKIPPED",
+    }
+}
+
+fn build_actionable_mismatch_hint(
+    status: &str,
+    focus: Option<&DoctorCompareFocus>,
+    specgate_resolution: Option<&DoctorCompareResolutionOutput>,
+    tsc_trace_resolution: Option<&DoctorCompareResolutionOutput>,
+    missing_in_specgate: &[String],
+    extra_in_specgate: &[String],
+) -> Option<String> {
+    if status != "mismatch" {
+        return None;
+    }
+
+    let shared_guidance = "check tsconfig selection/baseUrl/paths, monorepo project references, `moduleResolution` condition sets, package `exports`, and symlink handling (`preserveSymlinks`)";
+
+    let Some(_focus) = focus else {
+        return Some(format!(
+            "Edge sets differ. Re-run with `--from <file> --import <specifier>` for targeted diagnosis, then {shared_guidance}."
+        ));
+    };
+
+    let Some(specgate_resolution) = specgate_resolution else {
+        return Some(format!(
+            "Focused parity mismatch detected; {shared_guidance}."
+        ));
+    };
+
+    let Some(tsc_trace_resolution) = tsc_trace_resolution else {
+        return Some(format!(
+            "Focused parity mismatch detected; {shared_guidance}."
+        ));
+    };
+
+    match (
+        specgate_resolution.result_kind.as_str(),
+        tsc_trace_resolution.result_kind.as_str(),
+    ) {
+        ("first_party", "first_party")
+            if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
+        {
+            Some(format!(
+                "Both resolvers found first-party targets, but they disagree on the resolved file. Compare path alias precedence and project reference roots; then {shared_guidance}."
+            ))
+        }
+        ("unresolvable" | "not_observed", "first_party") => Some(format!(
+            "TypeScript resolved this import, but Specgate did not. Verify this command uses the same root tsconfig and project-reference graph; then {shared_guidance}."
+        )),
+        ("first_party", "unresolvable" | "not_observed") => Some(format!(
+            "Specgate resolved a first-party edge that TypeScript did not report. Ensure the trace comes from the same build target and includes the importing file; then {shared_guidance}."
+        )),
+        ("third_party", "first_party") | ("first_party", "third_party") => Some(format!(
+            "Resolver classification differs (first-party vs third-party). Inspect package `exports` conditions, path aliases, and symlinked workspace package links; then {shared_guidance}."
+        )),
+        _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => Some(format!(
+            "Focused parity mismatch detected; {shared_guidance}."
+        )),
+        _ => Some(format!(
+            "Focused parity mismatch detected; {shared_guidance}."
+        )),
     }
 }
 
@@ -2054,6 +2493,7 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"skipped\""));
+        assert!(result.stdout.contains("\"parity_verdict\": \"SKIPPED\""));
     }
 
     #[test]
