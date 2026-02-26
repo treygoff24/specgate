@@ -53,6 +53,7 @@ pub struct VerdictSummary {
     pub warning_violations: usize,
     pub new_error_violations: usize,
     pub new_warning_violations: usize,
+    pub stale_baseline_entries: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -117,12 +118,41 @@ pub struct Verdict {
     pub metrics: Option<VerdictMetrics>,
 }
 
+/// Governance context for verdict building.
+#[derive(Debug, Clone, Default)]
+pub struct GovernanceContext {
+    /// Number of baseline entries that no longer match any current violations.
+    pub stale_baseline_entries: usize,
+    /// Rule deltas computed from spec changes in diff-aware mode.
+    pub rule_deltas: Vec<String>,
+    /// Whether policy changes were detected in diff-aware mode.
+    pub policy_change_detected: bool,
+}
+
 pub fn build_verdict(
     project_root: &Path,
     violations: &[FingerprintedViolation],
     suppressed_violations: usize,
     metrics: Option<VerdictMetrics>,
     identity: VerdictIdentity,
+) -> Verdict {
+    build_verdict_with_governance(
+        project_root,
+        violations,
+        suppressed_violations,
+        metrics,
+        identity,
+        GovernanceContext::default(),
+    )
+}
+
+pub fn build_verdict_with_governance(
+    project_root: &Path,
+    violations: &[FingerprintedViolation],
+    suppressed_violations: usize,
+    metrics: Option<VerdictMetrics>,
+    identity: VerdictIdentity,
+    governance: GovernanceContext,
 ) -> Verdict {
     let mut rendered = violations
         .iter()
@@ -141,7 +171,11 @@ pub fn build_verdict(
             .then_with(|| a.message.cmp(&b.message))
     });
 
-    let summary = summarize(&rendered, suppressed_violations);
+    let summary = summarize(
+        &rendered,
+        suppressed_violations,
+        governance.stale_baseline_entries,
+    );
     let status = if summary.new_error_violations > 0 {
         VerdictStatus::Fail
     } else {
@@ -156,8 +190,13 @@ pub fn build_verdict(
         spec_hash: identity.spec_hash,
         output_mode: identity.output_mode,
         spec_files_changed: identity.spec_files_changed,
-        rule_deltas: identity.rule_deltas,
-        policy_change_detected: identity.policy_change_detected,
+        rule_deltas: if governance.rule_deltas.is_empty() {
+            identity.rule_deltas
+        } else {
+            governance.rule_deltas
+        },
+        policy_change_detected: governance.policy_change_detected
+            || identity.policy_change_detected,
         status,
         summary,
         violations: rendered,
@@ -210,7 +249,11 @@ fn severity_rank(severity: Severity) -> u8 {
     }
 }
 
-fn summarize(violations: &[VerdictViolation], suppressed_violations: usize) -> VerdictSummary {
+fn summarize(
+    violations: &[VerdictViolation],
+    suppressed_violations: usize,
+    stale_baseline_entries: usize,
+) -> VerdictSummary {
     let total_violations = violations.len();
     let new_violations = violations
         .iter()
@@ -242,6 +285,7 @@ fn summarize(violations: &[VerdictViolation], suppressed_violations: usize) -> V
         warning_violations,
         new_error_violations,
         new_warning_violations,
+        stale_baseline_entries,
     }
 }
 
@@ -369,5 +413,64 @@ mod tests {
         assert!(rendered.contains("metrics"));
         assert!(rendered.contains("build_graph"));
         assert!(rendered.contains("\"output_mode\":\"metrics\""));
+    }
+
+    #[test]
+    fn stale_baseline_entries_included_in_summary() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.never_imports", Severity::Error, "src/a.ts", "bad"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let verdict = build_verdict_with_governance(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 5,
+                rule_deltas: Vec::new(),
+                policy_change_detected: false,
+            },
+        );
+
+        assert_eq!(verdict.summary.stale_baseline_entries, 5);
+        let rendered = serde_json::to_string(&verdict).expect("serialize");
+        assert!(rendered.contains("\"stale_baseline_entries\":5"));
+    }
+
+    #[test]
+    fn governance_context_propagates_rule_deltas() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.never_imports", Severity::Error, "src/a.ts", "bad"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let rule_deltas = vec![
+            "boundary.never_imports:added".to_string(),
+            "dependency.forbidden:removed".to_string(),
+        ];
+
+        let verdict = build_verdict_with_governance(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 0,
+                rule_deltas: rule_deltas.clone(),
+                policy_change_detected: true,
+            },
+        );
+
+        assert_eq!(verdict.rule_deltas, rule_deltas);
+        assert!(verdict.policy_change_detected);
+        let rendered = serde_json::to_string(&verdict).expect("serialize");
+        assert!(rendered.contains("\"boundary.never_imports:added\""));
+        assert!(rendered.contains("\"policy_change_detected\":true"));
     }
 }

@@ -177,11 +177,37 @@ pub fn build_baseline_with_metadata(
     }
 }
 
+/// Count stale baseline entries without returning the classified violations.
+///
+/// This is useful when you only need the stale count for summary reporting.
+pub fn count_stale_baseline_entries(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+) -> usize {
+    let (_, stale_count) = classify_violations_with_stale(project_root, violations, baseline);
+    stale_count
+}
+
 pub fn classify_violations(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> Vec<FingerprintedViolation> {
+    let (classified, _stale_count) =
+        classify_violations_with_stale(project_root, violations, baseline);
+    classified
+}
+
+/// Classify violations against baseline and count stale entries.
+///
+/// Returns a tuple of (classified violations, stale baseline entry count).
+/// Stale entries are baseline entries that no longer match any current violation.
+pub fn classify_violations_with_stale(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+) -> (Vec<FingerprintedViolation>, usize) {
     let mut ordered_violations = violations.to_vec();
     sort_policy_violations(&mut ordered_violations);
 
@@ -191,6 +217,10 @@ pub fn classify_violations(
         .map(build_legacy_fingerprint_counts)
         .unwrap_or_default();
 
+    let baseline_entry_count = baseline.map(|b| b.entries.len()).unwrap_or(0);
+
+    let mut matched_baseline_entries = 0usize;
+
     let mut classified = ordered_violations
         .iter()
         .map(|violation| {
@@ -199,6 +229,7 @@ pub fn classify_violations(
 
             let disposition = if let Some(remaining) = remaining_by_primary.get_mut(&fingerprint) {
                 if consume_baseline_match(remaining, positional_fingerprint.as_deref()) {
+                    matched_baseline_entries += 1;
                     ViolationDisposition::Baseline
                 } else {
                     ViolationDisposition::New
@@ -206,6 +237,7 @@ pub fn classify_violations(
             } else {
                 let legacy_fingerprint = legacy_fingerprint_violation(project_root, violation);
                 if consume_legacy_fingerprint(&mut remaining_legacy, &legacy_fingerprint) {
+                    matched_baseline_entries += 1;
                     ViolationDisposition::Baseline
                 } else {
                     ViolationDisposition::New
@@ -232,7 +264,9 @@ pub fn classify_violations(
             .then_with(|| a.violation.message.cmp(&b.violation.message))
     });
 
-    classified
+    let stale_count = baseline_entry_count.saturating_sub(matched_baseline_entries);
+
+    (classified, stale_count)
 }
 
 /// Stable content fingerprint for baseline matching and verdict identity.
@@ -580,5 +614,62 @@ mod tests {
             baseline.entries[0].positional_fingerprint,
             baseline.entries[1].positional_fingerprint
         );
+    }
+
+    #[test]
+    fn classify_with_stale_counts_unmatched_baseline_entries() {
+        let project_root = Path::new(".");
+
+        // Create baseline with two violations
+        let v1 = violation("A", "src/a.ts");
+        let v2 = violation("B", "src/b.ts");
+        let baseline = build_baseline(project_root, &[v1.clone(), v2.clone()]);
+        assert_eq!(baseline.entries.len(), 2);
+
+        // Now classify with only one current violation (v2)
+        let (classified, stale_count) =
+            classify_violations_with_stale(project_root, &[v2], Some(&baseline));
+
+        assert_eq!(classified.len(), 1);
+        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+        assert_eq!(stale_count, 1); // v1 is now stale
+    }
+
+    #[test]
+    fn stale_count_is_zero_when_all_baseline_entries_match() {
+        let project_root = Path::new(".");
+
+        let v1 = violation("A", "src/a.ts");
+        let v2 = violation("B", "src/b.ts");
+        let baseline = build_baseline(project_root, &[v1.clone(), v2.clone()]);
+
+        let (_, stale_count) =
+            classify_violations_with_stale(project_root, &[v1, v2], Some(&baseline));
+
+        assert_eq!(stale_count, 0);
+    }
+
+    #[test]
+    fn stale_count_equals_baseline_size_when_no_current_violations() {
+        let project_root = Path::new(".");
+
+        let v1 = violation("A", "src/a.ts");
+        let v2 = violation("B", "src/b.ts");
+        let baseline = build_baseline(project_root, &[v1, v2]);
+
+        let (_, stale_count) = classify_violations_with_stale(project_root, &[], Some(&baseline));
+
+        assert_eq!(stale_count, 2);
+    }
+
+    #[test]
+    fn count_stale_baseline_entries_helper_function() {
+        let project_root = Path::new(".");
+
+        let v1 = violation("A", "src/a.ts");
+        let baseline = build_baseline(project_root, &[v1]);
+
+        let stale_count = count_stale_baseline_entries(project_root, &[], Some(&baseline));
+        assert_eq!(stale_count, 1);
     }
 }
