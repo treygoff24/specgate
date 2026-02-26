@@ -1,0 +1,47 @@
+name: Specgate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  specgate:
+    name: Specgate Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Specgate
+        run: |
+          cargo install --locked --git https://github.com/your-org/specgate --tag v0.1.0
+
+      - name: Run Specgate check
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            specgate check --since origin/main --output-mode deterministic
+          else
+            specgate check --output-mode deterministic
+          fi
+        continue-on-error: false
+
+      - name: Update baseline on main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          specgate baseline --output .specgate-baseline.json
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add .specgate-baseline.json
+          git commit -m "chore: update specgate baseline" || true
