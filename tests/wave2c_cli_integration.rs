@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
@@ -19,6 +19,13 @@ fn write_file(root: &Path, relative_path: &str, content: &str) {
 
 fn parse_json(source: &str) -> Value {
     serde_json::from_str(source).expect("valid json")
+}
+
+fn fixture_root(relative_path: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(relative_path)
 }
 
 fn write_project(root: &Path) {
@@ -443,4 +450,33 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
     assert!(result.stdout.contains("\"status\": \"match\""));
     assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
     assert!(result.stdout.contains("\"source\": \"tsc_trace\""));
+}
+
+#[test]
+fn doctor_compare_focus_supports_project_reference_trace_fixture() {
+    let fixture = fixture_root("doctor-compare/monorepo-project-reference");
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        fixture.to_str().expect("utf8"),
+        "--tsc-trace",
+        fixture.join("trace.log").to_str().expect("utf8"),
+        "--from",
+        "packages/web/src/app.ts",
+        "--import",
+        "@shared/util",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(result.stdout.contains("\"status\": \"match\""));
+    assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
+    assert!(result.stdout.contains("\"source\": \"tsc_trace\""));
+    assert!(
+        result
+            .stdout
+            .contains("\"resolved_to\": \"packages/shared/src/util.ts\"")
+    );
 }

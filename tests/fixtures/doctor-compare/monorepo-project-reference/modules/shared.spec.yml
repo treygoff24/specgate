@@ -1,0 +1,5 @@
+version: "2.2"
+module: shared
+boundaries:
+  path: packages/shared/src/**/*
+constraints: []

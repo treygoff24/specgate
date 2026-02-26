@@ -1,0 +1,5 @@
+version: "2.2"
+module: web
+boundaries:
+  path: packages/web/src/**/*
+constraints: []

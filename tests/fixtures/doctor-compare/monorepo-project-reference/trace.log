@@ -1,0 +1,6 @@
+======== Resolving module '@shared/util' from 'packages/web/src/app.ts'. ========
+Loading module '@shared/util' from cache failed.
+======== Module name '@shared/util' was not resolved. ========
+======== Resolving module '@shared/util' from 'packages/web/src/app.ts'. ========
+Loading module '@shared/util' from 'paths' option.
+======== Module name '@shared/util' was successfully resolved to 'packages/shared/src/util.ts'. ========
