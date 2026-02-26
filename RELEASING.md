@@ -58,7 +58,20 @@ rg -n "TODO|placeholder|TBD|not wired" README.md docs/*.md
 1. Merge all merge-gate required changes.
 2. Create a signed tag (for example `v0.1.0-rc2`).
 3. Publish release artifacts in CI/release pipeline.
-4. Publish release notes and announce the selected release channel.
+4. Run `.github/workflows/release-asset-verify.yml` for the release tag and confirm a pass.
+5. Publish release notes and announce the selected release channel.
+
+## Release asset verification workflow
+
+- File: `.github/workflows/release-asset-verify.yml`
+- Purpose: verify release artifacts are complete and executable before rollout.
+- Triggers:
+  - release pipeline publishes the tag artifacts
+  - optional manual re-run on a release tag when a fresh re-check is needed
+- Behavior:
+  - validates every published checksum file against its artifact tarball
+  - downloads each target artifact and runs `specgate --version` smoke checks
+
 
 ## Release-binaries workflow
 
@@ -89,13 +102,16 @@ rg -n "TODO|placeholder|TBD|not wired" README.md docs/*.md
    - `specgate-vX.Y.Z-*-unknown-linux-gnu.tar.gz`
    - `specgate-vX.Y.Z-*-apple-darwin.tar.gz`
    - `specgate-vX.Y.Z-*.tar.gz.sha256`
-2. Spot-check checksums:
+2. Confirm `release-asset-verify` passed for checksum + smoke signals:
+   - checksum validation succeeds for all `.sha256` files
+   - `specgate --version` succeeds for each downloaded target
+3. (Optional) spot-check checksums:
 
    ```bash
    sha256sum -c specgate-v0.1.0-rc2-aarch64-apple-darwin.tar.gz.sha256
    ```
 
-3. Download the Linux or macOS artifact, unpack, and run a smoke check:
+4. (Optional) download a Linux or macOS artifact, unpack, and run:
 
    ```bash
    tar -xzf specgate-v0.1.0-rc2-aarch64-apple-darwin.tar.gz
