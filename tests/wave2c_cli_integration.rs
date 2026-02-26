@@ -269,6 +269,7 @@ fn doctor_compare_mismatch_uses_diagnostic_exit_code() {
 
     assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
     assert!(result.stdout.contains("\"status\": \"mismatch\""));
+    assert!(result.stdout.contains("\"parity_verdict\": \"DIFF\""));
 }
 
 #[test]
@@ -317,9 +318,129 @@ fn doctor_compare_supports_single_import_focus_mode() {
 
     assert_eq!(result.exit_code, EXIT_CODE_PASS);
     assert!(result.stdout.contains("\"focus\""));
+    assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
+    assert!(result.stdout.contains("\"specgate_resolution\""));
+    assert!(result.stdout.contains("\"tsc_trace_resolution\""));
     assert!(
         result
             .stdout
             .contains("\"resolution_kind\": \"first_party\"")
     );
+}
+
+#[test]
+fn doctor_compare_focus_mismatch_includes_actionable_hint() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+    write_file(
+        temp.path(),
+        "trace.json",
+        "[{\"from\":\"src/app/main.ts\",\"to\":\"src/core/other.ts\"}]\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.json").to_str().expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "../core/index",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    assert!(result.stdout.contains("\"parity_verdict\": \"DIFF\""));
+    assert!(result.stdout.contains("\"actionable_mismatch_hint\""));
+    assert!(result.stdout.contains("tsconfig"));
+}
+
+#[test]
+fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/web.spec.yml",
+        "version: \"2.2\"\nmodule: web\nboundaries:\n  path: packages/web/src/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/shared.spec.yml",
+        "version: \"2.2\"\nmodule: shared\nboundaries:\n  path: packages/shared/src/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/web" }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["packages/shared/src/*"]
+    }
+  }
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "packages/shared/tsconfig.json",
+        "{\"compilerOptions\":{\"composite\":true},\"include\":[\"src\"]}\n",
+    );
+    write_file(
+        temp.path(),
+        "packages/web/tsconfig.json",
+        "{\"compilerOptions\":{\"composite\":true},\"references\":[{\"path\":\"../shared\"}],\"include\":[\"src\"]}\n",
+    );
+    write_file(
+        temp.path(),
+        "packages/shared/src/util.ts",
+        "export const util = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "packages/web/src/app.ts",
+        "import { util } from '@shared/util';\nexport const app = util;\n",
+    );
+
+    let web_app = temp.path().join("packages/web/src/app.ts");
+    let shared_util = temp.path().join("packages/shared/src/util.ts");
+    let trace = format!(
+        "======== Resolving module '@shared/util' from '{}'. ========\nLoading module '@shared/util' from 'paths' option.\n======== Module name '@shared/util' was successfully resolved to '{}'. ========\n",
+        web_app.display(),
+        shared_util.display(),
+    );
+    write_file(temp.path(), "trace.log", &trace);
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.log").to_str().expect("utf8"),
+        "--from",
+        "packages/web/src/app.ts",
+        "--import",
+        "@shared/util",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(result.stdout.contains("\"status\": \"match\""));
+    assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
+    assert!(result.stdout.contains("\"source\": \"tsc_trace\""));
 }
