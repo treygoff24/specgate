@@ -20,7 +20,7 @@ This guide walks you through installing, configuring, and running your first arc
 
 ```bash
 # Fast path (release asset + checksum)
-SPECGATE_TAG=v0.1.0-rc1
+SPECGATE_TAG=v0.1.0-rc2
 SPECGATE_ARCH="x86_64-unknown-linux-gnu"
 SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_ARCH}.tar.gz"
 SPECGATE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}/${SPECGATE_ARCHIVE}"

@@ -56,7 +56,7 @@ rg -n "TODO|placeholder|TBD|not wired" README.md docs/*.md
 ## Tagging and communication
 
 1. Merge all merge-gate required changes.
-2. Create a signed tag (for example `v0.1.0-rc1`).
+2. Create a signed tag (for example `v0.1.0-rc2`).
 3. Publish release artifacts in CI/release pipeline.
 4. Publish release notes and announce the selected release channel.
 
@@ -92,13 +92,13 @@ rg -n "TODO|placeholder|TBD|not wired" README.md docs/*.md
 2. Spot-check checksums:
 
    ```bash
-   sha256sum -c specgate-v0.1.0-rc1-aarch64-apple-darwin.tar.gz.sha256
+   sha256sum -c specgate-v0.1.0-rc2-aarch64-apple-darwin.tar.gz.sha256
    ```
 
 3. Download the Linux or macOS artifact, unpack, and run a smoke check:
 
    ```bash
-   tar -xzf specgate-v0.1.0-rc1-aarch64-apple-darwin.tar.gz
+   tar -xzf specgate-v0.1.0-rc2-aarch64-apple-darwin.tar.gz
    ./specgate --version
    ```
 

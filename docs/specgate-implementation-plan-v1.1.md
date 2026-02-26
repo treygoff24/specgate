@@ -441,8 +441,8 @@ Add integration fixtures for:
 
 ### Tomorrow pickup checklist
 
-- [x] Tag `v0.1.0-rc1` (or equivalent) from the current verified head after quick smoke verification.
-- [x] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`) at `docs/release-artifacts/v0.1.0-rc1-gate-evidence.md`.
+- [x] Tag `v0.1.0-rc2` from the current verified head after quick smoke verification.
+- [x] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`) at `docs/release-artifacts/v0.1.0-rc2-gate-evidence.md` (historical `v0.1.0-rc1` evidence remains in `docs/release-artifacts/v0.1.0-rc1-gate-evidence.md`).
 - [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location.
 - [x] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
 - [x] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
