@@ -85,6 +85,9 @@ jobs:
       - name: Build
         run: cargo build --locked --release --target ${{ matrix.target }}
 
+      - name: Smoke check built binary
+        run: target/${{ matrix.target }}/release/specgate --version
+
       - name: Package artifacts
         run: |
           set -euo pipefail
@@ -121,6 +124,26 @@ jobs:
           pattern: specgate-*
           path: dist/
           merge-multiple: true
+
+      - name: Validate release artifacts
+        run: |
+          set -euo pipefail
+          declare -a required_assets=(
+            "specgate-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+            "specgate-${TAG}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+            "specgate-${TAG}-x86_64-apple-darwin.tar.gz"
+            "specgate-${TAG}-x86_64-apple-darwin.tar.gz.sha256"
+            "specgate-${TAG}-aarch64-apple-darwin.tar.gz"
+            "specgate-${TAG}-aarch64-apple-darwin.tar.gz.sha256"
+          )
+
+          for asset in "${required_assets[@]}"; do
+            if [[ ! -f "dist/$asset" ]]; then
+              echo "Missing release artifact: $asset" >&2
+              ls -la dist/
+              exit 1
+            fi
+          done
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
