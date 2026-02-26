@@ -242,7 +242,7 @@ Tier A fixtures are:
 - **CI-gating** — Must pass for merge
 
 Gating vs informational:
-- **Gating (current):** `cargo test --test contract_fixtures`, `cargo test --test golden_corpus_gate`, `cargo test --test tier_a_golden`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
+- **Gating (current):** `golden_corpus_gate` merge-gating suite requires `cargo test --test contract_fixtures`, `cargo test --test golden_corpus_gate`, `cargo test --test tier_a_golden`, `cargo test --test integration`, `cargo test --test wave2c_cli_integration`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
 - **Informational:** Extra fixture runs and ad-hoc validation beyond this required sequence.
 
 **P0 Fixtures:**
