@@ -6,6 +6,7 @@
 //! - intro output is deterministic across 3 runs
 //! - fixtures must not use `@specgate-ignore`
 
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -59,11 +60,14 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "a10-provider-deny-imported-by",
             near_miss_variant: None,
         },
-        // NOTE: a11-forbidden-dependency excluded from tier-a because it requires
-        // npm dependencies (package.json + node_modules) which breaks the deterministic,
-        // self-contained tier-a gate criteria. Dependency rules are covered by d01/d02
-        // in the regular golden_corpus tests.
     ]
+}
+
+fn intentional_tier_a_exclusions() -> Vec<(&'static str, &'static str)> {
+    vec![(
+        "a11-forbidden-dependency",
+        "Requires npm dependency graph materialization (`package.json` + node_modules); validated by D01/D02 in golden_corpus",
+    )]
 }
 
 fn tier_a_dir() -> PathBuf {
@@ -409,6 +413,71 @@ fn assert_contract_files_exist(fixture: &TierAFixture) {
     );
 }
 
+fn assert_tier_a_fixture_catalog_is_authorized() {
+    let included: BTreeSet<String> = fixtures()
+        .iter()
+        .map(|fixture| fixture.id.to_string())
+        .collect();
+    let exclusions: HashMap<String, &str> = intentional_tier_a_exclusions()
+        .into_iter()
+        .map(|(id, reason)| (id.to_string(), reason))
+        .collect();
+    let excluded_ids = exclusions.keys().cloned().collect::<BTreeSet<_>>();
+    let expected: BTreeSet<String> = included
+        .iter()
+        .cloned()
+        .chain(excluded_ids.iter().cloned())
+        .collect();
+
+    let actual = fs::read_dir(tier_a_dir())
+        .expect("read tier-a fixtures directory")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !path.is_dir() {
+                return None;
+            }
+            let name = path.file_name()?.to_str()?.to_string();
+            Some(name)
+        })
+        .collect::<BTreeSet<_>>();
+
+    if let Some((missing_exclusion,)) = excluded_ids
+        .difference(&actual)
+        .next()
+        .map(|id| (id.clone(),))
+    {
+        panic!(
+            "tier-a fixture exclusion list is stale: {} is listed in intentional exclusions but directory is missing",
+            missing_exclusion
+        );
+    }
+
+    let unexpected: Vec<_> = actual.difference(&expected).collect();
+    if !unexpected.is_empty() {
+        let details = unexpected
+            .into_iter()
+            .map(|id| {
+                format!(
+                    "{} (add to fixtures() or intentional_tier_a_exclusions() with reason)",
+                    id
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        panic!("tier-a fixture directory drift detected for: {}", details);
+    }
+
+    for (excluded_id, reason) in exclusions.iter() {
+        assert!(
+            actual.contains(excluded_id),
+            "explicit tier-a exclusion is missing: {} => {}",
+            excluded_id,
+            reason
+        );
+    }
+}
+
 fn assert_intro_contract_and_determinism(fixture: &TierAFixture) {
     let expected_intro = load_expected_verdict(fixture, "intro");
     assert_expected_verdict_shape(fixture, "intro", &expected_intro);
@@ -570,6 +639,8 @@ fn assert_optional_near_miss_contract(fixture: &TierAFixture) {
 
 #[test]
 fn tier_a_fixtures_are_strict_deterministic_and_ignore_free() {
+    assert_tier_a_fixture_catalog_is_authorized();
+
     let fixtures = fixtures();
     let fixture_ids = fixtures
         .iter()
