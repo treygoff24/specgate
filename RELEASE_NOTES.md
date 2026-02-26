@@ -4,7 +4,7 @@
 
 ## Status
 
-Specgate is in a dogfood-ready MVP state after closeout hardening and operational docs.
+Specgate is in a dogfood-ready MVP state, operating on the `dogfood` channel at `v0.1.0-rc3`.
 Core validation is stable and deterministic for the current enforced scope.
 
 ## What is included
@@ -40,3 +40,19 @@ Core validation is stable and deterministic for the current enforced scope.
   - [DOGFOOD_ROLLOUT_CHECKLIST](docs/DOGFOOD_ROLLOUT_CHECKLIST.md)
   - [DOGFOOD_SUCCESS_METRICS](docs/DOGFOOD_SUCCESS_METRICS.md)
   - [DOGFOOD_RELEASE_CHANNEL](docs/DOGFOOD_RELEASE_CHANNEL.md)
+
+## RC3 hardening since initial closeout
+
+- Merge gate hardening in `scripts/ci/mvp_gate.sh`:
+  - Added/kept lockfile gating (`--locked`) on gate commands.
+  - Explicitly enforces `cargo test --lib`, `cargo test --test golden_corpus_gate`, and `cargo test --test integration` as part of the enforced merge scope.
+  - Continues policy enforcement of new violations via `mvp_gate_baseline`.
+- Release publication hardening:
+  - `.github/workflows/release-binaries.yml` now validates tag format/version alignment, runs merge gate before publish, checks artifact completeness, and performs per-target smoke checks.
+  - `.github/workflows/release-asset-verify.yml` was added to validate checksums and execute `specgate --version` for each released target after publish.
+- Consumer installation/operations hardening:
+  - `docs/examples/specgate-consumer-github-actions.yml` verifies release checksum and executable presence before using prebuilt binaries.
+  - Includes `.specgate-verdict.json` telemetry summarization.
+  - Uses `cargo install --locked --git ... --tag ... --root ...` fallback with explicit executable checks.
+- Evidence continuity:
+  - Added RC gate-evidence snapshots for `v0.1.0-rc1`, `v0.1.0-rc2`, and `v0.1.0-rc3` in `docs/release-artifacts/`.
