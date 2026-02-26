@@ -1,0 +1,5 @@
+{
+  "status": "pass",
+  "violations": [],
+  "notes": "Semantic proxy - boundary.public_api passes but type leakage not detected"
+}

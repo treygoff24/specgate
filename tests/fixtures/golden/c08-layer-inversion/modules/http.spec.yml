@@ -1,0 +1,12 @@
+version: "2.2"
+module: http
+boundaries:
+  path: src/**/*
+constraints:
+  - rule: enforce-layer
+    params:
+      layers:
+        - http
+        - ws
+        - shared
+    severity: error
