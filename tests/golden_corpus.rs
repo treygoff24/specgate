@@ -1,46 +1,27 @@
 //! Golden Corpus Integration Tests
 //!
-//! These tests execute the golden corpus fixtures deterministically,
-//! verifying that Specgate catches the intended bug patterns.
+//! Informational golden corpus fixtures.
 //!
 //! ## Status Key
 //!
 //! - ✅ **Direct Detection**: Pattern catchable with current Specgate rules
 //! - ⚠️ **Future Enhancement**: Requires rule not yet implemented; fixture demonstrates intended behavior
 //! - ⚠️ **Semantic Proxy**: Requires semantic analysis beyond current capabilities; serves as proxy for future enhancement
+//!
+//! Gate-intended catchable-now fixtures live in `tests/golden_corpus_gate.rs`.
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::cli::{EXIT_CODE_PASS, run};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
         .join("golden")
-}
-
-/// Install npm dependencies if package.json exists
-fn install_npm_deps(project_root: &std::path::Path) {
-    if project_root.join("package.json").exists() {
-        let result = Command::new("npm")
-            .args(["install"])
-            .current_dir(project_root)
-            .output();
-
-        if let Ok(output) = result {
-            if !output.status.success() {
-                eprintln!(
-                    "npm install warning: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-    }
 }
 
 fn copy_files(src_dir: &std::path::Path, dest_dir: &std::path::Path) {
@@ -583,230 +564,6 @@ fn c09_api_leakage_fix_validates() {
     assert_eq!(
         result.exit_code, EXIT_CODE_PASS,
         "C09 fix should pass: stdout={}, stderr={}",
-        result.stdout, result.stderr
-    );
-}
-
-// =============================================================================
-// D01: Forbidden Third-Party Dependency
-// Status: ✅ Direct Detection - dependency.forbidden rule catches this
-// =============================================================================
-
-/// Test that D01 intro fails due to forbidden dependency
-#[test]
-fn d01_forbidden_third_party_intro_fails() {
-    let temp = TempDir::new().expect("tempdir");
-
-    // Copy spec files
-    copy_files(
-        &fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("modules"),
-        &temp.path().join("modules"),
-    );
-
-    // Copy intro source (uses forbidden lodash)
-    fs::create_dir_all(temp.path().join("src")).expect("create src");
-    fs::copy(
-        fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("src")
-            .join("utils-intro.ts"),
-        temp.path().join("src").join("utils.ts"),
-    )
-    .expect("copy intro file");
-
-    // Copy config
-    fs::copy(
-        fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("specgate.config.yml"),
-        temp.path().join("specgate.config.yml"),
-    )
-    .expect("copy config");
-
-    // Copy package.json and install deps
-    fs::copy(
-        fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("package.json"),
-        temp.path().join("package.json"),
-    )
-    .expect("copy package.json");
-    install_npm_deps(temp.path());
-
-    // D01 intro should fail due to forbidden dependency
-    let result = run([
-        "specgate",
-        "check",
-        "--project-root",
-        temp.path().to_str().expect("utf8 path"),
-        "--no-baseline",
-    ]);
-
-    assert_eq!(
-        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
-        "D01 intro should fail due to forbidden dependency: stdout={}, stderr={}",
-        result.stdout, result.stderr
-    );
-}
-
-/// Test that D01 fix passes (no forbidden dependencies)
-#[test]
-fn d01_forbidden_third_party_fix_passes() {
-    let temp = TempDir::new().expect("tempdir");
-
-    // Copy spec files
-    copy_files(
-        &fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("modules"),
-        &temp.path().join("modules"),
-    );
-
-    // Copy fix source (uses native JS only)
-    fs::create_dir_all(temp.path().join("src")).expect("create src");
-    fs::copy(
-        fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("src")
-            .join("utils-fix.ts"),
-        temp.path().join("src").join("utils.ts"),
-    )
-    .expect("copy fix file");
-
-    // Copy config
-    fs::copy(
-        fixtures_dir()
-            .join("d01-forbidden-third-party")
-            .join("specgate.config.yml"),
-        temp.path().join("specgate.config.yml"),
-    )
-    .expect("copy config");
-
-    let result = run([
-        "specgate",
-        "check",
-        "--project-root",
-        temp.path().to_str().expect("utf8 path"),
-        "--no-baseline",
-    ]);
-
-    assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
-        "D01 fix should pass: stdout={}, stderr={}",
-        result.stdout, result.stderr
-    );
-}
-
-// =============================================================================
-// D02: Dependency Not Allowed (whitelist violation)
-// Status: ✅ Direct Detection - dependency.not_allowed rule catches this
-// =============================================================================
-
-/// Test that D02 intro fails due to dependency not in allowed list
-#[test]
-fn d02_dependency_not_allowed_intro_fails() {
-    let temp = TempDir::new().expect("tempdir");
-
-    // Copy spec files
-    copy_files(
-        &fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("modules"),
-        &temp.path().join("modules"),
-    );
-
-    // Copy intro source (uses 'got' which is not in allowed list)
-    fs::create_dir_all(temp.path().join("src")).expect("create src");
-    fs::copy(
-        fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("src")
-            .join("client-intro.ts"),
-        temp.path().join("src").join("client.ts"),
-    )
-    .expect("copy intro file");
-
-    // Copy config
-    fs::copy(
-        fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("specgate.config.yml"),
-        temp.path().join("specgate.config.yml"),
-    )
-    .expect("copy config");
-
-    // Copy package.json and install deps
-    fs::copy(
-        fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("package.json"),
-        temp.path().join("package.json"),
-    )
-    .expect("copy package.json");
-    install_npm_deps(temp.path());
-
-    // D02 intro should fail due to dependency not in allowed list
-    let result = run([
-        "specgate",
-        "check",
-        "--project-root",
-        temp.path().to_str().expect("utf8 path"),
-        "--no-baseline",
-    ]);
-
-    assert_eq!(
-        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
-        "D02 intro should fail due to dependency not allowed: stdout={}, stderr={}",
-        result.stdout, result.stderr
-    );
-}
-
-/// Test that D02 fix passes (uses allowed dependency)
-#[test]
-fn d02_dependency_not_allowed_fix_passes() {
-    let temp = TempDir::new().expect("tempdir");
-
-    // Copy spec files
-    copy_files(
-        &fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("modules"),
-        &temp.path().join("modules"),
-    );
-
-    // Copy fix source (uses 'axios' which is in allowed list)
-    fs::create_dir_all(temp.path().join("src")).expect("create src");
-    fs::copy(
-        fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("src")
-            .join("client-fix.ts"),
-        temp.path().join("src").join("client.ts"),
-    )
-    .expect("copy fix file");
-
-    // Copy config
-    fs::copy(
-        fixtures_dir()
-            .join("d02-dependency-not-allowed")
-            .join("specgate.config.yml"),
-        temp.path().join("specgate.config.yml"),
-    )
-    .expect("copy config");
-
-    let result = run([
-        "specgate",
-        "check",
-        "--project-root",
-        temp.path().to_str().expect("utf8 path"),
-        "--no-baseline",
-    ]);
-
-    assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
-        "D02 fix should pass: stdout={}, stderr={}",
         result.stdout, result.stderr
     );
 }
