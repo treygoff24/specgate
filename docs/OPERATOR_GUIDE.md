@@ -81,19 +81,31 @@ The verdict JSON:
 
 ```json
 {
-  "specgate": "0.1.0",
-  "verdict": "fail",
+  "schema_version": "2.2",
+  "status": "fail",
+  "summary": {
+    "total_violations": 1,
+    "new_violations": 1,
+    "baseline_violations": 0,
+    "suppressed_violations": 0,
+    "error_violations": 1,
+    "warning_violations": 0,
+    "new_error_violations": 1,
+    "new_warning_violations": 0,
+    "stale_baseline_entries": 0
+  },
   "violations": [
     {
-      "rule_id": "boundary.allow_imports_from",
+      "rule": "boundary.allow_imports_from",
       "from_module": "core/api",
       "to_module": "infrastructure/db",
       "from_file": "src/api/handlers/user.ts",
-      "severity": "error"
+      "severity": "error",
+      "disposition": "new",
+      "message": "Module `core/api` is not allowed to import from `infrastructure/db` by constraints",
+      "fingerprint": "sha256:..."
     }
-  ],
-  "baseline_hits": 0,
-  "new_violations": 1
+  ]
 }
 ```
 
@@ -102,6 +114,7 @@ Exit codes:
 - `1` — Policy violation (new errors)
 - `2` — Runtime/config error
 
+Note: warning-only violations do not fail the pipeline because exit `1` is reserved for new `error`-severity policy violations.
 ---
 
 ## Wave 0 Contract
@@ -137,7 +150,7 @@ version: "2.0"
 
 #### Git Blast-Radius Mode
 
-Only check modules affected by changes:
+Only check modules affected by changes, plus their transitive importers:
 
 ```bash
 specgate check --since HEAD~1
@@ -146,9 +159,9 @@ specgate check --since main
 
 Blast radius computation:
 1. `git diff --name-only --diff-filter=ACMRT <ref>`
-2. Map changed files to modules
+2. Map changed files (and changed spec files) to modules
 3. Compute transitive importers
-4. Filter violations to affected modules
+4. Filter violations to files in the blast radius
 
 ### Rule Precedence
 
@@ -204,7 +217,7 @@ jobs:
       
       - name: Update Baseline (main only)
         if: github.ref == 'refs/heads/main'
-        run: specgate baseline --write .specgate-baseline.json
+        run: specgate baseline --output .specgate-baseline.json
 ```
 
 ### Exit Code Handling
@@ -228,6 +241,10 @@ Tier A fixtures are:
 - **Exact-contract** — Not "contains" matching, exact expected violations
 - **CI-gating** — Must pass for merge
 
+Gating vs informational:
+- **Gating (current):** `cargo test --test contract_fixtures`, `cargo test --test golden_corpus`, `cargo test --test tier_a_golden`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
+- **Informational:** Extra fixture runs and ad-hoc validation beyond this required sequence.
+
 **P0 Fixtures:**
 
 | ID | Rule | What It Tests |
@@ -245,7 +262,7 @@ See [Tier A Fixture Design](tier-a-fixture-design-v1.md) for the full specificat
 **Location:** `tests/fixtures/golden/c01-*`, `c02-*`, etc.
 
 Golden corpus fixtures are:
-- **Informative** — Not CI-gating
+- **Gating (current):** required in `mvp-merge-gate.sh` for this repo revision
 - **Broader coverage** — More failure classes
 - **Tier B** — Candidates for Tier A promotion
 
@@ -259,7 +276,7 @@ Mapping:
 
 ## MVP Status
 
-**Current: ~80% complete**
+**Current: ~95% complete as of 2026-02-26, ship-ready for dogfooding with explicit remaining hardening tasks.**
 
 ### Completed ✅
 
@@ -269,14 +286,15 @@ Mapping:
 | Golden v1 scaffold | `2e52949` | Top-5 golden corpus fixtures |
 | Tier A P0 | `0297381` | Deterministic gate implemented |
 | Reviewer hardening | `7a7fab8` | Near-miss contracts, null handling |
+| Merge-gate docs consolidation | `126bc38` / `502ad8a` | Merge-gate and operator docs aligned |
 
 ### Remaining 🔄
 
 1. **P0: CI wiring** — Merge gate definition, clear failure reasons
 2. **P0/P1: Golden expansion** — Broader failure class coverage
 3. **P1: Doctor UX** — `doctor compare` parity diagnostics
-4. **P1: Governance** — `spec_files_changed`, `rule_deltas` completeness
-5. **P1: Docs** — This consolidation work
+4. **P1: Governance** — `spec_files_changed`, `rule_deltas` readability in human review
+5. **P1: Release hardening** — stale-baseline lifecycle and triage policy
 
 See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) for details.
 

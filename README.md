@@ -72,19 +72,19 @@ See [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) for complete CI patte
 
 ## Project Status
 
-**MVP: ~80% complete** — Core engine and contract-critical semantics are in place.
+**MVP hard-gate status (as of 2026-02-26): ~95% complete and ready for shipping/dogfooding with explicit hardening tasks below.**
 
 ### Completed
 - ✅ Wave 0 contract lock (CLI semantics, version policy)
 - ✅ Golden corpus scaffold (top-5 fixtures)
 - ✅ Tier A P0 fixtures (deterministic CI gate)
 - ✅ Baseline fingerprinting and blast-radius mode
+- ✅ Merge gate command contract and operator runbook alignment
 
 ### Remaining
-- 🔄 CI wiring and merge gate documentation
+- 🔄 Release hardening and stale-baseline lifecycle policy
 - 🔄 Golden corpus expansion
-- 🔄 Doctor UX parity tooling
-- 🔄 Governance hardening
+- 🔄 Governance readability and review ergonomics
 
 See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) for details.
 

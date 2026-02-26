@@ -20,6 +20,11 @@ A change is merge-ready only when all required checks pass and are categorized c
 3. **Baseline/new-violation policy semantics**
    - Baseline hits remain report-only; newly introduced violations are merge-blocking.
 
+## Gate taxonomy (for this repo)
+
+- **Gating:** all commands in this document's sequence (`contract_fixtures`, `golden_corpus`, `tier_a_golden`, `mvp_gate_baseline`) must pass for CI merge.
+- **Informational:** diagnostics (`doctor compare`), metrics-mode tuning, and non-gating fixture experiments.
+
 ---
 
 ## Required Gate Command Sequence

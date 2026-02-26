@@ -1,6 +1,6 @@
 # Specgate Implementation Plan
 
-**Version:** 1.1 — February 25, 2026  
+**Version:** 1.1 — February 26, 2026  
 **Purpose:** Definitive Rust build guide for coding agents (MVP-focused)  
 **Language:** Rust  
 **MVP Scope:** File-edge structural policy engine with deterministic output contract
@@ -21,7 +21,7 @@
 
 ---
 
-## Build Execution Status Refresh (2026-02-25, post-swarm integration)
+## Build Execution Status Refresh (2026-02-26, post-swarm integration)
 
 This section updates the plan against final merged `master` history and validation results.
 
@@ -61,7 +61,7 @@ This section updates the plan against final merged `master` history and validati
 
 ### MVP completion estimate
 
-- **~95% complete for MVP hard gate readiness (integration scope complete).**
+- **~95% complete as of 2026-02-26, ship-ready for shipping/dogfooding with explicit hardening tasks below.**
 - Core MVP scope is implemented and validated on merged `master`; remaining work is release/operations hardening, policy finalization, and adoption follow-through.
 
 ---
@@ -230,7 +230,7 @@ This command is diagnostic; it does not affect check exit codes.
 ### CLI
 
 ```bash
-specgate baseline --write .specgate-baseline.json
+specgate baseline --output .specgate-baseline.json
 ```
 
 ### Baseline file format
@@ -244,8 +244,20 @@ specgate baseline --write .specgate-baseline.json
     "config_hash": "...",
     "spec_hash": "..."
   },
-  "fingerprints": [
-    "sha256:..."
+  "entries": [
+    {
+      "fingerprint": "sha256:...",
+      "positional_fingerprint": "sha256:...",
+      "rule": "boundary.allow_imports_from",
+      "severity": "error",
+      "message": "...",
+      "from_file": "src/api/handlers/user.ts",
+      "to_file": "src/infra/db/index.ts",
+      "from_module": "core/api",
+      "to_module": "infra/db",
+      "line": 15,
+      "column": 8
+    }
   ]
 }
 ```
@@ -263,7 +275,7 @@ Hash normalized tuple:
 - if violation fingerprint exists in baseline: report-only
 - if not in baseline: enforce by severity
 - summary must include:
-  - `baseline_hits`
+  - `summary.baseline_violations`
   - `new_violations`
   - optional `stale_baseline_entries`
 
@@ -283,12 +295,12 @@ pub enum OutputMode {
 ### Deterministic mode requirements (default)
 
 - Byte-identical for same inputs
-- Include only stable fields (e.g., `tool_version`, `git_sha`, `config_hash`, `spec_hash`, sorted `violations`)
-- Exclude `timestamp`, `duration_ms`, host/process identifiers
+- Include stable fields only (e.g., `tool_version`, `git_sha`, `config_hash`, `spec_hash`, `summary`, sorted `violations`)
+- Exclude runtime `metrics` section and duration fields
 
 ### Metrics mode requirements
 
-- Adds runtime telemetry (`timestamp`, `duration_ms`, optional perf counters)
+- Adds runtime telemetry in `metrics` (`timings_ms`, `total_ms`) and optional perf counters
 - Must not change violation ordering/content
 
 CLI:
@@ -306,32 +318,40 @@ Add governance and baseline visibility fields:
 
 ```rust
 pub struct Verdict {
-    pub specgate: String,
-    pub output_mode: String,
+    pub schema_version: String,
     pub tool_version: String,
     pub git_sha: String,
     pub config_hash: String,
     pub spec_hash: String,
-
-    pub verdict: VerdictStatus,
-    pub violations: Vec<Violation>,
-
-    pub baseline_hits: usize,
-    pub new_violations: usize,
-
-    pub spec_files_changed: Vec<PathBuf>,
-    pub rule_deltas: Vec<RuleDelta>,
+    pub output_mode: String,
+    pub spec_files_changed: Vec<String>,
+    pub rule_deltas: Vec<String>,
     pub policy_change_detected: bool,
+    pub status: VerdictStatus,
+    pub summary: VerdictSummary,
+    pub violations: Vec<VerdictViolation>,
 
     // metrics mode only
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
+    pub metrics: Option<VerdictMetrics>,
 }
 ```
 
-`RuleDelta` minimally contains: `spec`, `rule`, `change_type`, `before`, `after`.
+```rust
+pub struct VerdictSummary {
+    pub total_violations: usize,
+    pub new_violations: usize,
+    pub baseline_violations: usize,
+    pub suppressed_violations: usize,
+    pub error_violations: usize,
+    pub warning_violations: usize,
+    pub new_error_violations: usize,
+    pub new_warning_violations: usize,
+    pub stale_baseline_entries: usize,
+}
+```
+
+`rule_deltas` are represented in JSON as governance labels.
 
 ---
 
@@ -356,12 +376,12 @@ pub struct Verdict {
 
 ## 11. CLI Surface (v1.1)
 
-- `specgate check [--diff <ref>] [--output-mode deterministic|metrics]`
+- `specgate check [--since <ref>] [--output-mode deterministic|metrics]`
 - `specgate validate`
 - `specgate init`
 - `specgate doctor`
 - `specgate doctor compare --from <file> --import <specifier>`
-- `specgate baseline --write <path>`
+- `specgate baseline --output <path>`
 
 ---
 

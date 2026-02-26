@@ -18,6 +18,11 @@ Specgate solves these with:
 - **Baseline fingerprinting** — Suppress known violations
 - **Git-aware blast-radius** — Only check affected modules
 
+## Gate taxonomy
+
+- **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden corpus, tier-A gate, baseline behavior).
+- **Informational checks:** local metrics-mode runs, optional `doctor compare` explorations, and additional non-gate fixture collections.
+
 ---
 
 ## Exit Codes
@@ -57,7 +62,7 @@ specgate check --output-mode deterministic
 
 **Guarantees:**
 - Byte-identical output for same inputs
-- Excludes unstable fields (timestamps, durations, host info)
+- Excludes runtime `metrics` section and timing fields
 - Sorted violations for consistent diff
 
 **Use in CI:** Always use deterministic mode for merge gates.
@@ -69,8 +74,8 @@ specgate check --output-mode metrics
 ```
 
 **Adds:**
-- `timestamp`
-- `duration_ms`
+- `metrics.timings_ms` (phase timings)
+- `metrics.total_ms` (total duration)
 - Performance counters
 
 **Use locally:** For debugging performance, not for CI gating.
@@ -86,7 +91,7 @@ Baselines suppress known violations while still reporting them. New violations s
 ### Creating a Baseline
 
 ```bash
-specgate baseline --write .specgate-baseline.json
+specgate baseline --output .specgate-baseline.json
 ```
 
 Baseline file format:
@@ -100,8 +105,20 @@ Baseline file format:
     "config_hash": "...",
     "spec_hash": "..."
   },
-  "fingerprints": [
-    "sha256:abc123..."
+  "entries": [
+    {
+      "fingerprint": "sha256:...",
+      "positional_fingerprint": "sha256:...",
+      "rule": "boundary.allow_imports_from",
+      "severity": "error",
+      "message": "...",
+      "from_file": "src/api/handlers/user.ts",
+      "to_file": "src/infra/db/index.ts",
+      "from_module": "core/api",
+      "to_module": "infra/db",
+      "line": 15,
+      "column": 8
+    }
   ]
 }
 ```
@@ -133,7 +150,7 @@ module|rule|severity|file|line|import_source|resolved_target
 - name: Update Baseline
   if: github.ref == 'refs/heads/main'
   run: |
-    specgate baseline --write .specgate-baseline.json
+    specgate baseline --output .specgate-baseline.json
     git config user.name "CI"
     git config user.email "ci@example.com"
     git add .specgate-baseline.json
@@ -145,13 +162,25 @@ module|rule|severity|file|line|import_source|resolved_target
 
 ```json
 {
-  "baseline_hits": 5,
-  "new_violations": 1
+  "status": "fail",
+  "summary": {
+    "total_violations": 6,
+    "new_violations": 1,
+    "baseline_violations": 5,
+    "suppressed_violations": 0,
+    "error_violations": 1,
+    "warning_violations": 5,
+    "new_error_violations": 1,
+    "new_warning_violations": 0,
+    "stale_baseline_entries": 0
+  }
 }
 ```
 
-- `baseline_hits`: Violations matching fingerprints
-- `new_violations`: Violations not in baseline (causes exit 1)
+- `summary.baseline_violations`: Violations matching fingerprints
+- `summary.new_violations`: Violations not in baseline
+- `summary.new_error_violations`: New error violations (drives exit `1`)
+- `summary.stale_baseline_entries`: Baseline entries with no current match (stability signal)
 
 ---
 
@@ -177,7 +206,7 @@ specgate check --since ${{ github.base_ref }}
 ### Blast Radius Computation
 
 1. Run `git diff --name-only --diff-filter=ACMRT <ref>`
-2. Map changed files to their modules
+2. Map changed files and changed spec files to their modules
 3. Compute transitive importers of affected modules
 4. Filter violations to blast radius
 
@@ -295,7 +324,7 @@ jobs:
       - name: Update Baseline
         if: github.ref == 'refs/heads/main' && success()
         run: |
-          ./target/release/specgate baseline --write .specgate-baseline.json
+          ./target/release/specgate baseline --output .specgate-baseline.json
           git config user.name "CI Bot"
           git config user.email "ci@example.com"
           git add .specgate-baseline.json
@@ -338,7 +367,7 @@ Verify:
 3. **Use blast-radius on PRs** — Faster feedback
 4. **Run full check on main** — Catch edge cases
 5. **Gate on Tier A** — Deterministic contract enforcement
-6. **Monitor baseline_hits** — High numbers indicate tech debt
+6. **Monitor summary.stale_baseline_entries** — indicates churned/unused baseline debt
 7. **Review stale entries** — Periodically clean baselines
 
 ---

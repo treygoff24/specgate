@@ -28,7 +28,7 @@ For each fixture variant (`intro`, `fix`):
 - Intro must assert:
   - `exit_code == 1`
   - `violations.len == expected_count` (default 1)
-  - exact `rule_id`, `from_module`, `to_module` (or exact expected set)
+  - exact `rule`, `from_module`, `to_module` (or exact expected set)
   - `unexpected_rule_ids == ∅`
   - `analyzer_errors == ∅`
 - Fix must assert:
@@ -38,7 +38,7 @@ For each fixture variant (`intro`, `fix`):
 ### Determinism contract
 - Run intro **3 times**.
 - Compare normalized violation records byte-for-byte, sorted by:
-  `rule_id, from_module, to_module, from_file, to_file`.
+  `rule, from_module, to_module, from_file, to_file`.
 - Exclude unstable fields (absolute paths, timestamps).
 
 ---
