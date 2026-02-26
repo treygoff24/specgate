@@ -24,9 +24,12 @@ git clone <specgate-repo>
 cd specgate
 cargo build --release
 
-# Binary is at ./target/release/specgate
-# Add to PATH or alias
-alias specgate="./target/release/specgate"
+# Ensure `specgate` is runnable from this shell
+cargo install --path . --locked
+# Or use the local build directly:
+export PATH="$PWD/target/release:$PATH"
+
+specgate --help
 ```
 
 ### Minute 3-5: Initialize Your Project
@@ -218,11 +221,17 @@ boundaries:
 Only check affected modules:
 
 ```bash
-# Check only modules changed since last commit
-specgate check --since HEAD~1
+# Full run is safest when history/base refs are not available yet.
+specgate check
 
-# Check only modules changed since branching
-specgate check --since main
+# For PR/delta checks, use an explicit tracked ref.
+# Requires that origin/main exists and includes project history.
+git fetch origin main --depth=1
+specgate check --since origin/main
+
+# Avoid these in fresh/new repos unless refs exist:
+# - --since HEAD~1 (only valid when current branch has a parent commit)
+# - --since main (only valid when local branch `main` exists)
 ```
 
 ---

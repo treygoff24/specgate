@@ -27,6 +27,9 @@ This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corp
 # Build from source
 cargo build --release
 
+# Install to a known command path (recommended for repeat runs)
+cargo install --path . --locked
+
 # Initialize a project
 cd your-project
 specgate init
@@ -154,8 +157,16 @@ version: "2.0"
 Only check modules affected by changes, plus their transitive importers:
 
 ```bash
-specgate check --since HEAD~1
-specgate check --since main
+# Full check is safe when the repo/rebase base ref is not available.
+specgate check
+
+# Use explicit refs for diff checks.
+git fetch origin main --depth=1
+specgate check --since origin/main
+
+# Avoid:
+# - --since HEAD~1 when there is no previous commit
+# - --since main when the local branch is not tracked
 ```
 
 Blast radius computation:

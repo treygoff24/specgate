@@ -420,7 +420,7 @@ Add integration fixtures for:
 ## 15. Remaining Work (Prioritized)
 
 1. **Release-candidate hardening and reproducibility evidence (P0)**
-   - Cut an MVP release candidate from `341ebc39728390ee1e163da4ab14efbb8ba8f219` with attached gate artifacts.
+   - Cut an MVP release candidate from the current verified `master` tip (or latest stable release branch point) with attached gate artifacts.
    - Run clean-room verification (fresh clone + documented command path) to confirm onboarding/reproducibility.
 
 2. **Baseline lifecycle policy finalization (P0/P1)**
@@ -441,11 +441,11 @@ Add integration fixtures for:
 
 ### Tomorrow pickup checklist
 
-- [ ] Tag `v0.1.0-rc1` (or equivalent) from `341ebc39728390ee1e163da4ab14efbb8ba8f219` after quick smoke verification.
+- [x] Tag `v0.1.0-rc1` (or equivalent) from the current verified head after quick smoke verification.
 - [ ] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`).
 - [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location.
-- [ ] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
-- [ ] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
+- [x] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
+- [x] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
 - [x] Draft release notes summarizing landed lanes, rule-impacting changes, and operator action items.
 
 ## 19. Release closeout (Current snapshot: 2026-02-26)
