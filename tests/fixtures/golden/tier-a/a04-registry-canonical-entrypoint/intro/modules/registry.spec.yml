@@ -1,0 +1,9 @@
+version: "2.2"
+module: registry
+import_id: "@app/registry"
+boundaries:
+  path: src/registry/**/*
+  enforce_canonical_imports: true
+constraints:
+  - rule: boundary.canonical_import
+    severity: error

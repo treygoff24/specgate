@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "enforce-layer",
+      "from_module": "domain/orders",
+      "to_module": "ingress/http"
+    }
+  ]
+}

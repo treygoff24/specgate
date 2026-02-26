@@ -1,0 +1,5 @@
+version: "2.2"
+module: infra/db
+boundaries:
+  path: src/infra/db/**/*
+constraints: []

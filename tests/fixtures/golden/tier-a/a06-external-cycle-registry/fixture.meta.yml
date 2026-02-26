@@ -1,0 +1,5 @@
+id: a06-external-cycle-registry
+tier: A
+maps_from_tier_b: C07
+target_rule: no-circular-deps
+expected_count: 1

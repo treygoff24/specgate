@@ -1,0 +1,5 @@
+version: "2.2"
+module: domain
+boundaries:
+  path: src/domain/**/*
+constraints: []

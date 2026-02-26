@@ -1,0 +1,5 @@
+id: a02-internal-file-api-leak
+tier: A
+maps_from_tier_b: C09
+target_rule: boundary.public_api
+expected_count: 1

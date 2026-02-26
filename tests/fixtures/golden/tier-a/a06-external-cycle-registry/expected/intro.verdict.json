@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "no-circular-deps",
+      "from_module": "registry",
+      "to_module": null
+    }
+  ]
+}

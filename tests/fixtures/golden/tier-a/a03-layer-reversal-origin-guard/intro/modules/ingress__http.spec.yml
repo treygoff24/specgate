@@ -1,0 +1,11 @@
+version: "2.2"
+module: ingress/http
+boundaries:
+  path: src/ingress/**/*
+constraints:
+  - rule: enforce-layer
+    severity: error
+    params:
+      layers:
+        - ingress
+        - domain

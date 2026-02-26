@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "boundary.canonical_import",
+      "from_module": "consumer",
+      "to_module": "registry"
+    }
+  ]
+}

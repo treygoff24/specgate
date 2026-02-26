@@ -1,0 +1,5 @@
+id: a01-ingress-persistence-bypass
+tier: A
+maps_from_tier_b: C02
+target_rule: boundary.allow_imports_from
+expected_count: 1

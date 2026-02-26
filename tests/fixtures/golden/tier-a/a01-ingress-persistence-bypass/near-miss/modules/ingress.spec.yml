@@ -1,0 +1,11 @@
+version: "2.2"
+module: ingress
+boundaries:
+  path: src/ingress/**/*
+  allow_imports_from:
+    - domain
+  allow_type_imports_from:
+    - infra/db
+constraints:
+  - rule: boundary.allow_imports_from
+    severity: error

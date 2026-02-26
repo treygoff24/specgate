@@ -1,0 +1,5 @@
+id: a04-registry-canonical-entrypoint
+tier: A
+maps_from_tier_b: C07
+target_rule: boundary.canonical_import
+expected_count: 1

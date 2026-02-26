@@ -1,0 +1,5 @@
+id: a03-layer-reversal-origin-guard
+tier: A
+maps_from_tier_b: C08
+target_rule: enforce-layer
+expected_count: 1

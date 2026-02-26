@@ -1,0 +1,9 @@
+version: "2.2"
+module: provider
+boundaries:
+  path: src/provider/**/*
+  public_api:
+    - src/provider/index.ts
+constraints:
+  - rule: boundary.public_api
+    severity: error
