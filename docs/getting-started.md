@@ -19,15 +19,28 @@ This guide walks you through installing, configuring, and running your first arc
 ### Minute 0-2: Build and Install
 
 ```bash
-# Clone and build
-git clone <specgate-repo>
-cd specgate
-cargo build --release
+# Fast path (release asset + checksum)
+SPECGATE_TAG=v0.1.0-rc1
+SPECGATE_ARCH="x86_64-unknown-linux-gnu"
+SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_ARCH}.tar.gz"
+SPECGATE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}/${SPECGATE_ARCHIVE}"
+INSTALL_BIN_DIR="$HOME/.local/bin"
 
-# Ensure `specgate` is runnable from this shell
-cargo install --path . --locked
-# Or use the local build directly:
-export PATH="$PWD/target/release:$PATH"
+mkdir -p "$INSTALL_BIN_DIR"
+if \
+  curl -fsSL "$SPECGATE_URL" -o "/tmp/${SPECGATE_ARCHIVE}" && \
+  curl -fsSL "${SPECGATE_URL}.sha256" -o "/tmp/${SPECGATE_ARCHIVE}.sha256" && \
+  (cd /tmp && sha256sum -c "${SPECGATE_ARCHIVE}.sha256"); then
+  tar -xzf "/tmp/${SPECGATE_ARCHIVE}" -C /tmp
+  mv /tmp/specgate "$INSTALL_BIN_DIR/specgate"
+  chmod +x "$INSTALL_BIN_DIR/specgate"
+  echo "✅ Installed prebuilt specgate ${SPECGATE_TAG}"
+else
+  # Fallback when release assets are unavailable
+  cargo install --locked --git https://github.com/treygoff24/specgate --tag "$SPECGATE_TAG"
+fi
+
+export PATH="$INSTALL_BIN_DIR:$PATH"
 
 specgate --help
 ```

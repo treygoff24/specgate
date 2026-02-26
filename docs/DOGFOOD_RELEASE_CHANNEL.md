@@ -17,6 +17,15 @@
   - Scope: after two stable dogfood windows meeting success metrics.
   - Promise: explicit support and regular release cadence.
 
+## Consumer install preference
+
+- Default install path for released versions is the prebuilt release artifact (fast path):
+  - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz`
+  - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz.sha256`
+- Verify checksum before unpacking, then run `specgate`.
+- Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are not available.
+- Example release tag for initial dogfood: `v0.1.0-rc1`.
+
 ## Upgrade policy
 
 - Patch updates: backward-compatible CLI/config behavior.

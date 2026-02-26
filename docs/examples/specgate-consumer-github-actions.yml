@@ -23,9 +23,28 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Specgate
+      - name: Install Specgate (prefer release binary with checksum, fallback to cargo install)
         run: |
-          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc1
+          set -euo pipefail
+          SPECGATE_TAG="v0.1.0-rc1"
+          SPECGATE_TARGET="x86_64-unknown-linux-gnu"
+          SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_TARGET}.tar.gz"
+          SPECGATE_BASE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}"
+          WORKDIR="${RUNNER_TEMP}/specgate-install"
+
+          mkdir -p "$WORKDIR"
+          if \
+            curl -fsSL "${SPECGATE_BASE_URL}/${SPECGATE_ARCHIVE}" -o "${WORKDIR}/${SPECGATE_ARCHIVE}" && \
+            curl -fsSL "${SPECGATE_BASE_URL}/${SPECGATE_ARCHIVE}.sha256" -o "${WORKDIR}/${SPECGATE_ARCHIVE}.sha256" && \
+            (cd "$WORKDIR" && sha256sum -c "${SPECGATE_ARCHIVE}.sha256"); then
+            tar -xzf "${WORKDIR}/${SPECGATE_ARCHIVE}" -C "$WORKDIR"
+            chmod +x "${WORKDIR}/specgate"
+            echo "${WORKDIR}" >> "$GITHUB_PATH"
+            echo "Installed prebuilt specgate ${SPECGATE_TAG} from release assets"
+          else
+            echo "::warning::Prebuilt release asset unavailable or checksum validation failed. Falling back to cargo install."
+            cargo install --locked --git https://github.com/treygoff24/specgate --tag "$SPECGATE_TAG"
+          fi
 
       - name: Run Specgate check
         id: check
