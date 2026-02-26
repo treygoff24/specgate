@@ -39,6 +39,7 @@ See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the f
 | [First 15 Minutes](docs/getting-started.md) | Quick hands-on tutorial |
 | [Spec Language Reference](docs/spec-language.md) | YAML spec file format |
 | [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) | How Specgate works in CI |
+| [MVP Merge Gate](docs/mvp-merge-gate.md) | Single merge-ready gate definition |
 | [Tier A Fixture Design](docs/tier-a-fixture-design-v1.md) | Deterministic CI gate contract |
 | [Implementation Plan](docs/specgate-implementation-plan-v1.1.md) | Full MVP roadmap and status |
 | [Wave 0 Contract](WAVE0_CONTRACT.md) | Locked CLI semantics and version policy |

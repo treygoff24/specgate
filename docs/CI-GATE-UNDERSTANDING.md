@@ -346,6 +346,7 @@ Verify:
 ## See Also
 
 - [Operator Guide](OPERATOR_GUIDE.md) — Full onboarding
+- [MVP Merge Gate](mvp-merge-gate.md) — Single merge-ready checklist
 - [Wave 0 Contract](../WAVE0_CONTRACT.md) — Locked semantics
 - [Tier A Fixture Design](tier-a-fixture-design-v1.md) — Gate specification
 - [Implementation Plan](specgate-implementation-plan-v1.1.md) — MVP status

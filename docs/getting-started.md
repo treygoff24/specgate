@@ -149,7 +149,7 @@ cargo test golden_corpus
 
 ### Set Up CI
 
-See [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) for complete patterns.
+Start with [MVP Merge Gate](mvp-merge-gate.md), then use [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) for full pipeline options.
 
 Quick CI snippet:
 

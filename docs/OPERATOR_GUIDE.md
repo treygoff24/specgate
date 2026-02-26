@@ -167,7 +167,8 @@ For cross-module edge A → B:
 
 ## CI Gate Understanding
 
-See [CI-GATE-UNDERSTANDING.md](CI-GATE-UNDERSTANDING.md) for complete patterns.
+- Start with [MVP Merge Gate](mvp-merge-gate.md) for the canonical merge-ready checklist.
+- Use [CI-GATE-UNDERSTANDING.md](CI-GATE-UNDERSTANDING.md) for detailed pipeline patterns.
 
 ### Quick CI Pattern
 
