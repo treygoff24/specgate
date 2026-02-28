@@ -1796,6 +1796,9 @@ fn parse_structured_trace_data(
         .map_err(|error| format!("structured snapshot JSON parse failed: {error}"))?;
 
     if let Ok(snapshot) = serde_json::from_value::<StructuredTraceSnapshot>(value.clone()) {
+        // "1.0.0" is accepted as a migration aid for snapshots generated before the
+        // schema_version was normalised to the short form "1". Once all in-flight
+        // snapshot files have been regenerated this fallback can be removed.
         if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION
             && snapshot.schema_version != "1.0.0"
         {

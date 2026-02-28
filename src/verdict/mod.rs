@@ -248,12 +248,14 @@ pub fn build_verdict_with_options(
         VerdictStatus::Pass
     };
 
-    let governance_payload = if options.stale_baseline_policy == StaleBaselinePolicy::Warn {
-        None
-    } else {
+    // Always emit governance when stale entries exist so consumers can distinguish
+    // "warn policy with stale entries" from "not evaluated / no stale entries".
+    let governance_payload = if summary.stale_baseline_entries > 0 {
         Some(VerdictGovernance {
             stale_baseline_policy: options.stale_baseline_policy,
         })
+    } else {
+        None
     };
 
     Verdict {

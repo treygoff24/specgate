@@ -16,9 +16,11 @@
     "specgate": "bin/specgate.js",
     "specgate-resolution-snapshot": "bin/specgate-resolution-snapshot.js"
   },
+  "main": "src/index.js",
   "files": [
     "README.md",
     "bin/",
+    "native/",
     "src/"
   ],
   "engines": {

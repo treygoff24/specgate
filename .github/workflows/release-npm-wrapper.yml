@@ -58,7 +58,8 @@ jobs:
 
           version="${tag#v}"
 
-          if [[ "${tag}" == *-* ]]; then
+          base="${tag%%+*}"
+          if [[ "${base}" == *-* ]]; then
             channel="beta"
             npm_dist_tag="beta"
           else

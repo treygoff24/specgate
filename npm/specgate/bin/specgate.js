@@ -63,7 +63,7 @@ function runNativeSpecgate(args) {
     }
 
     if (result.error) {
-      process.stderr.write(`Failed to launch native specgate binary '${candidate}': ${result.error.message}\n`);
+      process.stderr.write(`Failed to launch native specgate binary '${path.relative(process.cwd(), candidate)}': ${result.error.message}\n`);
       return 1;
     }
 

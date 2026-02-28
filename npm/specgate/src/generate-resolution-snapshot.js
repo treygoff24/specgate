@@ -7,7 +7,7 @@ const { builtinModules } = require("node:module");
 
 const TRACE_LINE_LIMIT = 48;
 const BUILTIN_MODULES = new Set(
-  builtinModules.flatMap((name) => (name.startsWith("node:") ? [name, name.slice(5)] : [name]))
+  builtinModules.flatMap((name) => [name, name.startsWith("node:") ? name.slice(5) : `node:${name}`])
 );
 
 function slashify(value) {
@@ -281,7 +281,7 @@ function generateResolutionSnapshot(options) {
   const fromAbsolute = resolvePath(projectRoot, options.from);
 
   if (!fs.existsSync(fromAbsolute)) {
-    throw new Error(`--from file not found: ${fromAbsolute}`);
+    throw new Error(`--from file not found: ${toProjectPath(projectRoot, fromAbsolute)}`);
   }
 
   const tsconfigPath = pickTsconfig(projectRoot, options.tsconfig);

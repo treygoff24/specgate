@@ -151,7 +151,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${TAG}" == *-* ]]; then
+          base="${TAG%%+*}"
+          if [[ "${base}" == *-* ]]; then
             echo "channel=beta" >> "$GITHUB_OUTPUT"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "npm_dist_tag=beta" >> "$GITHUB_OUTPUT"

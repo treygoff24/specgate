@@ -204,15 +204,6 @@ pub fn refresh_baseline(
     }
 }
 
-/// Prune stale entries while rebuilding baseline from current violations.
-pub fn prune_stale_baseline_entries(
-    project_root: &Path,
-    violations: &[PolicyViolation],
-    baseline: Option<&BaselineFile>,
-) -> BaselineRefreshResult {
-    refresh_baseline(project_root, violations, baseline)
-}
-
 /// Count stale baseline entries without returning the classified violations.
 ///
 /// This is useful when you only need the stale count for summary reporting.
@@ -755,16 +746,4 @@ mod tests {
         assert_eq!(refreshed.baseline.generated_from, existing.generated_from);
     }
 
-    #[test]
-    fn prune_stale_baseline_entries_alias_matches_refresh() {
-        let project_root = Path::new(".");
-        let v1 = violation("A", "src/a.ts");
-        let v2 = violation("B", "src/b.ts");
-        let existing = build_baseline(project_root, &[v1.clone(), v2.clone()]);
-
-        let refreshed = refresh_baseline(project_root, &[v2.clone()], Some(&existing));
-        let pruned = prune_stale_baseline_entries(project_root, &[v2], Some(&existing));
-
-        assert_eq!(pruned, refreshed);
-    }
 }
