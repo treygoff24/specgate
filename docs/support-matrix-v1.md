@@ -2,19 +2,7 @@
 
 This matrix defines support commitments for the TypeScript/JavaScript v1 surface of Specgate across GitHub binary artifacts and the npm wrapper package.
 
-## Channel Semantics
-
-- **Stable**
-  - Tag format: `vMAJOR.MINOR.PATCH` (for example `v1.2.3`)
-  - GitHub release type: non-prerelease
-  - npm wrapper dist-tag: `latest`
-  - Intended use: default production channel.
-
-- **Beta**
-  - Tag format: `vMAJOR.MINOR.PATCH-<prerelease>` (for example `v1.2.3-beta.1`)
-  - GitHub release type: prerelease
-  - npm wrapper dist-tag: `beta`
-  - Intended use: dogfood and pre-production validation.
+For channel semantics, see [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md).
 
 ## Tier Definitions
 
@@ -22,7 +10,7 @@ This matrix defines support commitments for the TypeScript/JavaScript v1 surface
 | --- | --- | --- | --- | --- |
 | Tier 1 | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`; npm wrapper on Node.js 20/22 LTS | Stable + Beta | Must pass release gate, binary asset verification, and npm wrapper publish/verify before promotion | Highest-priority support; Tier-1 regressions are release-blocking |
 | Tier 2 | `x86_64-apple-darwin`; npm wrapper on current Node.js (non-LTS) | Stable + Beta | Built and smoke-tested in release automation; can proceed only when Tier-1 remains green | Prioritized fixes; known issues must be documented at release time |
-| Tier 3 | Other OS/arch combinations, source-only installs, and unlisted runtime combinations | Beta-first, stable best-effort | Not part of release-blocking matrix | Best-effort support with documented workarounds |
+| Tier 3 | `aarch64-unknown-linux-gnu`, other OS/arch combinations, source-only installs, and unlisted runtime combinations | Beta-first, stable best-effort | Not part of release-blocking matrix | Best-effort support with documented workarounds |
 
 ## Downgrade Behavior
 

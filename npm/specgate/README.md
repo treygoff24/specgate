@@ -22,7 +22,7 @@ npx specgate-resolution-snapshot \
   --pretty
 ```
 
-Equivalent command through the wrapper bin:
+Equivalent command through the wrapper bin (also supports `snapshot-resolution` alias):
 
 ```bash
 npx specgate resolution-snapshot \

@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   resolve:
@@ -28,6 +27,7 @@ jobs:
       channel: ${{ steps.resolve.outputs.channel }}
       npm_dist_tag: ${{ steps.resolve.outputs.npm_dist_tag }}
       package_dir: ${{ steps.resolve.outputs.package_dir }}
+      has_binaries: ${{ steps.resolve.outputs.has_binaries }}
     steps:
       - name: Resolve release inputs
         id: resolve
@@ -57,8 +57,9 @@ jobs:
           fi
 
           version="${tag#v}"
+          version="${version%%+*}"
 
-          base="${tag%%+*}"
+          base="${version%%+*}"
           if [[ "${base}" == *-* ]]; then
             channel="beta"
             npm_dist_tag="beta"
@@ -69,16 +70,40 @@ jobs:
 
           package_dir="${DISPATCH_PACKAGE_DIR:-${DEFAULT_PACKAGE_DIR:-npm/specgate}}"
 
+          # Validate package_dir to prevent path traversal
+          if [[ "${package_dir}" == ".." ]] || [[ "${package_dir}" == *"/../"* ]] || [[ "${package_dir}" == *"../"* ]] || [[ "${package_dir}" =~ ^/ ]] || [[ "${package_dir}" =~ /$ ]] && [[ "${package_dir}" != "/" ]]; then
+            echo "Invalid package_dir: path traversal not allowed." >&2
+            exit 1
+          fi
+
+          # Check if this is a prerelease (beta) channel - require binary artifacts for stable releases
+          has_binaries="true"
+          if [[ "${channel}" == "stable" ]]; then
+            # For stable releases, check if release has assets (binaries)
+            if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+              if [[ $(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" | jq '.assets | length') -eq 0 ]]; then
+                has_binaries="false"
+              fi
+            else
+              # For workflow_dispatch, skip the binary check (user is manually triggering)
+              has_binaries="true"
+            fi
+          fi
+
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "channel=${channel}" >> "$GITHUB_OUTPUT"
           echo "npm_dist_tag=${npm_dist_tag}" >> "$GITHUB_OUTPUT"
           echo "package_dir=${package_dir}" >> "$GITHUB_OUTPUT"
+          echo "has_binaries=${has_binaries}" >> "$GITHUB_OUTPUT"
 
   publish:
     name: publish-and-verify
     needs: resolve
     runs-on: ubuntu-latest
+    if: needs.resolve.outputs.has_binaries == 'true'
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -164,7 +189,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          published_version="$(npm view "${PACKAGE_NAME}@${RELEASE_VERSION}" version)"
+          max_attempts=5
+          delay=2
+          attempt=1
+
+          while [[ ${attempt} -le ${max_attempts} ]]; do
+            if published_version="$(npm view "${PACKAGE_NAME}@${RELEASE_VERSION}" version 2>/dev/null)"; then
+              if [[ "${published_version}" == "${RELEASE_VERSION}" ]]; then
+                break
+              fi
+            fi
+            echo "Attempt ${attempt}/${max_attempts} failed: version not found yet. Retrying in ${delay}s..." >&2
+            sleep ${delay}
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
+
+          if [[ ${attempt} -gt ${max_attempts} ]]; then
+            echo "Failed to verify version after ${max_attempts} attempts." >&2
+            exit 1
+          fi
+
           if [[ "${published_version}" != "${RELEASE_VERSION}" ]]; then
             echo "Expected ${PACKAGE_NAME}@${RELEASE_VERSION} to be published." >&2
             exit 1
@@ -184,6 +229,8 @@ jobs:
           PACKAGE_NAME: ${{ steps.metadata.outputs.name }}
           NPM_DIST_TAG: ${{ needs.resolve.outputs.npm_dist_tag }}
         run: |
+          set -euo pipefail
+
           {
             echo "### release-npm-wrapper summary"
             echo "- tag: \`${RELEASE_TAG}\`"

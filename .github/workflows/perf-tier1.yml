@@ -27,5 +27,11 @@ jobs:
         with:
           toolchain: 1.88.0
 
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "perf-tier1"
+          cache-targets: false
+
       - name: Perf budget gate
         run: scripts/ci/perf_budget.sh

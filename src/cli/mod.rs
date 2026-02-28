@@ -17,8 +17,8 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
-    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations_with_stale, load_optional_baseline, refresh_baseline, write_baseline,
+    build_baseline_with_metadata, classify_violations_with_stale, load_optional_baseline,
+    refresh_baseline, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -27,19 +27,19 @@ use crate::resolver::classify::extract_package_name;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
-    RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
-    is_canonical_import_rule_id,
+    evaluate_enforce_layer, evaluate_no_circular_deps, is_canonical_import_rule_id, DependencyRule,
+    RuleContext, RuleViolation, RuleWithResolver, DEPENDENCY_FORBIDDEN_RULE_ID,
+    DEPENDENCY_NOT_ALLOWED_RULE_ID,
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
-    types::SUPPORTED_SPEC_VERSION,
+    self, types::SUPPORTED_SPEC_VERSION, Severity, SpecConfig, SpecFile, ValidationLevel,
+    ValidationReport,
 };
 use crate::verdict::{
-    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
-    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    build_verdict_with_options,
+    self, build_verdict_with_options, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary,
+    GovernanceContext, PolicyViolation, TelemetryEventName, VerdictBuildOptions, VerdictIdentity,
+    VerdictMetrics, VerdictStatus,
 };
 
 // Re-export from submodules for convenience
@@ -121,7 +121,7 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
-    /// Refresh an existing baseline by pruning stale entries.
+    /// Refresh an existing baseline by rebuilding from current violations.
     #[arg(long)]
     refresh: bool,
 }
@@ -337,12 +337,20 @@ struct DoctorCompareOutput {
 #[derive(Debug, Clone, Serialize)]
 struct DoctorCompareResolutionOutput {
     source: String,
-    result_kind: String,
+    #[serde(serialize_with = "serialize_trace_result_kind")]
+    result_kind: TraceResultKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     resolved_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     package_name: Option<String>,
     trace: Vec<String>,
+}
+
+fn serialize_trace_result_kind<S>(kind: &TraceResultKind, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(kind.as_str())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -591,7 +599,34 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     let config_hash_for_telemetry = governance.config_hash.clone();
     let spec_hash_for_telemetry = governance.spec_hash.clone();
 
-    let mut verdict = build_verdict_with_options(
+    let telemetry_summary = compute_telemetry_summary(
+        &classified,
+        artifacts.suppressed_violations,
+        stale_baseline_entries,
+    );
+    let fail_on_stale =
+        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && stale_baseline_entries > 0;
+    let telemetry_status = if telemetry_summary.new_error_violations > 0 || fail_on_stale {
+        VerdictStatus::Fail
+    } else {
+        VerdictStatus::Pass
+    };
+
+    let telemetry_event = if telemetry_enabled {
+        Some(AnonymizedTelemetryEvent {
+            schema_version: "1".to_string(),
+            event: TelemetryEventName::CheckCompleted,
+            project_fingerprint: project_fingerprint(&loaded.project_root),
+            config_hash: config_hash_for_telemetry.clone(),
+            spec_hash: spec_hash_for_telemetry.clone(),
+            status: telemetry_status,
+            summary: telemetry_summary,
+        })
+    } else {
+        None
+    };
+
+    let verdict = build_verdict_with_options(
         &loaded.project_root,
         &classified,
         artifacts.suppressed_violations,
@@ -613,18 +648,9 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         },
         VerdictBuildOptions {
             stale_baseline_policy: loaded.config.stale_baseline,
-            telemetry: None,
+            telemetry: telemetry_event,
         },
     );
-
-    if telemetry_enabled {
-        verdict.telemetry = Some(build_anonymized_telemetry_event(
-            &loaded.project_root,
-            &config_hash_for_telemetry,
-            &spec_hash_for_telemetry,
-            &verdict,
-        ));
-    }
 
     let exit_code = match verdict.status {
         VerdictStatus::Pass => EXIT_CODE_PASS,
@@ -882,6 +908,20 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
     } else {
         EXIT_CODE_PASS
     };
+
+    // Add governance field for machine-readable output when stale policy triggers failure
+    if stale_policy_failure {
+        lines.push(String::new());
+        lines.push("governance:".to_string());
+        lines.push(format!(
+            "  stale_baseline_policy: {}",
+            loaded.config.stale_baseline.as_str()
+        ));
+        lines.push(format!(
+            "  stale_baseline_entries: {}",
+            stale_baseline_entries
+        ));
+    }
 
     CliRunResult {
         exit_code,
@@ -1722,11 +1762,40 @@ struct ParsedTraceData {
     resolutions: Vec<TraceResolutionRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TraceResultKind {
+    FirstParty,
+    ThirdParty,
+    Unresolvable,
+    NotObserved,
+}
+
+impl TraceResultKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::FirstParty => "first_party",
+            Self::ThirdParty => "third_party",
+            Self::Unresolvable => "unresolvable",
+            Self::NotObserved => "not_observed",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "first_party" => Self::FirstParty,
+            "third_party" => Self::ThirdParty,
+            "unresolvable" => Self::Unresolvable,
+            "not_observed" => Self::NotObserved,
+            _ => Self::NotObserved,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TraceResolutionRecord {
     from: String,
     import_specifier: String,
-    result_kind: String,
+    result_kind: TraceResultKind,
     resolved_to: Option<String>,
     package_name: Option<String>,
     trace: Vec<String>,
@@ -1784,6 +1853,17 @@ struct StructuredTraceResolution {
     trace: Vec<String>,
 }
 
+impl StructuredTraceResolution {
+    fn to_trace_result_kind(&self) -> TraceResultKind {
+        self.result_kind
+            .as_deref()
+            .map(TraceResultKind::from_str)
+            .unwrap_or_else(|| {
+                infer_trace_result_kind(self.resolved_to.as_deref(), self.package_name.as_deref())
+            })
+    }
+}
+
 fn structured_trace_schema_version() -> String {
     STRUCTURED_TRACE_SCHEMA_VERSION.to_string()
 }
@@ -1799,11 +1879,14 @@ fn parse_structured_trace_data(
         // "1.0.0" is accepted as a migration aid for snapshots generated before the
         // schema_version was normalised to the short form "1". Once all in-flight
         // snapshot files have been regenerated this fallback can be removed.
-        if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION
-            && snapshot.schema_version != "1.0.0"
-        {
+        if snapshot.schema_version == "1.0.0" {
+            eprintln!(
+                "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{}'",
+                STRUCTURED_TRACE_SCHEMA_VERSION
+            );
+        } else if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION {
             return Err(format!(
-                "structured snapshot schema_version '{}' is not supported (expected '{}' or '1.0.0')",
+                "structured snapshot schema_version '{}' is not supported (expected '{}')",
                 snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
             ));
         }
@@ -1924,10 +2007,8 @@ fn parsed_trace_data_from_structured_snapshot(
                 .resolved_to
                 .as_deref()
                 .map(|raw| normalize_trace_path(project_root, raw));
+            let result_kind = resolution.to_trace_result_kind();
             let package_name = resolution.package_name;
-            let result_kind = resolution.result_kind.unwrap_or_else(|| {
-                infer_trace_result_kind(resolved_to.as_deref(), package_name.as_deref())
-            });
 
             TraceResolutionRecord {
                 from: normalize_trace_path(project_root, &resolution.from),
@@ -1961,7 +2042,7 @@ fn structured_snapshot_from_parsed_trace(
         .map(|record| StructuredTraceResolution {
             from: record.from.clone(),
             import_specifier: record.import_specifier.clone(),
-            result_kind: Some(record.result_kind.clone()),
+            result_kind: Some(record.result_kind.as_str().to_string()),
             resolved_to: record.resolved_to.clone(),
             package_name: record.package_name.clone(),
             trace: record.trace.clone(),
@@ -2061,7 +2142,7 @@ fn collect_trace_data_iterative(
                     let package_name = json_string_field(map, &["package_name", "packageName"])
                         .map(str::to_string);
                     let result_kind = json_string_field(map, &["result_kind", "resolution_kind"])
-                        .map(str::to_string)
+                        .map(TraceResultKind::from_str)
                         .unwrap_or_else(|| {
                             infer_trace_result_kind(resolved_to.as_deref(), package_name.as_deref())
                         });
@@ -2182,7 +2263,7 @@ fn finalize_pending_resolution(
     let result_kind =
         infer_trace_result_kind(pending.resolved_to.as_deref(), package_name.as_deref());
 
-    if result_kind == "first_party" {
+    if result_kind == TraceResultKind::FirstParty {
         if let Some(to) = &pending.resolved_to {
             edges.insert((pending.from.clone(), to.clone()));
         }
@@ -2211,15 +2292,18 @@ fn json_string_field<'a>(
         .find_map(|key| map.get(*key).and_then(serde_json::Value::as_str))
 }
 
-fn infer_trace_result_kind(resolved_to: Option<&str>, package_name: Option<&str>) -> String {
+fn infer_trace_result_kind(
+    resolved_to: Option<&str>,
+    package_name: Option<&str>,
+) -> TraceResultKind {
     if package_name.is_some() {
-        return "third_party".to_string();
+        return TraceResultKind::ThirdParty;
     }
 
     match resolved_to {
-        Some(target) if path_contains_node_modules(target) => "third_party".to_string(),
-        Some(_) => "first_party".to_string(),
-        None => "unresolvable".to_string(),
+        Some(target) if path_contains_node_modules(target) => TraceResultKind::ThirdParty,
+        Some(_) => TraceResultKind::FirstParty,
+        None => TraceResultKind::Unresolvable,
     }
 }
 
@@ -2270,14 +2354,14 @@ fn doctor_resolution_from_specgate(
             module_id: _,
         } => DoctorCompareResolutionOutput {
             source: "specgate".to_string(),
-            result_kind: "first_party".to_string(),
+            result_kind: TraceResultKind::FirstParty,
             resolved_to: Some(normalize_repo_relative(project_root, resolved_path)),
             package_name: None,
             trace,
         },
         ResolvedImport::ThirdParty { package_name } => DoctorCompareResolutionOutput {
             source: "specgate".to_string(),
-            result_kind: "third_party".to_string(),
+            result_kind: TraceResultKind::ThirdParty,
             resolved_to: None,
             package_name: Some(package_name.clone()),
             trace,
@@ -2287,7 +2371,7 @@ fn doctor_resolution_from_specgate(
             trace.push(format!("resolution error: {reason}"));
             DoctorCompareResolutionOutput {
                 source: "specgate".to_string(),
-                result_kind: "unresolvable".to_string(),
+                result_kind: TraceResultKind::Unresolvable,
                 resolved_to: None,
                 package_name: None,
                 trace,
@@ -2320,7 +2404,7 @@ fn derive_tsc_focus_resolution(
         if parsed_trace.edges.contains(expected_edge) {
             return DoctorCompareResolutionOutput {
                 source: "tsc_trace".to_string(),
-                result_kind: "first_party".to_string(),
+                result_kind: TraceResultKind::FirstParty,
                 resolved_to: Some(expected_edge.1.clone()),
                 package_name: None,
                 trace: vec![
@@ -2338,7 +2422,7 @@ fn derive_tsc_focus_resolution(
     {
         return DoctorCompareResolutionOutput {
             source: "tsc_trace".to_string(),
-            result_kind: "first_party".to_string(),
+            result_kind: TraceResultKind::FirstParty,
             resolved_to: Some(to.clone()),
             package_name: None,
             trace: vec![
@@ -2350,7 +2434,7 @@ fn derive_tsc_focus_resolution(
 
     DoctorCompareResolutionOutput {
         source: "tsc_trace".to_string(),
-        result_kind: "not_observed".to_string(),
+        result_kind: TraceResultKind::NotObserved,
         resolved_to: None,
         package_name: None,
         trace: vec![
@@ -2391,17 +2475,24 @@ fn classify_doctor_compare_mismatch(
     };
 
     let category = match (
-        specgate_resolution.result_kind.as_str(),
-        tsc_trace_resolution.result_kind.as_str(),
+        &specgate_resolution.result_kind,
+        &tsc_trace_resolution.result_kind,
     ) {
-        ("first_party", "first_party")
+        (TraceResultKind::FirstParty, TraceResultKind::FirstParty)
             if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
         {
             "focused_target_mismatch"
         }
-        ("unresolvable" | "not_observed", "first_party") => "focused_specgate_missing_resolution",
-        ("first_party", "unresolvable" | "not_observed") => "focused_tsc_missing_resolution",
-        ("third_party", "first_party") | ("first_party", "third_party") => {
+        (
+            TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
+            TraceResultKind::FirstParty,
+        ) => "focused_specgate_missing_resolution",
+        (
+            TraceResultKind::FirstParty,
+            TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
+        ) => "focused_tsc_missing_resolution",
+        (TraceResultKind::ThirdParty, TraceResultKind::FirstParty)
+        | (TraceResultKind::FirstParty, TraceResultKind::ThirdParty) => {
             "focused_classification_mismatch"
         }
         _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => {
@@ -2446,23 +2537,28 @@ fn build_actionable_mismatch_hint(
     };
 
     match (
-        specgate_resolution.result_kind.as_str(),
-        tsc_trace_resolution.result_kind.as_str(),
+        &specgate_resolution.result_kind,
+        &tsc_trace_resolution.result_kind,
     ) {
-        ("first_party", "first_party")
+        (TraceResultKind::FirstParty, TraceResultKind::FirstParty)
             if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
         {
             Some(format!(
                 "Both resolvers found first-party targets, but they disagree on the resolved file. Compare path alias precedence and project reference roots; then {shared_guidance}."
             ))
         }
-        ("unresolvable" | "not_observed", "first_party") => Some(format!(
-            "TypeScript resolved this import, but Specgate did not. Verify this command uses the same root tsconfig and project-reference graph; then {shared_guidance}."
-        )),
-        ("first_party", "unresolvable" | "not_observed") => Some(format!(
-            "Specgate resolved a first-party edge that TypeScript did not report. Ensure the trace comes from the same build target and includes the importing file; then {shared_guidance}."
-        )),
-        ("third_party", "first_party") | ("first_party", "third_party") => Some(format!(
+        (TraceResultKind::Unresolvable | TraceResultKind::NotObserved, TraceResultKind::FirstParty) => {
+            Some(format!(
+                "TypeScript resolved this import, but Specgate did not. Verify this command uses the same root tsconfig and project-reference graph; then {shared_guidance}."
+            ))
+        }
+        (TraceResultKind::FirstParty, TraceResultKind::Unresolvable | TraceResultKind::NotObserved) => {
+            Some(format!(
+                "Specgate resolved a first-party edge that TypeScript did not report. Ensure the trace comes from the same build target and includes the importing file; then {shared_guidance}."
+            ))
+        }
+        (TraceResultKind::ThirdParty, TraceResultKind::FirstParty)
+        | (TraceResultKind::FirstParty, TraceResultKind::ThirdParty) => Some(format!(
             "Resolver classification differs (first-party vs third-party). Inspect package `exports` conditions, path aliases, and symlinked workspace package links; then {shared_guidance}."
         )),
         _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => Some(format!(
@@ -2780,37 +2876,41 @@ fn compute_governance_hashes(
     })
 }
 
-fn build_anonymized_telemetry_event(
-    project_root: &Path,
-    config_hash: &str,
-    spec_hash: &str,
-    verdict: &verdict::Verdict,
-) -> AnonymizedTelemetryEvent {
-    AnonymizedTelemetryEvent {
-        schema_version: "1".to_string(),
-        event: TelemetryEventName::CheckCompleted,
-        project_fingerprint: project_fingerprint(project_root),
-        config_hash: config_hash.to_string(),
-        spec_hash: spec_hash.to_string(),
-        status: verdict.status,
-        summary: AnonymizedTelemetrySummary {
-            total_violations: verdict.summary.total_violations,
-            new_violations: verdict.summary.new_violations,
-            baseline_violations: verdict.summary.baseline_violations,
-            new_error_violations: verdict.summary.new_error_violations,
-            new_warning_violations: verdict.summary.new_warning_violations,
-            stale_baseline_entries: verdict.summary.stale_baseline_entries,
-        },
+fn compute_telemetry_summary(
+    classified: &[verdict::FingerprintedViolation],
+    _suppressed_violations: usize,
+    stale_baseline_entries: usize,
+) -> AnonymizedTelemetrySummary {
+    let total_violations = classified.len();
+    let new_violations = classified
+        .iter()
+        .filter(|v| matches!(v.disposition, verdict::ViolationDisposition::New))
+        .count();
+    let baseline_violations = total_violations.saturating_sub(new_violations);
+    let new_error_violations = classified
+        .iter()
+        .filter(|v| {
+            matches!(v.disposition, verdict::ViolationDisposition::New)
+                && v.violation.severity == Severity::Error
+        })
+        .count();
+    let new_warning_violations = new_violations.saturating_sub(new_error_violations);
+
+    AnonymizedTelemetrySummary {
+        total_violations,
+        new_violations,
+        baseline_violations,
+        new_error_violations,
+        new_warning_violations,
+        stale_baseline_entries,
     }
 }
 
 fn project_fingerprint(project_root: &Path) -> String {
     let canonical =
         std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-    format!(
-        "sha256:{}",
-        stable_hash_hex(canonical.to_string_lossy().as_bytes())
-    )
+    let path_bytes = canonical.as_os_str().as_encoded_bytes();
+    format!("sha256:{}", stable_hash_hex(path_bytes))
 }
 
 #[derive(Debug, Serialize)]
@@ -3219,11 +3319,9 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"match\""));
-        assert!(
-            result
-                .stdout
-                .contains("\"trace_parser\": \"legacy_trace_text\"")
-        );
+        assert!(result
+            .stdout
+            .contains("\"trace_parser\": \"legacy_trace_text\""));
     }
 
     #[test]
@@ -3267,16 +3365,12 @@ mod tests {
         ]);
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
-        assert!(
-            result
-                .stdout
-                .contains("\"trace_parser\": \"structured_snapshot\"")
-        );
-        assert!(
-            result
-                .stdout
-                .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\"")
-        );
+        assert!(result
+            .stdout
+            .contains("\"trace_parser\": \"structured_snapshot\""));
+        assert!(result
+            .stdout
+            .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\""));
 
         let snapshot = fs::read_to_string(temp.path().join("snapshots/normalized.json"))
             .expect("structured snapshot output");

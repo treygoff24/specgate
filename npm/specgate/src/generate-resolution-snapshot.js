@@ -6,9 +6,11 @@ const ts = require("typescript");
 const { builtinModules } = require("node:module");
 
 const TRACE_LINE_LIMIT = 48;
+
 const BUILTIN_MODULES = new Set(
   builtinModules.flatMap((name) => [name, name.startsWith("node:") ? name.slice(5) : `node:${name}`])
 );
+const BUILTIN_MODULES_COMMENT = "Built-in Node.js modules (e.g., fs, path) can be imported without resolution.";
 
 function slashify(value) {
   return value.split(path.sep).join("/");
@@ -154,6 +156,10 @@ function parseArgs(argv) {
       throw new Error(`missing value for ${token}`);
     }
 
+    if (next.startsWith("--") || next.startsWith("-")) {
+      throw new Error(`missing value for ${token}, got flag: ${next}`);
+    }
+
     if (token === "--from") {
       args.from = next;
       i += 1;
@@ -277,7 +283,7 @@ function generateResolutionSnapshot(options) {
     throw new Error("missing required --import <specifier>");
   }
 
-  const projectRoot = fs.realpathSync.native(resolvePath(process.cwd(), options.projectRoot || process.cwd()));
+  const projectRoot = tryRealpath(resolvePath(process.cwd(), options.projectRoot || process.cwd()));
   const fromAbsolute = resolvePath(projectRoot, options.from);
 
   if (!fs.existsSync(fromAbsolute)) {
@@ -297,7 +303,7 @@ function generateResolutionSnapshot(options) {
     realpath: ts.sys.realpath ? ts.sys.realpath.bind(ts.sys) : undefined,
   };
 
-  const cache = ts.createModuleResolutionCache(projectRoot, (value) => value, compilerOptions);
+  const cache = ts.createModuleResolutionCache(projectRoot, (value) => value.toLowerCase(), compilerOptions);
   const resolutionResult = ts.resolveModuleName(
     options.importSpecifier,
     fromAbsolute,
@@ -390,7 +396,10 @@ function printHelp() {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-function runCli(argv = process.argv.slice(2)) {
+function runCli(argv) {
+  if (argv === undefined) {
+    argv = process.argv.slice(2);
+  }
   let args;
   try {
     args = parseArgs(argv);

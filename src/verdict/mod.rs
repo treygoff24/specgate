@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::deterministic::normalize_repo_relative;
-use crate::spec::Severity;
 use crate::spec::config::StaleBaselinePolicy;
+use crate::spec::Severity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyViolation {
@@ -108,6 +108,19 @@ pub struct AnonymizedTelemetrySummary {
     pub new_error_violations: usize,
     pub new_warning_violations: usize,
     pub stale_baseline_entries: usize,
+}
+
+impl From<VerdictSummary> for AnonymizedTelemetrySummary {
+    fn from(summary: VerdictSummary) -> Self {
+        Self {
+            total_violations: summary.total_violations,
+            new_violations: summary.new_violations,
+            baseline_violations: summary.baseline_violations,
+            new_error_violations: summary.new_error_violations,
+            new_warning_violations: summary.new_warning_violations,
+            stale_baseline_entries: summary.stale_baseline_entries,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

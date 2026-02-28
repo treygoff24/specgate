@@ -6,6 +6,39 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { runCli } = require("../src/generate-resolution-snapshot");
 
+const signals = {
+  SIGHUP: 1,
+  SIGINT: 2,
+  SIGQUIT: 3,
+  SIGILL: 4,
+  SIGTRAP: 5,
+  SIGABRT: 6,
+  SIGBUS: 7,
+  SIGFPE: 8,
+  SIGKILL: 9,
+  SIGUSR1: 10,
+  SIGSEGV: 11,
+  SIGUSR2: 12,
+  SIGPIPE: 13,
+  SIGALRM: 14,
+  SIGTERM: 15,
+  SIGSTKFLT: 16,
+  SIGCHLD: 17,
+  SIGCONT: 18,
+  SIGSTOP: 19,
+  SIGTSTP: 20,
+  SIGTTIN: 21,
+  SIGTTOU: 22,
+  SIGURG: 23,
+  SIGXCPU: 24,
+  SIGXFSZ: 25,
+  SIGVTALRM: 26,
+  SIGPROF: 27,
+  SIGWINCH: 28,
+  SIGIO: 29,
+  SIGSYS: 31,
+};
+
 function isFile(pathname) {
   try {
     return fs.statSync(pathname).isFile();
@@ -22,7 +55,7 @@ function nativeCandidates() {
   const candidates = [];
 
   if (process.env.SPECGATE_NATIVE_BIN) {
-    candidates.push(path.resolve(process.cwd(), process.env.SPECGATE_NATIVE_BIN));
+    candidates.push(path.resolve(__dirname, "..", process.env.SPECGATE_NATIVE_BIN));
   }
 
   candidates.push(path.resolve(__dirname, "..", "native", process.platform, process.arch, binaryName()));
@@ -36,7 +69,7 @@ function printWrapperHelp() {
     "specgate npm wrapper",
     "",
     "Usage:",
-    "  specgate resolution-snapshot --from <file> --import <specifier> [options]",
+    "  specgate resolution-snapshot (or snapshot-resolution) --from <file> --import <specifier> [options]",
     "  specgate <native-specgate-args>",
     "",
     "Native binary lookup order:",
@@ -60,6 +93,11 @@ function runNativeSpecgate(args) {
     const result = spawnSync(candidate, args, { stdio: "inherit" });
     if (typeof result.status === "number") {
       return result.status;
+    }
+
+    if (result.signal) {
+      const signalCode = process.platform === "win32" ? 1 : 128 + signals[result.signal];
+      return signalCode;
     }
 
     if (result.error) {

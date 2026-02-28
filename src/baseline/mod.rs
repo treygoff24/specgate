@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
 use crate::verdict::{
-    FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
+    sort_policy_violations, FingerprintedViolation, PolicyViolation, ViolationDisposition,
 };
 
 pub const BASELINE_FILE_VERSION: &str = "1";
@@ -177,6 +177,41 @@ pub fn build_baseline_with_metadata(
     }
 }
 
+pub fn build_baseline_from_classified(
+    project_root: &Path,
+    classified: Vec<FingerprintedViolation>,
+) -> BaselineFile {
+    let mut entries = classified
+        .into_iter()
+        .map(|f| BaselineEntry {
+            fingerprint: f.fingerprint,
+            positional_fingerprint: positional_fingerprint_for_violation(&f.violation),
+            rule: f.violation.rule.clone(),
+            severity: f.violation.severity,
+            message: f.violation.message.clone(),
+            from_file: normalize_repo_relative(project_root, &f.violation.from_file),
+            to_file: f
+                .violation
+                .to_file
+                .as_ref()
+                .map(|path| normalize_repo_relative(project_root, path)),
+            from_module: f.violation.from_module.clone(),
+            to_module: f.violation.to_module.clone(),
+            line: f.violation.line,
+            column: f.violation.column,
+        })
+        .collect::<Vec<_>>();
+
+    sort_baseline_entries(&mut entries);
+    dedup_entries_by_identity(&mut entries);
+
+    BaselineFile {
+        version: BASELINE_FILE_VERSION.to_string(),
+        generated_from: BaselineGeneratedFrom::default(),
+        entries,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaselineRefreshResult {
     pub baseline: BaselineFile,
@@ -187,20 +222,18 @@ pub struct BaselineRefreshResult {
 ///
 /// - Entries not present in current violations are pruned as stale.
 /// - Current violations are re-materialized into a fully sorted, deduped baseline.
-/// - Existing metadata is preserved when a prior baseline is provided.
+/// - Metadata (tool_version, git_sha, config_hash) is updated to current values.
 pub fn refresh_baseline(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> BaselineRefreshResult {
-    let stale_entries_pruned = count_stale_baseline_entries(project_root, violations, baseline);
-    let generated_from = baseline
-        .map(|existing| existing.generated_from.clone())
-        .unwrap_or_default();
+    let (classified, stale_count) =
+        classify_violations_with_stale(project_root, violations, baseline);
 
     BaselineRefreshResult {
-        baseline: build_baseline_with_metadata(project_root, violations, generated_from),
-        stale_entries_pruned,
+        baseline: build_baseline_from_classified(project_root, classified),
+        stale_entries_pruned: stale_count,
     }
 }
 
@@ -717,16 +750,15 @@ mod tests {
         assert_eq!(refreshed.stale_entries_pruned, 1);
         assert_eq!(refreshed.baseline, refreshed_reversed.baseline);
 
-        let expected = build_baseline_with_metadata(
+        let expected = build_baseline_from_classified(
             project_root,
-            &[keep, add],
-            existing.generated_from.clone(),
+            classify_violations(project_root, &[keep, add], Some(&existing)),
         );
         assert_eq!(refreshed.baseline, expected);
     }
 
     #[test]
-    fn refresh_baseline_preserves_existing_metadata() {
+    fn refresh_baseline_updates_metadata_to_current_values() {
         let project_root = Path::new(".");
         let violation = violation("A", "src/a.ts");
 
@@ -743,7 +775,13 @@ mod tests {
 
         let refreshed = refresh_baseline(project_root, &[violation], Some(&existing));
         assert_eq!(refreshed.stale_entries_pruned, 0);
-        assert_eq!(refreshed.baseline.generated_from, existing.generated_from);
+        assert_eq!(
+            refreshed.baseline.generated_from.tool_version,
+            build_info::tool_version()
+        );
+        assert_eq!(
+            refreshed.baseline.generated_from.git_sha,
+            build_info::git_sha()
+        );
     }
-
 }

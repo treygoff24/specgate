@@ -1,10 +1,15 @@
+//! Performance Budget Tests
+//!
+//! Tests for CLI performance under various project sizes and constraint
+//! configurations.
+
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, run};
+use specgate::cli::{run, EXIT_CODE_PASS};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);
@@ -28,7 +33,7 @@ fn build_tier1_perf_fixture(root: &Path, module_count: usize, files_per_module: 
             root,
             &format!("modules/{module}.spec.yml"),
             &format!(
-                "version: \"2.2\"\nmodule: {module}\nboundaries:\n  path: {module_dir}/**/*\nconstraints: []\n"
+                "version: \"2.2\"\nmodule: {module}\nboundaries:\n  path: {module_dir}/**/*\n  never_imports:\n    - nonexistent_module\nconstraints:\n  - rule: boundary.never_imports\n    severity: warning\n"
             ),
         );
 

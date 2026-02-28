@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::cli::{run, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);
@@ -145,6 +145,43 @@ fn stale_baseline_policy_fail_blocks_gate_when_entries_are_stale() {
     assert_eq!(output["summary"]["new_error_violations"], 0);
     assert_eq!(output["summary"]["stale_baseline_entries"], 1);
     assert_eq!(output["governance"]["stale_baseline_policy"], "fail");
+}
+
+#[test]
+fn stale_baseline_policy_warn_does_not_block_gate_when_entries_are_stale() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    // Remove the violation so the baseline entry becomes stale.
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstale_baseline: warn\n",
+    );
+
+    let check_result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(check_result.exit_code, EXIT_CODE_PASS);
+
+    let output = parse_json(&check_result.stdout);
+    assert_eq!(output["status"], "pass");
+    assert_eq!(output["summary"]["new_violations"], 0);
+    assert_eq!(output["summary"]["new_error_violations"], 0);
+    assert_eq!(output["summary"]["stale_baseline_entries"], 1);
+    assert_eq!(output["governance"]["stale_baseline_policy"], "warn");
 }
 
 #[test]

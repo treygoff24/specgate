@@ -122,6 +122,33 @@ Modes:
 - `auto`: prefers structured parsing and falls back to raw trace text only in `beta` channel.
 - `legacy`: raw `tsc --traceResolution` text only (beta channel only).
 
+### Shell Command Execution
+
+```bash
+# Run a command that emits structured trace JSON to stdout
+specgate doctor compare --tsc-command "npx tsc --traceResolution" --allow-shell
+
+# Write normalized trace output to a file
+specgate doctor compare --tsc-trace trace.log --structured-snapshot-out snapshots/normalized.json
+```
+
+#### `--tsc-command` and `--allow-shell`
+
+| Flag | Description |
+|------|-------------|
+| `--tsc-command <cmd>` | Command that emits compatible JSON to stdout |
+| `--allow-shell` | Explicit opt-in for running `--tsc-command` through the system shell |
+
+**⚠️ SECURITY WARNING:** `--tsc-command` executes the provided command via `sh -lc`, which can run arbitrary shell code. You must also pass `--allow-shell` to opt into execution. Only use this flag with trusted commands.
+
+#### `--structured-snapshot-out`
+
+| Flag | Description |
+|------|-------------|
+| `--structured-snapshot-out <path>` | Write normalized structured trace snapshot JSON to this path |
+
+This writes the normalized trace data to a file for caching or offline comparison.
+
 ## Boundary Rules
 
 ### `allow_imports_from`

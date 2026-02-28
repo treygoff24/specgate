@@ -58,6 +58,15 @@ pub enum StaleBaselinePolicy {
     Fail,
 }
 
+impl StaleBaselinePolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReleaseChannel {

@@ -5,8 +5,8 @@ use tempfile::TempDir;
 
 use serde_json::Value;
 use specgate::cli::{
-    EXIT_CODE_DOCTOR_MISMATCH, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS,
-    EXIT_CODE_RUNTIME_ERROR, run,
+    run, EXIT_CODE_DOCTOR_MISMATCH, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS,
+    EXIT_CODE_RUNTIME_ERROR,
 };
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
@@ -87,26 +87,27 @@ fn check_with_metrics_includes_timing_metadata() {
 
 #[test]
 fn telemetry_is_opt_in_via_config_or_runtime_flag() {
-    let temp = TempDir::new().expect("tempdir");
-    write_project(temp.path());
-
-    // Default is off.
+    // Sub-case 1: Default is off.
+    let temp1 = TempDir::new().expect("tempdir");
+    write_project(temp1.path());
     let default_result = run([
         "specgate",
         "check",
         "--project-root",
-        temp.path().to_str().expect("utf8"),
+        temp1.path().to_str().expect("utf8"),
         "--no-baseline",
     ]);
     assert_eq!(default_result.exit_code, EXIT_CODE_PASS);
     assert!(!default_result.stdout.contains("\"telemetry\""));
 
-    // Runtime opt-in turns telemetry on.
+    // Sub-case 2: Runtime opt-in turns telemetry on.
+    let temp2 = TempDir::new().expect("tempdir");
+    write_project(temp2.path());
     let runtime_opt_in = run([
         "specgate",
         "check",
         "--project-root",
-        temp.path().to_str().expect("utf8"),
+        temp2.path().to_str().expect("utf8"),
         "--no-baseline",
         "--telemetry",
     ]);
@@ -115,9 +116,11 @@ fn telemetry_is_opt_in_via_config_or_runtime_flag() {
     assert!(runtime_opt_in_json.get("telemetry").is_some());
     assert_eq!(runtime_opt_in_json["telemetry"]["event"], "check_completed");
 
-    // Config opt-in also turns telemetry on.
+    // Sub-case 3: Config opt-in also turns telemetry on.
+    let temp3 = TempDir::new().expect("tempdir");
+    write_project(temp3.path());
     write_file(
-        temp.path(),
+        temp3.path(),
         "specgate.config.yml",
         "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\ntelemetry:\n  enabled: true\n",
     );
@@ -125,19 +128,21 @@ fn telemetry_is_opt_in_via_config_or_runtime_flag() {
         "specgate",
         "check",
         "--project-root",
-        temp.path().to_str().expect("utf8"),
+        temp3.path().to_str().expect("utf8"),
         "--no-baseline",
     ]);
     assert_eq!(config_opt_in.exit_code, EXIT_CODE_PASS);
     let config_opt_in_json = parse_json(&config_opt_in.stdout);
     assert!(config_opt_in_json.get("telemetry").is_some());
 
-    // Runtime explicit off wins.
+    // Sub-case 4: Runtime explicit off wins.
+    let temp4 = TempDir::new().expect("tempdir");
+    write_project(temp4.path());
     let runtime_force_off = run([
         "specgate",
         "check",
         "--project-root",
-        temp.path().to_str().expect("utf8"),
+        temp4.path().to_str().expect("utf8"),
         "--no-baseline",
         "--no-telemetry",
     ]);
@@ -228,28 +233,20 @@ fn baseline_file_is_stable_and_used_for_report_only() {
     let baseline_file = fs::read_to_string(temp.path().join(".specgate-baseline.json"))
         .expect("baseline file exists");
     let baseline_json = parse_json(&baseline_file);
-    assert!(
-        baseline_json["generated_from"]["tool_version"]
-            .as_str()
-            .is_some()
-    );
-    assert!(
-        baseline_json["generated_from"]["git_sha"]
-            .as_str()
-            .is_some()
-    );
-    assert!(
-        baseline_json["generated_from"]["config_hash"]
-            .as_str()
-            .expect("config hash")
-            .starts_with("sha256:")
-    );
-    assert!(
-        baseline_json["generated_from"]["spec_hash"]
-            .as_str()
-            .expect("spec hash")
-            .starts_with("sha256:")
-    );
+    assert!(baseline_json["generated_from"]["tool_version"]
+        .as_str()
+        .is_some());
+    assert!(baseline_json["generated_from"]["git_sha"]
+        .as_str()
+        .is_some());
+    assert!(baseline_json["generated_from"]["config_hash"]
+        .as_str()
+        .expect("config hash")
+        .starts_with("sha256:"));
+    assert!(baseline_json["generated_from"]["spec_hash"]
+        .as_str()
+        .expect("spec hash")
+        .starts_with("sha256:"));
 
     let first = run([
         "specgate",
@@ -270,18 +267,14 @@ fn baseline_file_is_stable_and_used_for_report_only() {
 
     let verdict = parse_json(&first.stdout);
     assert_eq!(verdict["output_mode"], "deterministic");
-    assert!(
-        verdict["config_hash"]
-            .as_str()
-            .expect("config hash")
-            .starts_with("sha256:")
-    );
-    assert!(
-        verdict["spec_hash"]
-            .as_str()
-            .expect("spec hash")
-            .starts_with("sha256:")
-    );
+    assert!(verdict["config_hash"]
+        .as_str()
+        .expect("config hash")
+        .starts_with("sha256:"));
+    assert!(verdict["spec_hash"]
+        .as_str()
+        .expect("spec hash")
+        .starts_with("sha256:"));
 
     write_file(
         temp.path(),
@@ -388,11 +381,9 @@ fn doctor_compare_supports_single_import_focus_mode() {
     assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
     assert!(result.stdout.contains("\"specgate_resolution\""));
     assert!(result.stdout.contains("\"tsc_trace_resolution\""));
-    assert!(
-        result
-            .stdout
-            .contains("\"resolution_kind\": \"first_party\"")
-    );
+    assert!(result
+        .stdout
+        .contains("\"resolution_kind\": \"first_party\""));
 }
 
 #[test]
@@ -469,16 +460,12 @@ fn doctor_compare_structured_snapshot_in_and_out_paths_work() {
 
     assert_eq!(result.exit_code, EXIT_CODE_PASS);
     assert!(result.stdout.contains("\"status\": \"match\""));
-    assert!(
-        result
-            .stdout
-            .contains("\"trace_parser\": \"structured_snapshot\"")
-    );
-    assert!(
-        result
-            .stdout
-            .contains("\"structured_snapshot_out\": \"structured-output/out.json\"")
-    );
+    assert!(result
+        .stdout
+        .contains("\"trace_parser\": \"structured_snapshot\""));
+    assert!(result
+        .stdout
+        .contains("\"structured_snapshot_out\": \"structured-output/out.json\""));
 
     let structured_output = fs::read_to_string(temp.path().join("structured-output/out.json"))
         .expect("structured snapshot output should exist");
@@ -626,9 +613,7 @@ fn doctor_compare_focus_supports_project_reference_trace_fixture() {
     assert!(result.stdout.contains("\"status\": \"match\""));
     assert!(result.stdout.contains("\"parity_verdict\": \"MATCH\""));
     assert!(result.stdout.contains("\"source\": \"tsc_trace\""));
-    assert!(
-        result
-            .stdout
-            .contains("\"resolved_to\": \"packages/shared/src/util.ts\"")
-    );
+    assert!(result
+        .stdout
+        .contains("\"resolved_to\": \"packages/shared/src/util.ts\""));
 }

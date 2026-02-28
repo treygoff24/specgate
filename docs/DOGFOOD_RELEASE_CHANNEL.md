@@ -2,19 +2,27 @@
 
 This document defines release-channel behavior for the TypeScript/JavaScript v1 distribution surface (GitHub binaries + npm wrapper package).
 
-## Channel Contract
+For authoritative channel semantics and tier definitions, see [support-matrix-v1](support-matrix-v1.md).
 
-- **stable**
-  - Tag format: `vMAJOR.MINOR.PATCH`
-  - Audience: production users
-  - Promise: full support commitment for Tier-1/Tier-2 targets
-  - npm wrapper dist-tag: `latest`
+## Semver Upgrade Policy
 
-- **beta**
-  - Tag format: `vMAJOR.MINOR.PATCH-<prerelease>`
-  - Audience: dogfood users and early adopters
-  - Promise: faster iteration with stricter rollback expectations
-  - npm wrapper dist-tag: `beta`
+| Change Type | Increment | When to Apply |
+| --- | --- | --- |
+| **Patch** | PATCH | Bug fixes, perf improvements, docs updates, internal refactors with no behavioral change |
+| **Minor** | MINOR | New features, deprecated functionality (with warning), internal improvements |
+| **Major** | MAJOR | Breaking changes to public APIs, CLI flags, output formats, or file locations |
+
+CI-gating tool consumers should expect this contract: any version bump follows the above rules, and breaking changes are never introduced in patch or minor releases.
+
+## Promotion Gate
+
+The "gate" refers to the merge gate and CI pipeline that must pass before beta can promote to stable:
+
+- All merge-required status checks (CI tests, linting, type checking)
+- Binary artifact build and verification
+- npm wrapper publish and dist-tag verification
+
+Promote beta to stable only after all gate checks are green, artifact verification succeeds, and wrapper publish/verify checks pass.
 
 ## Tag and Automation Mapping
 
