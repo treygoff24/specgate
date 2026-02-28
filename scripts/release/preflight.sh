@@ -31,7 +31,7 @@ end
 
 scan_forbidden_patterns() {
   local forbidden_pattern='No unreleased code changes are currently queued|@stable|channel = "stable"|your-org/specgate'
-  if rg -n -E "$forbidden_pattern" .; then
+  if rg -n -e "$forbidden_pattern" . --glob '!scripts/release/preflight.sh'; then
     echo "Blocked: forbidden pattern found in the repository."
     return 1
   fi

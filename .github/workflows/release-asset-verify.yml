@@ -25,7 +25,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runs-on: ubuntu-latest
           - target: x86_64-apple-darwin
-            runs-on: macos-13
+            runs-on: macos-15-intel
           - target: aarch64-apple-darwin
             runs-on: macos-14
 
@@ -62,12 +62,25 @@ jobs:
               "$@"
           }
 
-          curl_with_retries \
+          release_api_url="https://api.github.com/repos/${REPO}/releases/tags/${TAG_NAME}"
+          release_status="$(curl --silent --show-error --location \
+            --write-out "%{http_code}" \
+            --output /tmp/release.json \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${GH_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${REPO}/releases/tags/${TAG_NAME}" \
-            --output /tmp/release.json
+            "$release_api_url")"
+
+          if [ "$release_status" = "404" ]; then
+            echo "Release tag ${TAG_NAME} is not published yet. Run release-binaries to publish assets first."
+            exit 1
+          fi
+
+          if [ "$release_status" != "200" ]; then
+            echo "Failed to resolve release metadata for ${TAG_NAME} (HTTP ${release_status})."
+            cat /tmp/release.json
+            exit 1
+          fi
 
           TARBALL_NAME="$(jq -r --arg target "$TARGET" '[.assets[] | select(.name | endswith(".tar.gz")) | select(.name | contains($target))][0].name // empty' /tmp/release.json)"
           SHA_NAME="$(jq -r --arg target "$TARGET" '[.assets[] | select(.name | endswith(".sha256")) | select(.name | contains($target))][0].name // empty' /tmp/release.json)"
