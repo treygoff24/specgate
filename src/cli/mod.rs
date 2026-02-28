@@ -1367,11 +1367,13 @@ fn load_trace_source(
             });
         }
 
-        if executable == "tsc" && !is_command_available(executable) {
+        if !is_command_available(executable) {
             return Ok(TraceSource {
                 configured: true,
                 payload: None,
-                reason: Some("tsc is not available on PATH; parity check skipped".to_string()),
+                reason: Some(format!(
+                    "executable '{executable}' is not available on PATH; parity check skipped"
+                )),
             });
         }
 
@@ -1382,11 +1384,13 @@ fn load_trace_source(
             .map_err(|error| format!("failed to run command '{command}': {error}"))?;
 
         if !output.status.success() {
-            if executable == "tsc" && output.status.code() == Some(127) {
+            if output.status.code() == Some(127) {
                 return Ok(TraceSource {
                     configured: true,
                     payload: None,
-                    reason: Some("tsc is not available on PATH; parity check skipped".to_string()),
+                    reason: Some(format!(
+                        "executable '{executable}' was not found at runtime; parity check skipped"
+                    )),
                 });
             }
 
@@ -2500,7 +2504,7 @@ mod tests {
             "--project-root",
             temp.path().to_str().expect("utf8 path"),
             "--tsc-command",
-            "tsc --generateTrace .specgate-trace --noEmit",
+            "__specgate_missing_tsc__ --generateTrace .specgate-trace --noEmit",
             "--allow-shell",
         ]);
 
