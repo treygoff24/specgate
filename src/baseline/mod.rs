@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
 use crate::verdict::{
-    sort_policy_violations, FingerprintedViolation, PolicyViolation, ViolationDisposition,
+    FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
 };
 
 pub const BASELINE_FILE_VERSION: &str = "1";
@@ -181,6 +181,18 @@ pub fn build_baseline_from_classified(
     project_root: &Path,
     classified: Vec<FingerprintedViolation>,
 ) -> BaselineFile {
+    build_baseline_from_classified_with_metadata(
+        project_root,
+        classified,
+        BaselineGeneratedFrom::default(),
+    )
+}
+
+fn build_baseline_from_classified_with_metadata(
+    project_root: &Path,
+    classified: Vec<FingerprintedViolation>,
+    generated_from: BaselineGeneratedFrom,
+) -> BaselineFile {
     let mut entries = classified
         .into_iter()
         .map(|f| BaselineEntry {
@@ -207,7 +219,7 @@ pub fn build_baseline_from_classified(
 
     BaselineFile {
         version: BASELINE_FILE_VERSION.to_string(),
-        generated_from: BaselineGeneratedFrom::default(),
+        generated_from,
         entries,
     }
 }
@@ -222,17 +234,38 @@ pub struct BaselineRefreshResult {
 ///
 /// - Entries not present in current violations are pruned as stale.
 /// - Current violations are re-materialized into a fully sorted, deduped baseline.
-/// - Metadata (tool_version, git_sha, config_hash) is updated to current values.
+/// - Metadata is preserved from the provided baseline when available.
 pub fn refresh_baseline(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> BaselineRefreshResult {
+    let generated_from = baseline
+        .map(|existing| existing.generated_from.clone())
+        .unwrap_or_default();
+
+    refresh_baseline_with_metadata(project_root, violations, baseline, generated_from)
+}
+
+/// Refresh baseline entries using explicitly provided metadata.
+///
+/// Use this when callers have current governance hashes and need refreshed baselines
+/// to carry those exact values.
+pub fn refresh_baseline_with_metadata(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+    generated_from: BaselineGeneratedFrom,
+) -> BaselineRefreshResult {
     let (classified, stale_count) =
         classify_violations_with_stale(project_root, violations, baseline);
 
     BaselineRefreshResult {
-        baseline: build_baseline_from_classified(project_root, classified),
+        baseline: build_baseline_from_classified_with_metadata(
+            project_root,
+            classified,
+            generated_from,
+        ),
         stale_entries_pruned: stale_count,
     }
 }
@@ -758,30 +791,65 @@ mod tests {
     }
 
     #[test]
-    fn refresh_baseline_updates_metadata_to_current_values() {
+    fn refresh_baseline_preserves_provided_metadata() {
+        let project_root = Path::new(".");
+        let violation = violation("A", "src/a.ts");
+
+        let provided_metadata = BaselineGeneratedFrom {
+            tool_version: "1.2.3".to_string(),
+            git_sha: "deadbeef".to_string(),
+            config_hash: "sha256:config".to_string(),
+            spec_hash: "sha256:spec".to_string(),
+        };
+
+        let existing = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: provided_metadata.clone(),
+            entries: build_baseline(project_root, std::slice::from_ref(&violation)).entries,
+        };
+
+        let refreshed = refresh_baseline(project_root, &[violation], Some(&existing));
+        assert_eq!(refreshed.stale_entries_pruned, 0);
+        assert_eq!(refreshed.baseline.generated_from, provided_metadata);
+    }
+
+    #[test]
+    fn refresh_baseline_with_metadata_uses_explicit_hashes() {
         let project_root = Path::new(".");
         let violation = violation("A", "src/a.ts");
 
         let existing = BaselineFile {
             version: BASELINE_FILE_VERSION.to_string(),
             generated_from: BaselineGeneratedFrom {
-                tool_version: "1.2.3".to_string(),
-                git_sha: "deadbeef".to_string(),
-                config_hash: "sha256:config".to_string(),
-                spec_hash: "sha256:spec".to_string(),
+                tool_version: "old-tool".to_string(),
+                git_sha: "old-sha".to_string(),
+                config_hash: "sha256:old-config".to_string(),
+                spec_hash: "sha256:old-spec".to_string(),
             },
             entries: build_baseline(project_root, std::slice::from_ref(&violation)).entries,
         };
 
-        let refreshed = refresh_baseline(project_root, &[violation], Some(&existing));
+        let provided_metadata = BaselineGeneratedFrom {
+            tool_version: "new-tool".to_string(),
+            git_sha: "new-sha".to_string(),
+            config_hash: "sha256:new-config".to_string(),
+            spec_hash: "sha256:new-spec".to_string(),
+        };
+
+        let refreshed = refresh_baseline_with_metadata(
+            project_root,
+            &[violation],
+            Some(&existing),
+            provided_metadata.clone(),
+        );
         assert_eq!(refreshed.stale_entries_pruned, 0);
         assert_eq!(
-            refreshed.baseline.generated_from.tool_version,
-            build_info::tool_version()
+            refreshed.baseline.generated_from.config_hash,
+            provided_metadata.config_hash
         );
         assert_eq!(
-            refreshed.baseline.generated_from.git_sha,
-            build_info::git_sha()
+            refreshed.baseline.generated_from.spec_hash,
+            provided_metadata.spec_hash
         );
     }
 }

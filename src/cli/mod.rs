@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
     build_baseline_with_metadata, classify_violations_with_stale, load_optional_baseline,
-    refresh_baseline, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
+    refresh_baseline_with_metadata, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -121,7 +121,7 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
-    /// Refresh an existing baseline by rebuilding from current violations.
+    /// Refresh an existing baseline by rebuilding from current violations and pruning stale entries.
     #[arg(long)]
     refresh: bool,
 }
@@ -1219,10 +1219,11 @@ fn handle_baseline(args: BaselineArgs) -> CliRunResult {
         };
 
         if let Some(existing) = existing.as_ref() {
-            let refreshed = refresh_baseline(
+            let refreshed = refresh_baseline_with_metadata(
                 &loaded.project_root,
                 &artifacts.policy_violations,
                 Some(existing),
+                generated_from.clone(),
             );
             (refreshed.baseline, refreshed.stale_entries_pruned)
         } else {
@@ -1868,6 +1869,15 @@ fn structured_trace_schema_version() -> String {
     STRUCTURED_TRACE_SCHEMA_VERSION.to_string()
 }
 
+fn has_structured_snapshot_shape(value: &serde_json::Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+
+    matches!(map.get("edges"), Some(serde_json::Value::Array(_)))
+        || matches!(map.get("resolutions"), Some(serde_json::Value::Array(_)))
+}
+
 fn parse_structured_trace_data(
     project_root: &Path,
     trace_source: &str,
@@ -1875,25 +1885,27 @@ fn parse_structured_trace_data(
     let value = serde_json::from_str::<serde_json::Value>(trace_source)
         .map_err(|error| format!("structured snapshot JSON parse failed: {error}"))?;
 
-    if let Ok(snapshot) = serde_json::from_value::<StructuredTraceSnapshot>(value.clone()) {
-        // "1.0.0" is accepted as a migration aid for snapshots generated before the
-        // schema_version was normalised to the short form "1". Once all in-flight
-        // snapshot files have been regenerated this fallback can be removed.
-        if snapshot.schema_version == "1.0.0" {
-            eprintln!(
-                "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{}'",
-                STRUCTURED_TRACE_SCHEMA_VERSION
-            );
-        } else if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION {
-            return Err(format!(
-                "structured snapshot schema_version '{}' is not supported (expected '{}')",
-                snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
+    if has_structured_snapshot_shape(&value) {
+        if let Ok(snapshot) = serde_json::from_value::<StructuredTraceSnapshot>(value.clone()) {
+            // "1.0.0" is accepted as a migration aid for snapshots generated before the
+            // schema_version was normalised to the short form "1". Once all in-flight
+            // snapshot files have been regenerated this fallback can be removed.
+            if snapshot.schema_version == "1.0.0" {
+                eprintln!(
+                    "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{}'",
+                    STRUCTURED_TRACE_SCHEMA_VERSION
+                );
+            } else if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION {
+                return Err(format!(
+                    "structured snapshot schema_version '{}' is not supported (expected '{}')",
+                    snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
+                ));
+            }
+            return Ok(parsed_trace_data_from_structured_snapshot(
+                project_root,
+                snapshot,
             ));
         }
-        return Ok(parsed_trace_data_from_structured_snapshot(
-            project_root,
-            snapshot,
-        ));
     }
 
     let mut edges = BTreeSet::new();
@@ -2547,12 +2559,18 @@ fn build_actionable_mismatch_hint(
                 "Both resolvers found first-party targets, but they disagree on the resolved file. Compare path alias precedence and project reference roots; then {shared_guidance}."
             ))
         }
-        (TraceResultKind::Unresolvable | TraceResultKind::NotObserved, TraceResultKind::FirstParty) => {
+        (
+            TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
+            TraceResultKind::FirstParty,
+        ) => {
             Some(format!(
                 "TypeScript resolved this import, but Specgate did not. Verify this command uses the same root tsconfig and project-reference graph; then {shared_guidance}."
             ))
         }
-        (TraceResultKind::FirstParty, TraceResultKind::Unresolvable | TraceResultKind::NotObserved) => {
+        (
+            TraceResultKind::FirstParty,
+            TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
+        ) => {
             Some(format!(
                 "Specgate resolved a first-party edge that TypeScript did not report. Ensure the trace comes from the same build target and includes the importing file; then {shared_guidance}."
             ))
@@ -3232,6 +3250,53 @@ mod tests {
     }
 
     #[test]
+    fn baseline_refresh_rewrites_unknown_governance_hashes() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project(temp.path());
+        write_file(
+            temp.path(),
+            "legacy-baseline.json",
+            r#"{
+  "version": "1",
+  "generated_from": {
+    "tool_version": "legacy",
+    "git_sha": "legacy",
+    "config_hash": "sha256:unknown",
+    "spec_hash": "sha256:unknown"
+  },
+  "entries": []
+}
+"#,
+        );
+
+        let refreshed = run([
+            "specgate",
+            "baseline",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--output",
+            "legacy-baseline.json",
+            "--refresh",
+        ]);
+        assert_eq!(refreshed.exit_code, EXIT_CODE_PASS);
+
+        let baseline = fs::read_to_string(temp.path().join("legacy-baseline.json"))
+            .expect("refreshed baseline output");
+        let parsed = parse_json(&baseline);
+        let config_hash = parsed["generated_from"]["config_hash"]
+            .as_str()
+            .expect("config hash string");
+        let spec_hash = parsed["generated_from"]["spec_hash"]
+            .as_str()
+            .expect("spec hash string");
+
+        assert_ne!(config_hash, "sha256:unknown");
+        assert_ne!(spec_hash, "sha256:unknown");
+        assert!(config_hash.starts_with("sha256:"));
+        assert!(spec_hash.starts_with("sha256:"));
+    }
+
+    #[test]
     fn doctor_compare_skips_gracefully_when_tsc_missing() {
         let temp = TempDir::new().expect("tempdir");
         write_basic_project(temp.path());
@@ -3378,6 +3443,72 @@ mod tests {
         assert_eq!(parsed["schema_version"], STRUCTURED_TRACE_SCHEMA_VERSION);
         assert_eq!(parsed["edges"][0]["from"], "src/app/main.ts");
         assert_eq!(parsed["edges"][0]["to"], "src/core/index.ts");
+    }
+
+    #[test]
+    fn doctor_compare_auto_mode_scans_nested_json_trace_payload() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project_with_edge(temp.path());
+        write_file(
+            temp.path(),
+            "nested-trace.json",
+            r#"{
+  "metadata": {
+    "source": "tsc"
+  },
+  "payload": {
+    "trace": {
+      "edges": [
+        { "from": "src/app/main.ts", "to": "src/core/index.ts" }
+      ],
+      "resolutions": [
+        {
+          "from": "src/app/main.ts",
+          "import_specifier": "../core/index",
+          "resolved_to": "src/core/index.ts"
+        }
+      ]
+    }
+  }
+}
+"#,
+        );
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "compare",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--tsc-trace",
+            temp.path()
+                .join("nested-trace.json")
+                .to_str()
+                .expect("utf8 path"),
+            "--parser-mode",
+            "auto",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        assert!(result.stdout.contains("\"status\": \"match\""));
+        assert!(result.stdout.contains("\"trace_edge_count\": 1"));
+    }
+
+    #[test]
+    fn parse_structured_snapshot_keeps_schema_version_validation() {
+        let temp = TempDir::new().expect("tempdir");
+        let error = parse_structured_trace_data(
+            temp.path(),
+            r#"{
+  "schema_version": "999",
+  "edges": [],
+  "resolutions": []
+}
+"#,
+        )
+        .expect_err("unsupported schema version should fail");
+
+        assert!(error.contains("schema_version '999' is not supported"));
     }
 
     #[test]
