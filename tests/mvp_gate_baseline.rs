@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{run, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);

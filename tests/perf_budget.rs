@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use tempfile::TempDir;
 
-use specgate::cli::{run, EXIT_CODE_PASS};
+use specgate::cli::{EXIT_CODE_PASS, run};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);

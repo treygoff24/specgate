@@ -3,6 +3,7 @@ name: release-npm-wrapper
 on:
   release:
     types: [published]
+    # Prereleases without binaries will be skipped in the resolve job
   workflow_dispatch:
     inputs:
       tag:
@@ -70,22 +71,45 @@ jobs:
 
           package_dir="${DISPATCH_PACKAGE_DIR:-${DEFAULT_PACKAGE_DIR:-npm/specgate}}"
 
-          # Validate package_dir to prevent path traversal
-          if [[ "${package_dir}" == ".." ]] || [[ "${package_dir}" == *"/../"* ]] || [[ "${package_dir}" == *"../"* ]] || [[ "${package_dir}" =~ ^/ ]] || [[ "${package_dir}" =~ /$ ]] && [[ "${package_dir}" != "/" ]]; then
+          # Validate package_dir to prevent path traversal and ensure it's within npm/ directory
+          # Reject absolute paths
+          if [[ "${package_dir}" =~ ^/ ]]; then
+            echo "Invalid package_dir: absolute paths not allowed." >&2
+            exit 1
+          fi
+          # Reject paths with .. components (covers .., ../, /.., /../)
+          if [[ "${package_dir}" == ".." ]] || [[ "${package_dir}" =~ (^|/)\.\.(/|$) ]]; then
             echo "Invalid package_dir: path traversal not allowed." >&2
+            exit 1
+          fi
+          # Reject paths that escape repository root (normalized check)
+          normalized="$(realpath -m "${package_dir}" 2>/dev/null || echo "${package_dir}")"
+          if [[ "${normalized}" =~ ^\.\. ]]; then
+            echo "Invalid package_dir: path escapes repository root." >&2
+            exit 1
+          fi
+          # Only allow paths within npm/ directory
+          if [[ "${package_dir}" != npm/* ]]; then
+            echo "Invalid package_dir: must be within npm/ directory." >&2
             exit 1
           fi
 
           # Check if this is a prerelease (beta) channel - require binary artifacts for stable releases
-          has_binaries="true"
-          if [[ "${channel}" == "stable" ]]; then
+          has_binaries="false"
+          if [[ "${channel}" == "beta" ]]; then
+            # Skip prereleases - they don't publish to npm
+            echo "Prerelease detected, skipping npm publish." >&2
+          elif [[ "${channel}" == "stable" ]]; then
             # For stable releases, check if release has assets (binaries)
             if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-              if [[ $(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" | jq '.assets | length') -eq 0 ]]; then
-                has_binaries="false"
+              asset_count=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" | jq '.assets | length')
+              if [[ "${asset_count}" -gt 0 ]]; then
+                has_binaries="true"
+              else
+                echo "Stable release without binary assets, skipping npm publish." >&2
               fi
             else
-              # For workflow_dispatch, skip the binary check (user is manually triggering)
+              # For workflow_dispatch, allow proceeding (user is manually triggering)
               has_binaries="true"
             fi
           fi

@@ -114,7 +114,25 @@ fn telemetry_is_opt_in_via_config_or_runtime_flag() {
     assert_eq!(runtime_opt_in.exit_code, EXIT_CODE_PASS);
     let runtime_opt_in_json = parse_json(&runtime_opt_in.stdout);
     assert!(runtime_opt_in_json.get("telemetry").is_some());
-    assert_eq!(runtime_opt_in_json["telemetry"]["event"], "check_completed");
+    let telemetry = &runtime_opt_in_json["telemetry"];
+    assert_eq!(telemetry["event"], "check_completed");
+    assert_eq!(telemetry["schema_version"], "1");
+    assert!(telemetry["project_fingerprint"].as_str().is_some());
+    assert!(telemetry["summary"].is_object());
+    assert!(telemetry["summary"]["total_violations"].as_u64().is_some());
+    assert!(telemetry["summary"]["new_violations"].as_u64().is_some());
+    assert!(telemetry["summary"]["baseline_violations"]
+        .as_u64()
+        .is_some());
+    assert!(telemetry["summary"]["new_error_violations"]
+        .as_u64()
+        .is_some());
+    assert!(telemetry["summary"]["new_warning_violations"]
+        .as_u64()
+        .is_some());
+    assert!(telemetry["summary"]["stale_baseline_entries"]
+        .as_u64()
+        .is_some());
 
     // Sub-case 3: Config opt-in also turns telemetry on.
     let temp3 = TempDir::new().expect("tempdir");
@@ -315,7 +333,20 @@ fn doctor_compare_invalid_trace_json_is_runtime_error() {
 fn doctor_compare_mismatch_uses_diagnostic_exit_code() {
     let temp = TempDir::new().expect("tempdir");
     write_project_with_edge(temp.path());
-    write_file(temp.path(), "trace.json", "[]\n");
+    write_file(
+        temp.path(),
+        "trace.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    {
+      "from": "src/app/main.ts",
+      "to": "src/core/wrong.ts"
+    }
+  ]
+}
+"#,
+    );
 
     let result = run([
         "specgate",
@@ -476,6 +507,153 @@ fn doctor_compare_structured_snapshot_in_and_out_paths_work() {
 }
 
 #[test]
+fn doctor_compare_structured_snapshot_out_absolute_path() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+
+    write_file(
+        temp.path(),
+        "structured-input.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    {
+      "from": "src/app/main.ts",
+      "to": "src/core/index.ts"
+    }
+  ],
+  "resolutions": [
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/index.ts",
+      "trace": ["fixture"]
+    }
+  ]
+}
+"#,
+    );
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let abs_out_path = out_dir.path().join("abs-out.json");
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path()
+            .join("structured-input.json")
+            .to_str()
+            .expect("utf8"),
+        "--structured-snapshot-out",
+        abs_out_path.to_str().expect("utf8"),
+        "--parser-mode",
+        "structured",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(result.stdout.contains("\"status\": \"match\""));
+
+    let structured_output = fs::read_to_string(&abs_out_path)
+        .expect("structured snapshot output should exist at absolute path");
+    let snapshot = parse_json(&structured_output);
+    assert_eq!(snapshot["schema_version"], "1");
+    assert_eq!(snapshot["edges"][0]["from"], "src/app/main.ts");
+    assert_eq!(snapshot["edges"][0]["to"], "src/core/index.ts");
+}
+
+#[test]
+fn doctor_compare_structured_snapshot_round_trip_multiple_edges() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nimport { utils } from '../shared/utils';\nexport const app = core;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/shared/utils.ts",
+        "export const utils = 1;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "structured-input.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    {
+      "from": "src/app/main.ts",
+      "to": "src/core/index.ts"
+    },
+    {
+      "from": "src/app/main.ts",
+      "to": "src/shared/utils.ts"
+    }
+  ],
+  "resolutions": [
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/index.ts",
+      "trace": ["fixture"]
+    },
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../shared/utils",
+      "result_kind": "first_party",
+      "resolved_to": "src/shared/utils.ts",
+      "trace": ["fixture2"]
+    }
+  ]
+}
+"#,
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path()
+            .join("structured-input.json")
+            .to_str()
+            .expect("utf8"),
+        "--structured-snapshot-out",
+        "structured-output/out.json",
+        "--parser-mode",
+        "structured",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let structured_output = fs::read_to_string(temp.path().join("structured-output/out.json"))
+        .expect("structured snapshot output should exist");
+    let snapshot = parse_json(&structured_output);
+    assert_eq!(snapshot["schema_version"], "1");
+
+    let edges = snapshot["edges"]
+        .as_array()
+        .expect("edges should be an array");
+    assert_eq!(edges.len(), 2);
+
+    // Edges are sorted by `from` then `to`
+    assert_eq!(edges[0]["from"], "src/app/main.ts");
+    assert_eq!(edges[0]["to"], "src/core/index.ts");
+
+    assert_eq!(edges[1]["from"], "src/app/main.ts");
+    assert_eq!(edges[1]["to"], "src/shared/utils.ts");
+}
+
+#[test]
 fn doctor_compare_auto_mode_blocks_raw_trace_text_without_beta_hook() {
     let temp = TempDir::new().expect("tempdir");
     write_project_with_edge(temp.path());
@@ -616,4 +794,147 @@ fn doctor_compare_focus_supports_project_reference_trace_fixture() {
     assert!(result
         .stdout
         .contains("\"resolved_to\": \"packages/shared/src/util.ts\""));
+}
+
+#[test]
+fn baseline_refresh_prunes_stale_entries_and_updates_baseline() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+
+    let refresh_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--refresh",
+    ]);
+    assert_eq!(refresh_result.exit_code, EXIT_CODE_PASS);
+    assert!(refresh_result.stdout.contains("\"stale_entries_pruned\""));
+
+    let refresh_output = parse_json(&refresh_result.stdout);
+    assert_eq!(refresh_output["stale_entries_pruned"], 1);
+    assert_eq!(refresh_output["entry_count"], 0);
+
+    let check_after_refresh = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(check_after_refresh.exit_code, EXIT_CODE_PASS);
+
+    let check_output = parse_json(&check_after_refresh.stdout);
+    assert_eq!(check_output["status"], "pass");
+    assert_eq!(check_output["summary"]["stale_baseline_entries"], 0);
+}
+
+#[test]
+fn baseline_diff_flag_with_stale_baseline_fail_blocks_gate() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstale_baseline: fail\n",
+    );
+
+    let check_with_diff = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(check_with_diff.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&check_with_diff.stdout);
+    assert_eq!(output["status"], "fail");
+    assert_eq!(output["summary"]["stale_baseline_entries"], 1);
+    assert_eq!(output["governance"]["stale_baseline_policy"], "fail");
+}
+
+#[test]
+fn baseline_diff_flag_with_stale_baseline_warn_passes_gate() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstale_baseline: warn\n",
+    );
+
+    let check_with_diff = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(check_with_diff.exit_code, EXIT_CODE_PASS);
+
+    let output = parse_json(&check_with_diff.stdout);
+    assert_eq!(output["status"], "pass");
+    assert_eq!(output["summary"]["stale_baseline_entries"], 1);
+    assert_eq!(output["governance"]["stale_baseline_policy"], "warn");
 }

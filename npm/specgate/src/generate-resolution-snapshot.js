@@ -10,7 +10,7 @@ const TRACE_LINE_LIMIT = 48;
 const BUILTIN_MODULES = new Set(
   builtinModules.flatMap((name) => [name, name.startsWith("node:") ? name.slice(5) : `node:${name}`])
 );
-const BUILTIN_MODULES_COMMENT = "Built-in Node.js modules (e.g., fs, path) can be imported without resolution.";
+// Built-in Node.js modules (e.g., fs, path) can be imported without resolution.
 
 function slashify(value) {
   return value.split(path.sep).join("/");
@@ -157,7 +157,13 @@ function parseArgs(argv) {
     }
 
     if (next.startsWith("--") || next.startsWith("-")) {
-      throw new Error(`missing value for ${token}, got flag: ${next}`);
+      throw new Error(`argument ${token} requires a value but got flag: ${next}`);
+    }
+
+    if ((token.startsWith("--") || token.startsWith("-")) && !token.includes("=")) {
+      if (next.startsWith("--") || next.startsWith("-")) {
+        throw new Error(`value for ${token} cannot be a flag: ${next}`);
+      }
     }
 
     if (token === "--from") {
@@ -190,7 +196,9 @@ function parseArgs(argv) {
       continue;
     }
 
-    throw new Error(`unknown argument: ${token}`);
+    if (token.startsWith("--") || token.startsWith("-")) {
+      throw new Error(`unknown argument: ${token}`);
+    }
   }
 
   return args;
@@ -300,10 +308,10 @@ function generateResolutionSnapshot(options) {
     directoryExists: ts.sys.directoryExists ? ts.sys.directoryExists.bind(ts.sys) : undefined,
     getCurrentDirectory: () => projectRoot,
     getDirectories: ts.sys.getDirectories ? ts.sys.getDirectories.bind(ts.sys) : undefined,
-    realpath: ts.sys.realpath ? ts.sys.realpath.bind(ts.sys) : undefined,
+    realpath: tryRealpath,
   };
 
-  const cache = ts.createModuleResolutionCache(projectRoot, (value) => value.toLowerCase(), compilerOptions);
+  const cache = ts.createModuleResolutionCache(projectRoot, (v) => v.toLowerCase(), compilerOptions);
   const resolutionResult = ts.resolveModuleName(
     options.importSpecifier,
     fromAbsolute,
@@ -437,6 +445,11 @@ function runCli(argv) {
 module.exports = {
   generateResolutionSnapshot,
   runCli,
+  classifyResolution,
+  toProjectPath,
+  parseArgs,
+  isBuiltinImport,
+  extractPackageName,
 };
 
 if (require.main === module) {

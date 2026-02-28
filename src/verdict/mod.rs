@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::deterministic::normalize_repo_relative;
-use crate::spec::config::StaleBaselinePolicy;
 use crate::spec::Severity;
+use crate::spec::config::StaleBaselinePolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyViolation {

@@ -55,7 +55,10 @@ function nativeCandidates() {
   const candidates = [];
 
   if (process.env.SPECGATE_NATIVE_BIN) {
-    candidates.push(path.resolve(__dirname, "..", process.env.SPECGATE_NATIVE_BIN));
+    const nativeBinPath = path.isAbsolute(process.env.SPECGATE_NATIVE_BIN)
+      ? process.env.SPECGATE_NATIVE_BIN
+      : path.resolve(__dirname, "..", process.env.SPECGATE_NATIVE_BIN);
+    candidates.push(nativeBinPath);
   }
 
   candidates.push(path.resolve(__dirname, "..", "native", process.platform, process.arch, binaryName()));
@@ -78,7 +81,9 @@ function printWrapperHelp() {
     "  3) npm/specgate/native/<platform>/specgate",
     "",
     "Resolution snapshot help:",
-    "  specgate resolution-snapshot --help"
+    "  specgate resolution-snapshot --help",
+    "  specgate snapshot-resolution --help (alias)",
+    "  specgate snapshot-resolution --help (alias)"
   ];
 
   process.stdout.write(`${text.join("\n")}\n`);
@@ -97,6 +102,7 @@ function runNativeSpecgate(args) {
 
     if (result.signal) {
       const signalCode = process.platform === "win32" ? 1 : 128 + signals[result.signal];
+      process.stderr.write(`Native specgate binary was killed by signal ${result.signal}\n`);
       return signalCode;
     }
 
@@ -105,6 +111,7 @@ function runNativeSpecgate(args) {
       return 1;
     }
 
+    process.stderr.write(`Native specgate binary exited with unknown error\n`);
     return 1;
   }
 

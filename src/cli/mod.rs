@@ -1886,26 +1886,26 @@ fn parse_structured_trace_data(
         .map_err(|error| format!("structured snapshot JSON parse failed: {error}"))?;
 
     if has_structured_snapshot_shape(&value) {
-        if let Ok(snapshot) = serde_json::from_value::<StructuredTraceSnapshot>(value.clone()) {
-            // "1.0.0" is accepted as a migration aid for snapshots generated before the
-            // schema_version was normalised to the short form "1". Once all in-flight
-            // snapshot files have been regenerated this fallback can be removed.
-            if snapshot.schema_version == "1.0.0" {
-                eprintln!(
-                    "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{}'",
-                    STRUCTURED_TRACE_SCHEMA_VERSION
-                );
-            } else if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION {
-                return Err(format!(
-                    "structured snapshot schema_version '{}' is not supported (expected '{}')",
-                    snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
-                ));
-            }
-            return Ok(parsed_trace_data_from_structured_snapshot(
-                project_root,
-                snapshot,
+        let snapshot = serde_json::from_value::<StructuredTraceSnapshot>(value)
+            .map_err(|error| format!("structured snapshot JSON parse failed: {error}"))?;
+        // "1.0.0" is accepted as a migration aid for snapshots generated before the
+        // schema_version was normalised to the short form "1". Once all in-flight
+        // snapshot files have been regenerated this fallback can be removed.
+        if snapshot.schema_version == "1.0.0" {
+            eprintln!(
+                "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{}'",
+                STRUCTURED_TRACE_SCHEMA_VERSION
+            );
+        } else if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION {
+            return Err(format!(
+                "structured snapshot schema_version '{}' is not supported (expected '{}')",
+                snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
             ));
         }
+        return Ok(parsed_trace_data_from_structured_snapshot(
+            project_root,
+            snapshot,
+        ));
     }
 
     let mut edges = BTreeSet::new();
