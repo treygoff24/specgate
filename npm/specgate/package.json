@@ -1,0 +1,33 @@
+{
+  "name": "specgate",
+  "version": "0.1.0",
+  "description": "NPM wrapper for Specgate CLI with a TypeScript resolution snapshot generator.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/treygoff24/specgate.git",
+    "directory": "npm/specgate"
+  },
+  "homepage": "https://github.com/treygoff24/specgate",
+  "bugs": {
+    "url": "https://github.com/treygoff24/specgate/issues"
+  },
+  "bin": {
+    "specgate": "bin/specgate.js",
+    "specgate-resolution-snapshot": "bin/specgate-resolution-snapshot.js"
+  },
+  "files": [
+    "README.md",
+    "bin/",
+    "src/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "check": "node --check bin/specgate.js && node --check bin/specgate-resolution-snapshot.js && node --check src/generate-resolution-snapshot.js && node --check src/index.js"
+  }
+}
