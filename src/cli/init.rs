@@ -15,12 +15,12 @@ pub struct InitArgs {
     /// Directory where starter `.spec.yml` files are written.
     #[arg(long, default_value = "modules")]
     pub spec_dir: PathBuf,
-    /// Starter module id used in the initial example spec.
-    #[arg(long, default_value = "app")]
-    pub module: String,
-    /// Starter module boundary glob.
-    #[arg(long, default_value = "src/app/**/*")]
-    pub module_path: String,
+    /// Optional starter module id override.
+    #[arg(long)]
+    pub module: Option<String>,
+    /// Optional starter module boundary glob override.
+    #[arg(long)]
+    pub module_path: Option<String>,
     /// Overwrite existing scaffold files.
     #[arg(long)]
     pub force: bool,
@@ -35,14 +35,14 @@ mod tests {
         let args = InitArgs {
             project_root: PathBuf::from("."),
             spec_dir: PathBuf::from("modules"),
-            module: "app".to_string(),
-            module_path: "src/app/**/*".to_string(),
+            module: None,
+            module_path: None,
             force: false,
         };
 
         assert_eq!(args.spec_dir, PathBuf::from("modules"));
-        assert_eq!(args.module, "app");
-        assert_eq!(args.module_path, "src/app/**/*");
+        assert_eq!(args.module, None);
+        assert_eq!(args.module_path, None);
         assert!(!args.force);
     }
 }
