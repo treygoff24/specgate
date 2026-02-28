@@ -86,7 +86,7 @@ See [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) for complete CI patte
 
 ## Project Status
 
-**MVP hard-gate status (as of 2026-02-26): ~95% complete and ready for shipping/dogfooding with explicit hardening tasks below.**
+**Status (as of 2026-02-28): MVP implementation and merge gates are complete and passing on `master`; active work is post-MVP release/adoption follow-through.**
 
 ### Completed
 - ✅ Wave 0 contract lock (CLI semantics, version policy)
@@ -95,12 +95,12 @@ See [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) for complete CI patte
 - ✅ Baseline fingerprinting and blast-radius mode
 - ✅ Merge gate command contract and operator runbook alignment
 
-### Remaining
-- 🔄 Explicitly deferred rule families (pattern-aware `C02`, governance-only `C06`, friend-surface `C07`) remain roadmap items
-- 🔄 Golden corpus expansion
-- 🔄 Governance readability and review ergonomics
+### Post-MVP Follow-Through
+- 📌 Explicitly deferred rule families (pattern-aware `C02`, governance-only `C06`, friend-surface `C07`) remain out-of-scope for MVP and are tracked as roadmap work.
+- 📌 Golden corpus expansion continues as non-blocking coverage growth.
+- 📌 Governance readability and review ergonomics remain active operator UX improvements.
 
-See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) for details.
+See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
 
 ## Development
 

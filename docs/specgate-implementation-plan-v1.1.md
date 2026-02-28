@@ -59,10 +59,10 @@ This section updates the plan against final merged `master` history and validati
   - `./scripts/ci/mvp_gate.sh`
 - Branch state: `master` clean and aligned with `origin/master` at `341ebc39728390ee1e163da4ab14efbb8ba8f219`.
 
-### MVP completion estimate
+### MVP completion status
 
-- **~95% complete as of 2026-02-26, ship-ready for shipping/dogfooding with explicit hardening tasks below.**
-- Core MVP scope is implemented and validated on merged `master`; remaining work is release/operations hardening, policy finalization, and adoption follow-through.
+- **MVP is complete as of 2026-02-28 and validated by full gate pass on merged `master`.**
+- Remaining items below are post-MVP release/adoption workstreams (operations polish, parity depth, and governance UX), not MVP blockers.
 
 ---
 
@@ -417,7 +417,7 @@ Add integration fixtures for:
 
 ---
 
-## 15. Remaining Work (Prioritized)
+## 15. Post-MVP Work (Prioritized)
 
 1. **Release-candidate hardening and reproducibility evidence (P0)**
    - Cut an MVP release candidate from the current verified `master` tip (or latest stable release branch point) with attached gate artifacts.

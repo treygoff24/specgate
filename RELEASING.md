@@ -2,8 +2,8 @@
 
 ## Scope
 
-This document defines the release mechanics for Specgate MVP dogfood and the
-subsequent cadence toward broader adoption.
+This document defines the release mechanics for Specgate now that MVP is
+complete, including dogfood-first cadence toward broader adoption.
 
 ## Version and artifacts
 
@@ -19,7 +19,7 @@ subsequent cadence toward broader adoption.
   - `docs/DOGFOOD_RELEASE_CHANNEL.md`
   - `docs/examples/specgate-consumer-github-actions.yml`
 
-## Release prerequisites (dogfood-ready)
+## Release prerequisites (post-MVP, dogfood channel default)
 
 Before cutting a release:
 

@@ -77,7 +77,7 @@ Failures are reported as one of:
 - [CI Gate Understanding](CI-GATE-UNDERSTANDING.md)
 - [Wave 0 Contract](../WAVE0_CONTRACT.md)
 - [Tier A Fixture Design](tier-a-fixture-design-v1.md)
-- [Implementation Plan §15](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized)
+- [Implementation Plan §15](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized)
 - [Baseline Policy](BASELINE_POLICY.md)
 - [Dogfood Rollout Checklist](DOGFOOD_ROLLOUT_CHECKLIST.md)
 - [Releasing Guide](../RELEASING.md)

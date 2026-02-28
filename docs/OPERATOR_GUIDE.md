@@ -298,7 +298,7 @@ Mapping:
 
 ## MVP Status
 
-**Current: ~95% complete as of 2026-02-26, ship-ready for dogfooding with explicit remaining hardening tasks.**
+**Current (as of 2026-02-28): MVP is complete, validated, and gate-passing; active work is post-MVP hardening and adoption polish.**
 
 ### Completed ✅
 
@@ -310,12 +310,12 @@ Mapping:
 | Reviewer hardening | `7a7fab8` | Near-miss contracts, null handling |
 | Merge-gate docs consolidation | `126bc38` / `502ad8a` | Merge-gate and operator docs aligned |
 
-### Remaining 🔄
+### Post-MVP Priorities 🔄
 
-1. **P0: CI wiring** — Merge gate definition, clear failure reasons
-2. **P0/P1: Golden expansion** — Broader failure class coverage
-3. **P1: Doctor UX** — `doctor compare` parity diagnostics
-4. **P1: Governance** — `spec_files_changed`, `rule_deltas` readability in human review
+1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
+2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.
+3. **Doctor parity depth** — Extend `doctor compare` fixtures for monorepos/project references.
+4. **Governance UX polish** — Improve readability of `spec_files_changed` and `rule_deltas` in review flows.
 
 ### Dogfood Docs
 
@@ -326,7 +326,7 @@ Mapping:
 - [Consumer GitHub Actions workflow](examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
 - [Releasing Guide](../RELEASING.md) — How to ship and promote releases.
 
-See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-remaining-work-prioritized) for details.
+See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
 
 ---
 
