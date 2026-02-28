@@ -128,12 +128,12 @@ struct InitArgs {
     /// Directory where starter `.spec.yml` files are written.
     #[arg(long, default_value = "modules")]
     spec_dir: PathBuf,
-    /// Starter module id used in the initial example spec.
-    #[arg(long, default_value = "app")]
-    module: String,
-    /// Starter module boundary glob.
-    #[arg(long, default_value = "src/app/**/*")]
-    module_path: String,
+    /// Optional starter module id override.
+    #[arg(long)]
+    module: Option<String>,
+    /// Optional starter module boundary glob override.
+    #[arg(long)]
+    module_path: Option<String>,
     /// Overwrite existing scaffold files.
     #[arg(long)]
     force: bool,
@@ -819,10 +819,18 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
 fn handle_init(args: InitArgs) -> CliRunResult {
     let project_root = fs::canonicalize(&args.common.project_root)
         .unwrap_or_else(|_| args.common.project_root.clone());
-
-    if args.module.trim().is_empty() {
+    let module_override = args.module.as_ref().map(|module| module.trim().to_string());
+    if module_override
+        .as_ref()
+        .is_some_and(|module| module.is_empty())
+    {
         return runtime_error_json("init", "module must be non-empty", Vec::new());
     }
+    let module_path_override = args
+        .module_path
+        .as_ref()
+        .map(|module_path| module_path.trim().to_string())
+        .filter(|module_path| !module_path.is_empty());
 
     if let Err(error) = fs::create_dir_all(&project_root) {
         return runtime_error_json(
@@ -834,22 +842,15 @@ fn handle_init(args: InitArgs) -> CliRunResult {
 
     let normalized_spec_dir = normalize_path(&args.spec_dir);
     let config_path = project_root.join("specgate.config.yml");
-    let spec_file_stem = args.module.trim().replace('/', "__");
-    let spec_path = resolve_against_root(
+    let scaffold_specs = infer_init_scaffold_specs(
         &project_root,
-        &args.spec_dir.join(format!("{spec_file_stem}.spec.yml")),
+        module_override.as_deref(),
+        module_path_override.as_deref(),
     );
 
     let config_content = format!(
         "spec_dirs:\n  - \"{}\"\nexclude: []\ntest_patterns: []\n",
         escape_yaml_double_quoted(&normalized_spec_dir)
-    );
-
-    let spec_content = format!(
-        "version: \"{}\"\nmodule: \"{}\"\nboundaries:\n  path: \"{}\"\nconstraints: []\n",
-        SUPPORTED_SPEC_VERSION,
-        escape_yaml_double_quoted(args.module.trim()),
-        escape_yaml_double_quoted(args.module_path.trim())
     );
 
     let mut created = Vec::new();
@@ -866,15 +867,29 @@ fn handle_init(args: InitArgs) -> CliRunResult {
         return runtime_error_json("init", "failed to write scaffold", vec![error]);
     }
 
-    if let Err(error) = write_scaffold_file(
-        &project_root,
-        &spec_path,
-        &spec_content,
-        args.force,
-        &mut created,
-        &mut skipped_existing,
-    ) {
-        return runtime_error_json("init", "failed to write scaffold", vec![error]);
+    for scaffold in scaffold_specs {
+        let spec_file_stem = scaffold.module.replace('/', "__");
+        let spec_path = resolve_against_root(
+            &project_root,
+            &args.spec_dir.join(format!("{spec_file_stem}.spec.yml")),
+        );
+        let spec_content = format!(
+            "version: \"{}\"\nmodule: \"{}\"\nboundaries:\n  path: \"{}\"\nconstraints: []\n",
+            SUPPORTED_SPEC_VERSION,
+            escape_yaml_double_quoted(&scaffold.module),
+            escape_yaml_double_quoted(&scaffold.path)
+        );
+
+        if let Err(error) = write_scaffold_file(
+            &project_root,
+            &spec_path,
+            &spec_content,
+            args.force,
+            &mut created,
+            &mut skipped_existing,
+        ) {
+            return runtime_error_json("init", "failed to write scaffold", vec![error]);
+        }
     }
 
     CliRunResult::json(
@@ -887,6 +902,93 @@ fn handle_init(args: InitArgs) -> CliRunResult {
             skipped_existing,
         },
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InitScaffoldSpec {
+    module: String,
+    path: String,
+}
+
+const INIT_COMMON_ROOT_MODULE_DIRS: [&str; 11] = [
+    "lib",
+    "routes",
+    "ws",
+    "api",
+    "app",
+    "services",
+    "controllers",
+    "middleware",
+    "handlers",
+    "utils",
+    "helpers",
+];
+
+fn infer_init_scaffold_specs(
+    project_root: &Path,
+    module_override: Option<&str>,
+    module_path_override: Option<&str>,
+) -> Vec<InitScaffoldSpec> {
+    if module_override.is_some() || module_path_override.is_some() {
+        return vec![InitScaffoldSpec {
+            module: module_override.unwrap_or("app").to_string(),
+            path: module_path_override
+                .map(ToString::to_string)
+                .unwrap_or_else(|| infer_single_module_path(project_root)),
+        }];
+    }
+
+    if project_root.join("src").join("app").is_dir() {
+        return vec![InitScaffoldSpec {
+            module: "app".to_string(),
+            path: "src/app/**/*".to_string(),
+        }];
+    }
+
+    if project_root.join("src").is_dir() {
+        return vec![InitScaffoldSpec {
+            module: "app".to_string(),
+            path: "src/**/*".to_string(),
+        }];
+    }
+
+    let matched_dirs = INIT_COMMON_ROOT_MODULE_DIRS
+        .iter()
+        .copied()
+        .filter(|dir| project_root.join(dir).is_dir())
+        .collect::<Vec<_>>();
+
+    if !matched_dirs.is_empty() {
+        return matched_dirs
+            .into_iter()
+            .map(|dir| InitScaffoldSpec {
+                module: dir.to_string(),
+                path: format!("{dir}/**/*"),
+            })
+            .collect();
+    }
+
+    vec![InitScaffoldSpec {
+        module: "app".to_string(),
+        path: "src/app/**/*".to_string(),
+    }]
+}
+
+fn infer_single_module_path(project_root: &Path) -> String {
+    if project_root.join("src").join("app").is_dir() {
+        return "src/app/**/*".to_string();
+    }
+
+    if project_root.join("src").is_dir() {
+        return "src/**/*".to_string();
+    }
+
+    INIT_COMMON_ROOT_MODULE_DIRS
+        .iter()
+        .copied()
+        .find(|dir| project_root.join(dir).is_dir())
+        .map(|dir| format!("{dir}/**/*"))
+        .unwrap_or_else(|| "src/app/**/*".to_string())
 }
 
 fn write_scaffold_file(

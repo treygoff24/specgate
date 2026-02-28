@@ -115,6 +115,8 @@ fn init_creates_config_and_spec_files() {
     assert_eq!(result.exit_code, EXIT_CODE_PASS);
     assert!(temp.path().join("specgate.config.yml").exists());
     assert!(temp.path().join("modules/app.spec.yml").exists());
+    let app_spec = fs::read_to_string(temp.path().join("modules/app.spec.yml")).expect("read app");
+    assert!(app_spec.contains("path: \"src/app/**/*\""));
 }
 
 #[test]
@@ -192,6 +194,89 @@ fn init_force_overwrites_files() {
     let content = fs::read_to_string(&config_path).expect("read");
     assert_ne!(content, "modified");
     assert!(result.stdout.contains("\"created\""));
+}
+
+#[test]
+fn init_prefers_src_app_when_present() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("src/app")).expect("mkdir src/app");
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let app_spec = fs::read_to_string(temp.path().join("modules/app.spec.yml")).expect("read app");
+    assert!(app_spec.contains("path: \"src/app/**/*\""));
+}
+
+#[test]
+fn init_uses_src_when_src_exists_without_src_app() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("src/core")).expect("mkdir src/core");
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let app_spec = fs::read_to_string(temp.path().join("modules/app.spec.yml")).expect("read app");
+    assert!(app_spec.contains("path: \"src/**/*\""));
+}
+
+#[test]
+fn init_generates_specs_for_common_top_level_dirs() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("lib")).expect("mkdir lib");
+    fs::create_dir_all(temp.path().join("routes")).expect("mkdir routes");
+    fs::create_dir_all(temp.path().join("ws")).expect("mkdir ws");
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let lib_spec = fs::read_to_string(temp.path().join("modules/lib.spec.yml")).expect("read lib");
+    assert!(lib_spec.contains("module: \"lib\""));
+    assert!(lib_spec.contains("path: \"lib/**/*\""));
+
+    let routes_spec =
+        fs::read_to_string(temp.path().join("modules/routes.spec.yml")).expect("read routes");
+    assert!(routes_spec.contains("module: \"routes\""));
+    assert!(routes_spec.contains("path: \"routes/**/*\""));
+
+    let ws_spec = fs::read_to_string(temp.path().join("modules/ws.spec.yml")).expect("read ws");
+    assert!(ws_spec.contains("module: \"ws\""));
+    assert!(ws_spec.contains("path: \"ws/**/*\""));
+}
+
+#[test]
+fn init_module_path_override_still_wins() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("src/app")).expect("mkdir src/app");
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--module-path",
+        "custom/**/*",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let app_spec = fs::read_to_string(temp.path().join("modules/app.spec.yml")).expect("read app");
+    assert!(app_spec.contains("path: \"custom/**/*\""));
 }
 
 // ============================================================================
