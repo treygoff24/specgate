@@ -81,6 +81,47 @@ The blast radius includes:
 2. Modules containing changed files
 3. Modules that transitively import from affected modules
 
+### Baseline Hygiene + Telemetry
+
+```bash
+# Regenerate baseline from current violations
+specgate baseline --output .specgate-baseline.json
+
+# Refresh and prune stale entries
+specgate baseline --refresh --output .specgate-baseline.json
+
+# Opt in to telemetry for one run
+specgate check --telemetry
+```
+
+Config keys in `specgate.config.yml`:
+
+```yaml
+stale_baseline: warn   # or fail
+release_channel: stable # or beta
+telemetry:
+  enabled: false
+```
+
+- `stale_baseline: fail` makes stale baseline entries policy-failing.
+- `release_channel: beta` enables beta-only doctor compare legacy trace fallback.
+- telemetry is opt-in by default and can be toggled per run with `--telemetry` / `--no-telemetry`.
+
+### Doctor Compare Parser Modes
+
+```bash
+# Structured snapshots only
+specgate doctor compare --parser-mode structured --structured-snapshot-in trace.json
+
+# Auto: structured first, then beta-only legacy fallback
+specgate doctor compare --parser-mode auto --tsc-trace trace.log
+```
+
+Modes:
+- `structured`: requires structured JSON snapshot payload.
+- `auto`: prefers structured parsing and falls back to raw trace text only in `beta` channel.
+- `legacy`: raw `tsc --traceResolution` text only (beta channel only).
+
 ## Boundary Rules
 
 ### `allow_imports_from`

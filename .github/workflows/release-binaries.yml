@@ -146,10 +146,37 @@ jobs:
             fi
           done
 
+      - name: Classify release channel
+        id: release_channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${TAG}" == *-* ]]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm_dist_tag=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm_dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          prerelease: ${{ steps.release_channel.outputs.prerelease }}
+          make_latest: ${{ steps.release_channel.outputs.channel == 'stable' && 'true' || 'false' }}
           files: |
             dist/specgate-*.tar.gz
             dist/specgate-*.sha256
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "### release-binaries summary"
+            echo "- tag: \`${TAG}\`"
+            echo "- channel: \`${{ steps.release_channel.outputs.channel }}\`"
+            echo "- npm wrapper dist-tag target: \`${{ steps.release_channel.outputs.npm_dist_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

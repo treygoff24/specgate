@@ -1,52 +1,39 @@
-# Specgate Release Channels (Dogfood)
+# Specgate Release Channels (TS/JS v1)
 
-## Channels
+This document defines release-channel behavior for the TypeScript/JavaScript v1 distribution surface (GitHub binaries + npm wrapper package).
 
-- **dogfood**
-  - Audience: internal pilot repos and early adopters.
-  - Scope: mandatory merge gate + explicit baseline policy.
-  - Promise: fastest iteration, minimal compatibility guarantees.
-
-- **pre-release**
-  - Audience: broader controlled cohort.
-  - Scope: merge gate + release-note review + rollout checklist validation.
-  - Promise: stabilized docs and predictable baselines across multiple repos.
+## Channel Contract
 
 - **stable**
-  - Audience: all supported users.
-  - Scope: after two stable dogfood windows meeting success metrics.
-  - Promise: explicit support and regular release cadence.
+  - Tag format: `vMAJOR.MINOR.PATCH`
+  - Audience: production users
+  - Promise: full support commitment for Tier-1/Tier-2 targets
+  - npm wrapper dist-tag: `latest`
 
-## Consumer install preference
+- **beta**
+  - Tag format: `vMAJOR.MINOR.PATCH-<prerelease>`
+  - Audience: dogfood users and early adopters
+  - Promise: faster iteration with stricter rollback expectations
+  - npm wrapper dist-tag: `beta`
 
-- Default install path for released versions is the prebuilt release artifact (fast path):
+## Tag and Automation Mapping
+
+| Tag Shape | Channel | GitHub Release Type | Binary Workflow | npm Wrapper Workflow |
+| --- | --- | --- | --- | --- |
+| `vX.Y.Z` | stable | non-prerelease | `.github/workflows/release-binaries.yml` publishes binaries and checksum assets | `.github/workflows/release-npm-wrapper.yml` publishes wrapper to `latest` and verifies dist-tag |
+| `vX.Y.Z-beta.N` (or any semver prerelease) | beta | prerelease | `.github/workflows/release-binaries.yml` publishes binaries and marks release as prerelease | `.github/workflows/release-npm-wrapper.yml` publishes wrapper to `beta` and verifies dist-tag |
+
+## Install Preference
+
+- Preferred install path is the matching release artifact + checksum:
   - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz`
   - `specgate-<tag>-x86_64-unknown-linux-gnu.tar.gz.sha256`
-- Verify checksum before unpacking, then assert the extracted `specgate` binary exists and is executable before adding it to `PATH`.
-- Use resilient release asset fetches with retries and bounded connect/overall timeouts.
-- In fallback mode, install from source with an isolated root (`--root "$RUNNER_TEMP/specgate-install/cargo-root" --force`) and add `cargo-root/bin` to `PATH` to avoid runner-path ambiguity.
-- Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are not available, with the hardened root/path behavior above.
-- Example release tag for initial dogfood: `v0.1.0-rc3`.
-- Release verification contract for that tag is `.github/workflows/release-asset-verify.yml`, run after publish:
-  - pass requires checksum verification for all published artifacts
-  - pass requires `specgate --version` smoke checks for each target artifact
-- For `v0.1.0-rc3` and subsequent dogfood releases, only promote after that workflow is green.
+- Verify checksum before unpacking and ensure `specgate --version` succeeds.
+- Keep `cargo install --locked --git https://github.com/treygoff24/specgate --tag <tag>` as fallback when release assets are unavailable.
 
-## Upgrade policy
+## Promotion and Downgrade Rules
 
-- Patch updates: backward-compatible CLI/config behavior.
-- Minor updates: rule expansions and guardrail changes with release-note callouts.
-- Breaking updates: version bump aligned with `Cargo.toml` and `WAVE0_CONTRACT.md`.
-
-## Release cadence target
-
-- Tag a release candidate after baseline and gate verification.
-- Hold in `dogfood` for one full week.
-- Promote to `pre-release` when rollout checklist is complete.
-- Promote to `stable` when metrics pass for two consecutive windows.
-
-## Support model
-
-- `dogfood`: best-effort support via implementation notes.
-- `pre-release`: prioritized issue triage.
-- `stable`: documented support commitments and release notes for every change.
+- Beta is the default dogfood channel for TS/JS v1 changes.
+- Promote beta to stable only after gate, artifact verification, and wrapper publish/verify checks are green.
+- If a Tier-1 regression appears, pause stable promotion and continue on beta until fixed.
+- Full downgrade policy and tier commitments live in [support-matrix-v1](support-matrix-v1.md).

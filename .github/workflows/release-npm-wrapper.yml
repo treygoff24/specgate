@@ -1,0 +1,192 @@
+name: release-npm-wrapper
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example v1.2.3 or v1.2.3-beta.1)
+        required: true
+        type: string
+      package_dir:
+        description: Relative package path (defaults to repository variable NPM_WRAPPER_PACKAGE_DIR)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve:
+    name: resolve-npm-release-metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      npm_dist_tag: ${{ steps.resolve.outputs.npm_dist_tag }}
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+    steps:
+      - name: Resolve release inputs
+        id: resolve
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          DISPATCH_PACKAGE_DIR: ${{ github.event.inputs.package_dir }}
+          DEFAULT_PACKAGE_DIR: ${{ vars.NPM_WRAPPER_PACKAGE_DIR }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${DISPATCH_TAG}"
+          else
+            tag="${RELEASE_TAG}"
+          fi
+
+          if [[ -z "${tag}" ]]; then
+            echo "Unable to resolve release tag." >&2
+            exit 1
+          fi
+
+          if [[ ! "${tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Invalid tag format: ${tag}" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+
+          if [[ "${tag}" == *-* ]]; then
+            channel="beta"
+            npm_dist_tag="beta"
+          else
+            channel="stable"
+            npm_dist_tag="latest"
+          fi
+
+          package_dir="${DISPATCH_PACKAGE_DIR:-${DEFAULT_PACKAGE_DIR:-npm/specgate}}"
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "npm_dist_tag=${npm_dist_tag}" >> "$GITHUB_OUTPUT"
+          echo "package_dir=${package_dir}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: publish-and-verify
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Validate package metadata
+        id: metadata
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ needs.resolve.outputs.package_dir }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          package_json="${PACKAGE_DIR}/package.json"
+          if [[ ! -f "${package_json}" ]]; then
+            echo "Missing package.json at ${package_json}" >&2
+            exit 1
+          fi
+
+          package_name="$(jq -r '.name // empty' "${package_json}")"
+          package_version="$(jq -r '.version // empty' "${package_json}")"
+          package_private="$(jq -r '.private // false' "${package_json}")"
+
+          if [[ -z "${package_name}" ]]; then
+            echo "Package name is missing in ${package_json}" >&2
+            exit 1
+          fi
+
+          if [[ "${package_private}" == "true" ]]; then
+            echo "Refusing to publish private package ${package_name}." >&2
+            exit 1
+          fi
+
+          if [[ "${package_version}" != "${RELEASE_VERSION}" ]]; then
+            echo "Package version ${package_version} does not match release version ${RELEASE_VERSION}." >&2
+            exit 1
+          fi
+
+          echo "name=${package_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ needs.resolve.outputs.package_dir }}
+        run: |
+          set -euo pipefail
+          cd "${PACKAGE_DIR}"
+          if [[ -f "package-lock.json" ]]; then
+            npm ci
+          else
+            npm install --no-fund --no-audit
+          fi
+
+      - name: Publish npm wrapper
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ needs.resolve.outputs.package_dir }}
+          NPM_DIST_TAG: ${{ needs.resolve.outputs.npm_dist_tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "Missing required secret NPM_TOKEN." >&2
+            exit 1
+          fi
+
+          cd "${PACKAGE_DIR}"
+          npm publish --access public --provenance --tag "${NPM_DIST_TAG}"
+
+      - name: Verify publish and dist-tag
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.metadata.outputs.name }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          NPM_DIST_TAG: ${{ needs.resolve.outputs.npm_dist_tag }}
+        run: |
+          set -euo pipefail
+
+          published_version="$(npm view "${PACKAGE_NAME}@${RELEASE_VERSION}" version)"
+          if [[ "${published_version}" != "${RELEASE_VERSION}" ]]; then
+            echo "Expected ${PACKAGE_NAME}@${RELEASE_VERSION} to be published." >&2
+            exit 1
+          fi
+
+          dist_tag_version="$(npm view "${PACKAGE_NAME}" "dist-tags.${NPM_DIST_TAG}")"
+          if [[ "${dist_tag_version}" != "${RELEASE_VERSION}" ]]; then
+            echo "dist-tag ${NPM_DIST_TAG} points to ${dist_tag_version}, expected ${RELEASE_VERSION}." >&2
+            exit 1
+          fi
+
+      - name: Publish summary
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PACKAGE_NAME: ${{ steps.metadata.outputs.name }}
+          NPM_DIST_TAG: ${{ needs.resolve.outputs.npm_dist_tag }}
+        run: |
+          {
+            echo "### release-npm-wrapper summary"
+            echo "- tag: \`${RELEASE_TAG}\`"
+            echo "- channel: \`${CHANNEL}\`"
+            echo "- package: \`${PACKAGE_NAME}\`"
+            echo "- dist-tag: \`${NPM_DIST_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

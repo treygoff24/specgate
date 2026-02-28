@@ -84,3 +84,16 @@ Contract tests are in `tests/contract_fixtures.rs`:
 - Added `src/git_blast/` module for git integration
 - Added contract fixtures in `tests/contract_fixtures.rs`
 - Updated `docs/spec-language.md` with contract documentation
+
+### Post-Wave TS/JS v1 Additions (Channel-Gated)
+
+- Added doctor compare parser modes: `auto|structured|legacy`.
+- Added structured snapshot IO flags:
+  - `--structured-snapshot-in <path>`
+  - `--structured-snapshot-out <path>`
+- Added baseline refresh command surface:
+  - `specgate baseline --refresh`
+- Added config keys:
+  - `stale_baseline: warn|fail`
+  - `release_channel: stable|beta`
+  - `telemetry.enabled: bool` (opt-in; default off)

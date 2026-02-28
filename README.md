@@ -47,6 +47,7 @@ See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the f
 | [Baseline Policy](docs/BASELINE_POLICY.md) | Baseline lifecycle and stale-entry policy |
 | [Dogfood Rollout Checklist](docs/DOGFOOD_ROLLOUT_CHECKLIST.md) | Pre-launch onboarding checklist |
 | [Dogfood Success Metrics](docs/DOGFOOD_SUCCESS_METRICS.md) | Success criteria for dogfood adoption |
+| [TS/JS v1 Support Matrix](docs/support-matrix-v1.md) | Tier 1/2/3 commitments, downgrade rules, stable/beta semantics |
 | [Dogfood Release Channel](docs/DOGFOOD_RELEASE_CHANNEL.md) | Stable/beta channel strategy |
 | [Releasing Guide](RELEASING.md) | Release process and ownership |
 | [Release Notes](RELEASE_NOTES.md) | Current MVP closeout highlights |
