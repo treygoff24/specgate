@@ -95,7 +95,8 @@ boundaries:
 ```
 
 **Contract**:
-- Empty list: All imports allowed (no restriction)
+- Field omitted: All imports allowed (no restriction)
+- Empty list: No cross-module imports allowed
 - Non-empty list: Only listed modules can be imported
 - Exact module ID matching (case-sensitive)
 

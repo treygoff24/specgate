@@ -36,7 +36,8 @@ fn parse_json(stdout: &str) -> serde_json::Value {
 /// ## Contract
 ///
 /// - `allow_imports_from` entries must match exact module IDs
-/// - Empty `allow_imports_from` means all imports are allowed (default deny)
+/// - Omitted `allow_imports_from` means all imports are allowed (no restriction)
+/// - `allow_imports_from: []` means no cross-module imports are allowed
 /// - Non-empty `allow_imports_from` means only listed modules can be imported
 /// - Module IDs are case-sensitive
 #[test]
@@ -231,9 +232,9 @@ export const app = lib;
     );
 }
 
-/// Test that empty allowlist allows all imports (no restriction).
+/// Test that omitted allowlist allows all imports (no restriction).
 #[test]
-fn empty_allow_imports_from_allows_all() {
+fn omitted_allow_imports_from_allows_all() {
     let temp = TempDir::new().expect("tempdir");
 
     // Create modules with NO allowlist restriction
@@ -295,6 +296,88 @@ export const app = lib;
     assert_eq!(
         result.exit_code, EXIT_CODE_PASS,
         "check should pass with no allowlist restriction"
+    );
+}
+
+/// Test that empty allowlist denies cross-module imports.
+#[test]
+fn empty_allow_imports_from_denies_all_cross_module_imports() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from: []
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/lib.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: lib
+boundaries:
+  path: src/lib/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        r#"
+import { lib } from '../lib';
+export const app = lib;
+"#,
+    );
+
+    write_file(
+        temp.path(),
+        "src/lib/index.ts",
+        "export const lib = 1;
+",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:
+  - modules
+exclude: []
+test_patterns: []
+",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "check should fail with empty allowlist"
+    );
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert!(
+        violations
+            .iter()
+            .any(|v| { v["rule"].as_str() == Some("boundary.allow_imports_from") }),
+        "should have boundary.allow_imports_from violation"
     );
 }
 

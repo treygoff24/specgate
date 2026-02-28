@@ -38,6 +38,7 @@ pub const SUPPORTED_SPEC_VERSION: &str = "2.2";
 
 /// A single `.spec.yml` file (one per module).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SpecFile {
     /// Schema version. Must be "2.2".
     pub version: String,
@@ -89,6 +90,7 @@ impl SpecFile {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Boundaries {
     /// Glob pattern for files belonging to this module.
     #[serde(default)]
@@ -98,9 +100,13 @@ pub struct Boundaries {
     pub public_api: Vec<String>,
 
     // importer-side
-    /// Allowlist of modules this module may import from (default deny if non-empty).
+    /// Allowlist of modules this module may import from.
+    ///
+    /// - `None` (field omitted): no importer-side allowlist restriction.
+    /// - `Some(vec![])`: deny all cross-module imports.
+    /// - `Some([...])`: only listed provider modules allowed.
     #[serde(default)]
-    pub allow_imports_from: Vec<String>,
+    pub allow_imports_from: Option<Vec<String>>,
     /// Hard-deny list of modules this module may never import from.
     #[serde(default)]
     pub never_imports: Vec<String>,
@@ -154,6 +160,7 @@ pub enum Visibility {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Constraint {
     /// Rule identifier.
     pub rule: String,

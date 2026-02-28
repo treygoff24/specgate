@@ -275,6 +275,196 @@ fn validate_reports_multiple_issues() {
     assert!(output["error_count"].as_u64().unwrap() >= 2);
 }
 
+#[test]
+fn check_empty_allowlist_blocks_cross_module_imports() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/lib.spec.yml",
+        r#"version: "2.2"
+module: lib
+boundaries:
+  path: src/lib/**/*
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "modules/routes.spec.yml",
+        r#"version: "2.2"
+module: routes
+boundaries:
+  path: src/routes/**/*
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        r#"version: "2.2"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from: []
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { health } from '../routes/health';
+export const app = health;
+",
+    );
+    write_file(
+        temp.path(),
+        "src/lib/index.ts",
+        "export const lib = 1;
+",
+    );
+    write_file(
+        temp.path(),
+        "src/routes/health.ts",
+        "export const health = 'ok';
+",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:
+  - modules
+exclude: []
+test_patterns: []
+",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation["rule"].as_str() == Some("boundary.allow_imports_from")),
+        "expected boundary.allow_imports_from violation"
+    );
+}
+
+#[test]
+fn check_omitted_allowlist_allows_cross_module_imports() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        r#"version: "2.2"
+module: app
+boundaries:
+  path: src/app/**/*
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "modules/routes.spec.yml",
+        r#"version: "2.2"
+module: routes
+boundaries:
+  path: src/routes/**/*
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { health } from '../routes/health';
+export const app = health;
+",
+    );
+    write_file(
+        temp.path(),
+        "src/routes/health.ts",
+        "export const health = 'ok';
+",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:
+  - modules
+exclude: []
+test_patterns: []
+",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "pass");
+}
+
+#[test]
+fn validate_rejects_unknown_boundary_fields() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        r#"version: "2.2"
+module: app
+boundaries:
+  path: src/app/**/*
+  deny_imports_from:
+    - routes
+constraints: []
+"#,
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:
+  - modules
+exclude: []
+test_patterns: []
+",
+    );
+
+    let result = run([
+        "specgate",
+        "validate",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "error");
+    let details = output["details"].as_array().expect("details array");
+    assert!(
+        details.iter().any(|detail| {
+            detail
+                .as_str()
+                .is_some_and(|value| value.contains("unknown field `deny_imports_from`"))
+        }),
+        "expected unknown field parse error, got details: {details:?}"
+    );
+}
+
 // ============================================================================
 // CHECK COMMAND DETERMINISM TESTS
 // ============================================================================

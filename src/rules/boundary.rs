@@ -242,25 +242,27 @@ fn check_importer_side(
         return;
     }
 
-    let allow_set = as_set(&importer_boundaries.allow_imports_from);
-    if !allow_set.is_empty() && !allow_set.contains(provider_module) {
-        let type_allow_set = as_set(&importer_boundaries.allow_type_imports_from);
-        let type_only_carve_out =
-            edge_kind == EdgeKind::TypeOnlyImport && type_allow_set.contains(provider_module);
+    if let Some(allow_imports_from) = importer_boundaries.allow_imports_from.as_deref() {
+        let allow_set = as_set(allow_imports_from);
+        if !allow_set.contains(provider_module) {
+            let type_allow_set = as_set(&importer_boundaries.allow_type_imports_from);
+            let type_only_carve_out =
+                edge_kind == EdgeKind::TypeOnlyImport && type_allow_set.contains(provider_module);
 
-        if !type_only_carve_out {
-            violations.push(build_violation(
-                "boundary.allow_imports_from",
-                format!(
-                    "module '{importer_module}' is not allowed to import from '{provider_module}'"
-                ),
-                from_file,
-                Some(provider_file),
-                Some(importer_module),
-                Some(provider_module),
-                position,
-            ));
-            return;
+            if !type_only_carve_out {
+                violations.push(build_violation(
+                    "boundary.allow_imports_from",
+                    format!(
+                        "module '{importer_module}' is not allowed to import from '{provider_module}'"
+                    ),
+                    from_file,
+                    Some(provider_file),
+                    Some(importer_module),
+                    Some(provider_module),
+                    position,
+                ));
+                return;
+            }
         }
     }
 
@@ -505,6 +507,143 @@ mod tests {
     }
 
     #[test]
+    fn omitted_allow_imports_from_allows_cross_module_imports() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/a/main.ts",
+            "import { b } from '../b/index';
+export const x = b;
+",
+        );
+        write_test_file(
+            temp.path(),
+            "src/b/index.ts",
+            "export const b = 1;
+",
+        );
+
+        let specs = vec![
+            spec_with_boundaries("a", "src/a/**/*", Boundaries::default()),
+            spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn empty_allow_imports_from_denies_cross_module_imports() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/a/main.ts",
+            "import { b } from '../b/index';
+export const x = b;
+",
+        );
+        write_test_file(
+            temp.path(),
+            "src/b/index.ts",
+            "export const b = 1;
+",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec![]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.allow_imports_from");
+    }
+
+    #[test]
+    fn allow_imports_from_specific_modules_allows_listed_and_blocks_others() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/a/main.ts",
+            "import { lib } from '../lib/index';
+import { health } from '../routes/health';
+export const x = { lib, health };
+",
+        );
+        write_test_file(
+            temp.path(),
+            "src/lib/index.ts",
+            "export const lib = 1;
+",
+        );
+        write_test_file(
+            temp.path(),
+            "src/routes/health.ts",
+            "export const health = 'ok';
+",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec!["lib".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("lib", "src/lib/**/*", Boundaries::default()),
+            spec_with_boundaries("routes", "src/routes/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.allow_imports_from");
+        assert_eq!(violations[0].to_module.as_deref(), Some("routes"));
+    }
+
+    #[test]
+    fn self_imports_are_always_allowed_even_with_empty_allowlist() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/a/main.ts",
+            "import { local } from './local';
+export const x = local;
+",
+        );
+        write_test_file(
+            temp.path(),
+            "src/a/local.ts",
+            "export const local = 1;
+",
+        );
+
+        let specs = vec![spec_with_boundaries(
+            "a",
+            "src/a/**/*",
+            Boundaries {
+                allow_imports_from: Some(vec![]),
+                ..Boundaries::default()
+            },
+        )];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
     fn enforces_importer_allow_and_never_with_type_only_carve_out() {
         let temp = TempDir::new().expect("tempdir");
 
@@ -526,7 +665,7 @@ mod tests {
                 "a",
                 "src/a/**/*",
                 Boundaries {
-                    allow_imports_from: vec!["b".to_string()],
+                    allow_imports_from: Some(vec!["b".to_string()]),
                     allow_type_imports_from: vec!["types".to_string()],
                     never_imports: vec!["never".to_string()],
                     ..Boundaries::default()
@@ -727,7 +866,7 @@ mod tests {
                 "a",
                 "src/a/**/*",
                 Boundaries {
-                    allow_imports_from: vec![],
+                    allow_imports_from: Some(vec![]),
                     never_imports: vec!["b".to_string()],
                     enforce_in_tests: false,
                     ..Boundaries::default()
@@ -834,7 +973,7 @@ mod tests {
                 "a",
                 "src/a/**/*",
                 Boundaries {
-                    allow_imports_from: vec!["a".to_string()],
+                    allow_imports_from: Some(vec!["a".to_string()]),
                     ..Boundaries::default()
                 },
             ),
@@ -911,7 +1050,7 @@ mod tests {
                 "a",
                 "src/a/**/*",
                 Boundaries {
-                    allow_imports_from: vec!["a".to_string()],
+                    allow_imports_from: Some(vec!["a".to_string()]),
                     ..Boundaries::default()
                 },
             ),
@@ -952,7 +1091,7 @@ mod tests {
                 "z",
                 "src/z/**/*",
                 Boundaries {
-                    allow_imports_from: vec!["z".to_string()],
+                    allow_imports_from: Some(vec!["z".to_string()]),
                     ..Boundaries::default()
                 },
             ),
@@ -960,7 +1099,7 @@ mod tests {
                 "y",
                 "src/y/**/*",
                 Boundaries {
-                    allow_imports_from: vec!["y".to_string()],
+                    allow_imports_from: Some(vec!["y".to_string()]),
                     ..Boundaries::default()
                 },
             ),

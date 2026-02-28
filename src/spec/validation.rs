@@ -182,6 +182,8 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
 
         let allow_set: BTreeSet<&str> = boundaries
             .allow_imports_from
+            .as_deref()
+            .unwrap_or(&[])
             .iter()
             .map(String::as_str)
             .collect();
@@ -299,7 +301,7 @@ mod tests {
     fn overlap_is_warning() {
         let mut spec = base_spec("orders");
         spec.boundaries = Some(Boundaries {
-            allow_imports_from: vec!["payments".to_string()],
+            allow_imports_from: Some(vec!["payments".to_string()]),
             never_imports: vec!["payments".to_string()],
             ..Boundaries::default()
         });
