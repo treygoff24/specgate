@@ -423,9 +423,10 @@ Add integration fixtures for:
    - Cut an MVP release candidate from the current verified `master` tip (or latest stable release branch point) with attached gate artifacts.
    - Run clean-room verification (fresh clone + documented command path) to confirm onboarding/reproducibility.
 
-2. **Baseline lifecycle policy finalization (P0/P1)**
-   - Resolve stale-baseline policy (`warn` vs `fail`, auto-prune vs manual review) and codify it in CI/docs.
-   - Define operator runbook cadence for baseline refresh and stale-entry triage.
+2. **Baseline lifecycle policy finalization (P0/P1)** ✅ DECIDED 2026-02-27
+   - **Stale entry policy:** Default `warn` — CI passes but reports stale baseline entries. Config flag `stale_baseline: fail` available for teams wanting strict hygiene. Auto-prune rejected (loses audit trail; can't distinguish "fixed" from "silently disappeared").
+   - **Refresh cadence:** Operator-defined. Specgate surfaces stale counts; teams decide review rhythm (per-release recommended, weekly for strict shops).
+   - **CLI:** `specgate baseline --refresh` to prune stale entries after review. `specgate check` output includes `stale_baseline_entries` count in summary.
 
 3. **Doctor parity depth for monorepos/project references (P1)**
    - Add focused fixtures covering project references and complex path alias overlaps.
@@ -443,7 +444,7 @@ Add integration fixtures for:
 
 - [x] Tag `v0.1.0-rc3` from the current verified head after quick smoke verification.
 - [x] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`) at `docs/release-artifacts/v0.1.0-rc3-gate-evidence.md` (historical `v0.1.0-rc2` evidence remains in `docs/release-artifacts/v0.1.0-rc2-gate-evidence.md`, with `v0.1.0-rc1` evidence in `docs/release-artifacts/v0.1.0-rc1-gate-evidence.md`).
-- [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location.
+- [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location. ✅ DECIDED 2026-02-27 (warn default, opt-in fail, no auto-prune).
 - [x] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
 - [x] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
 - [x] Draft release notes summarizing landed lanes, rule-impacting changes, and operator action items.
@@ -488,8 +489,20 @@ Add integration fixtures for:
 
 ## 18. Open Implementation Questions
 
-1. Should `friend_modules` bypass `allow_imported_by` or only visibility gates? (recommended: bypass visibility only, still subject to explicit deny)
-2. Baseline lifecycle policy: auto-prune stale fingerprints vs manual review gate?
-3. `doctor compare` implementation detail: parse `tsc --traceResolution` text robustly in monorepos with project references.
+1. ~~Should `friend_modules` bypass `allow_imported_by` or only visibility gates?~~ — ✅ DECIDED 2026-02-27. **Friends bypass visibility gates only.** Explicit denies (`deny_imported_by`) always win. `allow_imported_by` allowlists are NOT bypassed by friends — if you set an allowlist, friends still need to be on it. Principle: deny always wins, friends are a visibility exemption, not a superuser pass.
+2. ~~Baseline lifecycle policy~~ — ✅ DECIDED 2026-02-27. See §15 item 2.
+3. `doctor compare` implementation detail: parse `tsc --traceResolution` text robustly in monorepos with project references. — **OPEN. Implementation detail, not blocking.**
 
-These do not block current MVP gate operation, but should be resolved before broader rollout.
+Only question 1 requires a design decision before broader rollout.
+
+---
+
+## 18. Post-MVP: Architectural Pattern Scanning
+
+**Status:** Deferred until after MVP.
+
+Beyond import-graph boundary enforcement, Specgate could scan for broader architectural patterns via regex — detecting usages of deprecated APIs, convention violations, naming rule enforcement, or custom pattern rules defined in spec files. This would extend Specgate from "did you respect the import graph?" to "did you respect the project's conventions?"
+
+**Candidate dependency:** [`ripgrep-api`](https://crates.io/crates/ripgrep-api) by Alex Younger (@AlextheYounga) — a clean Rust API wrapper around ripgrep's core crates. Builder pattern, structured `Match` results with file/line/text, glob filtering, threading, mmap support, streaming callbacks. Well-designed for programmatic use. Not needed for MVP (import resolution requires AST, not regex), but a natural fit for pattern scanning.
+
+**GitHub:** https://github.com/AlextheYounga/ripgrep-api
