@@ -90,10 +90,10 @@ jobs:
             exit 1
           fi
 
-          TARBALL_URL="$(jq -r --arg name "$TARBALL_NAME" '.assets[] | select(.name == $name) | .browser_download_url' /tmp/release.json)"
-          SHA_URL="$(jq -r --arg name "$SHA_NAME" '.assets[] | select(.name == $name) | .browser_download_url' /tmp/release.json)"
+          TARBALL_ASSET_URL="$(jq -r --arg name "$TARBALL_NAME" '.assets[] | select(.name == $name) | .url' /tmp/release.json)"
+          SHA_ASSET_URL="$(jq -r --arg name "$SHA_NAME" '.assets[] | select(.name == $name) | .url' /tmp/release.json)"
 
-          if [ -z "$TARBALL_URL" ] || [ -z "$SHA_URL" ]; then
+          if [ -z "$TARBALL_ASSET_URL" ] || [ -z "$SHA_ASSET_URL" ]; then
             echo "Unable to resolve release asset download URLs for target ${TARGET}."
             exit 1
           fi
@@ -103,8 +103,19 @@ jobs:
           TARBALL_PATH="${WORKDIR}/${TARBALL_NAME}"
           SHA_PATH="${WORKDIR}/${SHA_NAME}"
 
-          curl_with_retries --output "$TARBALL_PATH" "$TARBALL_URL"
-          curl_with_retries --output "$SHA_PATH" "$SHA_URL"
+          curl_with_retries \
+            --header "Accept: application/octet-stream" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$TARBALL_PATH" \
+            "$TARBALL_ASSET_URL"
+
+          curl_with_retries \
+            --header "Accept: application/octet-stream" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$SHA_PATH" \
+            "$SHA_ASSET_URL"
 
           cd "$WORKDIR"
           if command -v sha256sum >/dev/null; then
