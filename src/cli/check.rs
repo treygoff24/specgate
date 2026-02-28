@@ -37,6 +37,12 @@ pub struct CheckArgs {
     /// Disable baseline classification.
     #[arg(long)]
     pub no_baseline: bool,
+    /// Enable telemetry emission for this run (opt-in).
+    #[arg(long, conflicts_with = "no_telemetry")]
+    pub telemetry: bool,
+    /// Force telemetry disabled for this run.
+    #[arg(long, conflicts_with = "telemetry")]
+    pub no_telemetry: bool,
 
     // Baseline diff mode (preferred naming)
     /// Output diff between current and baseline violations.
@@ -132,6 +138,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -152,6 +160,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: true,
             baseline_new_only: false,
             since: None,
@@ -171,6 +181,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: true,
             baseline_new_only: true,
             since: None,
@@ -189,6 +201,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -211,6 +225,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -233,6 +249,8 @@ mod tests {
             metrics: false,
             baseline: PathBuf::from(DEFAULT_BASELINE_PATH),
             no_baseline: false,
+            telemetry: false,
+            no_telemetry: false,
             baseline_diff: false,
             baseline_new_only: false,
             since: Some("HEAD~1".to_string()),

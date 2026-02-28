@@ -86,6 +86,66 @@ fn check_with_metrics_includes_timing_metadata() {
 }
 
 #[test]
+fn telemetry_is_opt_in_via_config_or_runtime_flag() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    // Default is off.
+    let default_result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+    assert_eq!(default_result.exit_code, EXIT_CODE_PASS);
+    assert!(!default_result.stdout.contains("\"telemetry\""));
+
+    // Runtime opt-in turns telemetry on.
+    let runtime_opt_in = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+        "--telemetry",
+    ]);
+    assert_eq!(runtime_opt_in.exit_code, EXIT_CODE_PASS);
+    let runtime_opt_in_json = parse_json(&runtime_opt_in.stdout);
+    assert!(runtime_opt_in_json.get("telemetry").is_some());
+    assert_eq!(runtime_opt_in_json["telemetry"]["event"], "check_completed");
+
+    // Config opt-in also turns telemetry on.
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\ntelemetry:\n  enabled: true\n",
+    );
+    let config_opt_in = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+    assert_eq!(config_opt_in.exit_code, EXIT_CODE_PASS);
+    let config_opt_in_json = parse_json(&config_opt_in.stdout);
+    assert!(config_opt_in_json.get("telemetry").is_some());
+
+    // Runtime explicit off wins.
+    let runtime_force_off = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+        "--no-telemetry",
+    ]);
+    assert_eq!(runtime_force_off.exit_code, EXIT_CODE_PASS);
+    assert!(!runtime_force_off.stdout.contains("\"telemetry\""));
+}
+
+#[test]
 fn check_with_custom_baseline_path_marks_report_only() {
     let temp = TempDir::new().expect("tempdir");
     write_project(temp.path());
@@ -366,6 +426,98 @@ fn doctor_compare_focus_mismatch_includes_actionable_hint() {
 }
 
 #[test]
+fn doctor_compare_structured_snapshot_in_and_out_paths_work() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+    write_file(
+        temp.path(),
+        "structured-input.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    { "from": "src/app/main.ts", "to": "src/core/index.ts" }
+  ],
+  "resolutions": [
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/index.ts",
+      "trace": ["fixture"]
+    }
+  ]
+}
+"#,
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path()
+            .join("structured-input.json")
+            .to_str()
+            .expect("utf8"),
+        "--structured-snapshot-out",
+        "structured-output/out.json",
+        "--parser-mode",
+        "structured",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(result.stdout.contains("\"status\": \"match\""));
+    assert!(
+        result
+            .stdout
+            .contains("\"trace_parser\": \"structured_snapshot\"")
+    );
+    assert!(
+        result
+            .stdout
+            .contains("\"structured_snapshot_out\": \"structured-output/out.json\"")
+    );
+
+    let structured_output = fs::read_to_string(temp.path().join("structured-output/out.json"))
+        .expect("structured snapshot output should exist");
+    let snapshot = parse_json(&structured_output);
+    assert_eq!(snapshot["schema_version"], "1");
+    assert_eq!(snapshot["edges"][0]["from"], "src/app/main.ts");
+    assert_eq!(snapshot["edges"][0]["to"], "src/core/index.ts");
+}
+
+#[test]
+fn doctor_compare_auto_mode_blocks_raw_trace_text_without_beta_hook() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+
+    let app = temp.path().join("src/app/main.ts");
+    let core = temp.path().join("src/core/index.ts");
+    let trace = format!(
+        "======== Resolving module '../core/index' from '{}'. ========\n======== Module name '../core/index' was successfully resolved to '{}'. ========\n",
+        app.display(),
+        core.display()
+    );
+    write_file(temp.path(), "trace.log", &trace);
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.log").to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    assert!(result.stdout.contains("\"status\": \"error\""));
+    assert!(result.stdout.contains("beta-only"));
+}
+
+#[test]
 fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
     let temp = TempDir::new().expect("tempdir");
 
@@ -382,7 +534,7 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
     write_file(
         temp.path(),
         "specgate.config.yml",
-        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nrelease_channel: beta\n",
     );
     write_file(
         temp.path(),

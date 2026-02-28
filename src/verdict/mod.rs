@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::deterministic::normalize_repo_relative;
 use crate::spec::Severity;
+use crate::spec::config::StaleBaselinePolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyViolation {
@@ -88,6 +89,45 @@ pub struct VerdictMetrics {
     pub total_ms: u128,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VerdictGovernance {
+    pub stale_baseline_policy: StaleBaselinePolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryEventName {
+    CheckCompleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnonymizedTelemetrySummary {
+    pub total_violations: usize,
+    pub new_violations: usize,
+    pub baseline_violations: usize,
+    pub new_error_violations: usize,
+    pub new_warning_violations: usize,
+    pub stale_baseline_entries: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnonymizedTelemetryEvent {
+    pub schema_version: String,
+    pub event: TelemetryEventName,
+    /// Stable project-level hash supplied by the caller; never raw repo paths/names.
+    pub project_fingerprint: String,
+    pub config_hash: String,
+    pub spec_hash: String,
+    pub status: VerdictStatus,
+    pub summary: AnonymizedTelemetrySummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VerdictBuildOptions {
+    pub stale_baseline_policy: StaleBaselinePolicy,
+    pub telemetry: Option<AnonymizedTelemetryEvent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerdictIdentity {
     pub tool_version: String,
@@ -116,6 +156,10 @@ pub struct Verdict {
     pub violations: Vec<VerdictViolation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<VerdictMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub governance: Option<VerdictGovernance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<AnonymizedTelemetryEvent>,
 }
 
 /// Governance context for verdict building.
@@ -154,6 +198,26 @@ pub fn build_verdict_with_governance(
     identity: VerdictIdentity,
     governance: GovernanceContext,
 ) -> Verdict {
+    build_verdict_with_options(
+        project_root,
+        violations,
+        suppressed_violations,
+        metrics,
+        identity,
+        governance,
+        VerdictBuildOptions::default(),
+    )
+}
+
+pub fn build_verdict_with_options(
+    project_root: &Path,
+    violations: &[FingerprintedViolation],
+    suppressed_violations: usize,
+    metrics: Option<VerdictMetrics>,
+    identity: VerdictIdentity,
+    governance: GovernanceContext,
+    options: VerdictBuildOptions,
+) -> Verdict {
     let mut rendered = violations
         .iter()
         .map(|entry| render_violation(project_root, entry))
@@ -176,10 +240,20 @@ pub fn build_verdict_with_governance(
         suppressed_violations,
         governance.stale_baseline_entries,
     );
-    let status = if summary.new_error_violations > 0 {
+    let fail_on_stale = options.stale_baseline_policy == StaleBaselinePolicy::Fail
+        && summary.stale_baseline_entries > 0;
+    let status = if summary.new_error_violations > 0 || fail_on_stale {
         VerdictStatus::Fail
     } else {
         VerdictStatus::Pass
+    };
+
+    let governance_payload = if options.stale_baseline_policy == StaleBaselinePolicy::Warn {
+        None
+    } else {
+        Some(VerdictGovernance {
+            stale_baseline_policy: options.stale_baseline_policy,
+        })
     };
 
     Verdict {
@@ -201,6 +275,8 @@ pub fn build_verdict_with_governance(
         summary,
         violations: rendered,
         metrics,
+        governance: governance_payload,
+        telemetry: options.telemetry,
     }
 }
 
@@ -385,6 +461,8 @@ mod tests {
         assert!(rendered.contains("\"spec_files_changed\":[]"));
         assert!(rendered.contains("\"rule_deltas\":[]"));
         assert!(rendered.contains("\"policy_change_detected\":false"));
+        assert!(!rendered.contains("\"governance\""));
+        assert!(!rendered.contains("\"telemetry\""));
     }
 
     #[test]
@@ -472,5 +550,100 @@ mod tests {
         let rendered = serde_json::to_string(&verdict).expect("serialize");
         assert!(rendered.contains("\"boundary.never_imports:added\""));
         assert!(rendered.contains("\"policy_change_detected\":true"));
+    }
+
+    #[test]
+    fn stale_baseline_policy_fail_flips_status_without_new_errors() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.public_api", Severity::Warning, "src/a.ts", "warn"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let warn_verdict = build_verdict_with_governance(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 2,
+                rule_deltas: Vec::new(),
+                policy_change_detected: false,
+            },
+        );
+        assert_eq!(warn_verdict.status, VerdictStatus::Pass);
+
+        let fail_verdict = build_verdict_with_options(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 2,
+                rule_deltas: Vec::new(),
+                policy_change_detected: false,
+            },
+            VerdictBuildOptions {
+                stale_baseline_policy: StaleBaselinePolicy::Fail,
+                telemetry: None,
+            },
+        );
+
+        assert_eq!(fail_verdict.status, VerdictStatus::Fail);
+        assert_eq!(
+            fail_verdict.governance,
+            Some(VerdictGovernance {
+                stale_baseline_policy: StaleBaselinePolicy::Fail,
+            })
+        );
+        let rendered = serde_json::to_string(&fail_verdict).expect("serialize");
+        assert!(rendered.contains("\"stale_baseline_policy\":\"fail\""));
+    }
+
+    #[test]
+    fn verdict_optionally_serializes_anonymized_telemetry_payload() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.never_imports", Severity::Error, "src/a.ts", "bad"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let telemetry = AnonymizedTelemetryEvent {
+            schema_version: "1".to_string(),
+            event: TelemetryEventName::CheckCompleted,
+            project_fingerprint: "sha256:project".to_string(),
+            config_hash: "sha256:config".to_string(),
+            spec_hash: "sha256:spec".to_string(),
+            status: VerdictStatus::Fail,
+            summary: AnonymizedTelemetrySummary {
+                total_violations: 1,
+                new_violations: 1,
+                baseline_violations: 0,
+                new_error_violations: 1,
+                new_warning_violations: 0,
+                stale_baseline_entries: 0,
+            },
+        };
+
+        let verdict = build_verdict_with_options(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext::default(),
+            VerdictBuildOptions {
+                stale_baseline_policy: StaleBaselinePolicy::Warn,
+                telemetry: Some(telemetry.clone()),
+            },
+        );
+
+        assert_eq!(verdict.telemetry, Some(telemetry));
+        let rendered = serde_json::to_string(&verdict).expect("serialize");
+        assert!(rendered.contains("\"telemetry\""));
+        assert!(rendered.contains("\"event\":\"check_completed\""));
+        assert!(rendered.contains("\"project_fingerprint\":\"sha256:project\""));
     }
 }

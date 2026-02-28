@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
     BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations_with_stale, load_optional_baseline, write_baseline,
+    classify_violations_with_stale, load_optional_baseline, refresh_baseline, write_baseline,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -31,13 +31,15 @@ use crate::rules::{
     RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
     is_canonical_import_rule_id,
 };
+use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
     self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
     types::SUPPORTED_SPEC_VERSION,
 };
 use crate::verdict::{
-    self, GovernanceContext, PolicyViolation, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    build_verdict_with_governance,
+    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
+    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
+    build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience
@@ -119,6 +121,9 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
+    /// Refresh an existing baseline by pruning stale entries.
+    #[arg(long)]
+    refresh: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -157,6 +162,15 @@ enum DoctorCommand {
 struct DoctorCompareArgs {
     #[command(flatten)]
     common: CommonProjectArgs,
+    /// Parser mode for tsc parity payloads.
+    #[arg(long, value_enum, default_value_t = DoctorCompareParserMode::Auto)]
+    parser_mode: DoctorCompareParserMode,
+    /// Read structured trace snapshot JSON from this path.
+    #[arg(long, conflicts_with_all = ["tsc_trace", "tsc_command"])]
+    structured_snapshot_in: Option<PathBuf>,
+    /// Write normalized structured trace snapshot JSON to this path.
+    #[arg(long)]
+    structured_snapshot_out: Option<PathBuf>,
     /// Trace payload file: JSON edge data or raw `tsc --traceResolution` output text.
     #[arg(long)]
     tsc_trace: Option<PathBuf>,
@@ -175,6 +189,24 @@ struct DoctorCompareArgs {
     /// Import specifier paired with `--from` for single-edge diagnostics.
     #[arg(long = "import")]
     import_specifier: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "lower")]
+enum DoctorCompareParserMode {
+    Auto,
+    Structured,
+    Legacy,
+}
+
+impl DoctorCompareParserMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Structured => "structured",
+            Self::Legacy => "legacy",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +269,8 @@ struct BaselineOutput {
     baseline_path: String,
     entry_count: usize,
     source_violation_count: usize,
+    refreshed: bool,
+    stale_entries_pruned: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -275,6 +309,9 @@ struct DoctorCompareOutput {
     schema_version: String,
     status: String,
     parity_verdict: String,
+    parser_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace_parser: Option<String>,
     configured: bool,
     reason: Option<String>,
     specgate_edge_count: usize,
@@ -282,7 +319,13 @@ struct DoctorCompareOutput {
     missing_in_specgate: Vec<String>,
     extra_in_specgate: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    mismatch_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     actionable_mismatch_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    structured_snapshot_in: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    structured_snapshot_out: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     specgate_resolution: Option<DoctorCompareResolutionOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -537,7 +580,18 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             .collect();
     }
 
-    let verdict = build_verdict_with_governance(
+    let telemetry_enabled = if args.no_telemetry {
+        false
+    } else if args.telemetry {
+        true
+    } else {
+        loaded.config.telemetry.enabled
+    };
+
+    let config_hash_for_telemetry = governance.config_hash.clone();
+    let spec_hash_for_telemetry = governance.spec_hash.clone();
+
+    let mut verdict = build_verdict_with_options(
         &loaded.project_root,
         &classified,
         artifacts.suppressed_violations,
@@ -557,7 +611,20 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             rule_deltas: Vec::new(),
             policy_change_detected: false,
         },
+        VerdictBuildOptions {
+            stale_baseline_policy: loaded.config.stale_baseline,
+            telemetry: None,
+        },
     );
+
+    if telemetry_enabled {
+        verdict.telemetry = Some(build_anonymized_telemetry_event(
+            &loaded.project_root,
+            &config_hash_for_telemetry,
+            &spec_hash_for_telemetry,
+            &verdict,
+        ));
+    }
 
     let exit_code = match verdict.status {
         VerdictStatus::Pass => EXIT_CODE_PASS,
@@ -609,6 +676,13 @@ fn build_blast_radius_data(
 ) -> BlastRadiusData {
     let mut module_to_files: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut file_to_module: BTreeMap<String, String> = BTreeMap::new();
+    let project_files = walkdir::WalkDir::new(&loaded.project_root)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|entry| normalize_repo_relative(&loaded.project_root, entry.path()))
+        .collect::<Vec<_>>();
 
     // Map files to modules based on spec boundaries
     for spec in &loaded.specs {
@@ -627,18 +701,10 @@ fn build_blast_radius_data(
             if let Some(path_glob) = &boundaries.path {
                 if let Ok(glob) = globset::Glob::new(path_glob) {
                     if let Ok(set) = globset::GlobSetBuilder::new().add(glob).build() {
-                        // Walk project files
-                        for file_entry in walkdir::WalkDir::new(&loaded.project_root)
-                            .follow_links(true)
-                            .into_iter()
-                            .filter_map(std::result::Result::ok)
-                            .filter(|e| e.file_type().is_file())
-                        {
-                            let relative =
-                                normalize_repo_relative(&loaded.project_root, file_entry.path());
-                            if set.is_match(&relative) {
+                        for relative in &project_files {
+                            if set.is_match(relative) {
                                 files_set.insert(relative.clone());
-                                file_to_module.insert(relative, module_id.clone());
+                                file_to_module.insert(relative.clone(), module_id.clone());
                             }
                         }
                     }
@@ -793,8 +859,14 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
     // Add stale baseline entry count if non-zero
     if stale_baseline_entries > 0 {
         lines.push(format!(
-            "Stale baseline entries: {stale_baseline_entries} (consider pruning with `specgate baseline --output`)"
+            "Stale baseline entries: {stale_baseline_entries} (consider pruning with `specgate baseline --refresh`)"
         ));
+        if loaded.config.stale_baseline == StaleBaselinePolicy::Fail {
+            lines.push(
+                "Stale baseline policy is `fail`; run `specgate baseline --refresh` after review."
+                    .to_string(),
+            );
+        }
     }
 
     // Determine exit code based on new errors
@@ -802,8 +874,10 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         matches!(v.disposition, verdict::ViolationDisposition::New)
             && v.violation.severity == Severity::Error
     });
+    let stale_policy_failure =
+        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && stale_baseline_entries > 0;
 
-    let exit_code = if has_new_errors {
+    let exit_code = if has_new_errors || stale_policy_failure {
         EXIT_CODE_POLICY_VIOLATIONS
     } else {
         EXIT_CODE_PASS
@@ -1084,17 +1158,53 @@ fn handle_baseline(args: BaselineArgs) -> CliRunResult {
         }
     };
 
-    let baseline = build_baseline_with_metadata(
-        &loaded.project_root,
-        &artifacts.policy_violations,
-        BaselineGeneratedFrom {
-            tool_version: build_info::tool_version().to_string(),
-            git_sha: build_info::git_sha().to_string(),
-            config_hash: governance.config_hash,
-            spec_hash: governance.spec_hash,
-        },
-    );
     let baseline_path = resolve_against_root(&loaded.project_root, &args.output);
+    let generated_from = BaselineGeneratedFrom {
+        tool_version: build_info::tool_version().to_string(),
+        git_sha: build_info::git_sha().to_string(),
+        config_hash: governance.config_hash,
+        spec_hash: governance.spec_hash,
+    };
+
+    let (baseline, stale_entries_pruned) = if args.refresh {
+        let existing = match load_optional_baseline(&baseline_path) {
+            Ok(existing) => existing,
+            Err(error) => {
+                return runtime_error_json(
+                    "baseline",
+                    "failed to load baseline file for refresh",
+                    vec![error.to_string()],
+                );
+            }
+        };
+
+        if let Some(existing) = existing.as_ref() {
+            let refreshed = refresh_baseline(
+                &loaded.project_root,
+                &artifacts.policy_violations,
+                Some(existing),
+            );
+            (refreshed.baseline, refreshed.stale_entries_pruned)
+        } else {
+            (
+                build_baseline_with_metadata(
+                    &loaded.project_root,
+                    &artifacts.policy_violations,
+                    generated_from.clone(),
+                ),
+                0usize,
+            )
+        }
+    } else {
+        (
+            build_baseline_with_metadata(
+                &loaded.project_root,
+                &artifacts.policy_violations,
+                generated_from,
+            ),
+            0usize,
+        )
+    };
 
     if let Err(error) = write_baseline(&baseline_path, &baseline) {
         return runtime_error_json(
@@ -1110,6 +1220,8 @@ fn handle_baseline(args: BaselineArgs) -> CliRunResult {
         baseline_path: normalize_repo_relative(&loaded.project_root, &baseline_path),
         entry_count: baseline.entries.len(),
         source_violation_count: artifacts.policy_violations.len(),
+        refreshed: args.refresh,
+        stale_entries_pruned,
     };
 
     CliRunResult::json(EXIT_CODE_PASS, &output)
@@ -1248,23 +1360,35 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         }
     };
 
+    let legacy_trace_allowed = doctor_compare_beta_channel_enabled(&loaded.config);
     let compare_specgate_edges = filter_edges_for_focus(&artifacts.edge_pairs, focus.as_ref());
     let specgate_resolution = focus
         .as_ref()
         .map(|focus| focus.specgate_resolution.clone());
+    let structured_snapshot_in = args.structured_snapshot_in.as_ref().map(|path| {
+        normalize_repo_relative(
+            &loaded.project_root,
+            &resolve_against_root(&loaded.project_root, path),
+        )
+    });
 
     let Some(trace_source_payload) = trace_source.payload else {
         let output = DoctorCompareOutput {
             schema_version: "2.2".to_string(),
             status: "skipped".to_string(),
             parity_verdict: "SKIPPED".to_string(),
+            parser_mode: args.parser_mode.as_str().to_string(),
+            trace_parser: None,
             configured: trace_source.configured,
             reason: trace_source.reason,
             specgate_edge_count: compare_specgate_edges.len(),
             trace_edge_count: 0,
             missing_in_specgate: Vec::new(),
             extra_in_specgate: Vec::new(),
+            mismatch_category: None,
             actionable_mismatch_hint: None,
+            structured_snapshot_in,
+            structured_snapshot_out: None,
             specgate_resolution,
             tsc_trace_resolution: None,
             focus: focus.as_ref().map(|focus| focus.output.clone()),
@@ -1273,7 +1397,12 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         return CliRunResult::json(EXIT_CODE_PASS, &output);
     };
 
-    let parsed_trace = match parse_trace_data(&loaded.project_root, &trace_source_payload) {
+    let parsed_trace = match parse_trace_data(
+        &loaded.project_root,
+        &trace_source_payload,
+        args.parser_mode,
+        legacy_trace_allowed,
+    ) {
         Ok(trace) => trace,
         Err(error) => {
             return runtime_error_json(
@@ -1283,8 +1412,25 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
             );
         }
     };
+    let parsed_trace_data = parsed_trace.data;
 
-    let compare_trace_edges = filter_edges_for_focus(&parsed_trace.edges, focus.as_ref());
+    let structured_snapshot_out = match &args.structured_snapshot_out {
+        Some(output_path) => {
+            match write_structured_snapshot(&loaded.project_root, output_path, &parsed_trace_data) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    return runtime_error_json(
+                        "doctor.compare",
+                        "failed to write structured snapshot output",
+                        vec![error],
+                    );
+                }
+            }
+        }
+        None => None,
+    };
+
+    let compare_trace_edges = filter_edges_for_focus(&parsed_trace_data.edges, focus.as_ref());
 
     let missing_in_specgate = compare_trace_edges
         .difference(&compare_specgate_edges)
@@ -1304,7 +1450,15 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
 
     let tsc_trace_resolution = focus
         .as_ref()
-        .map(|focus| derive_tsc_focus_resolution(&parsed_trace, focus));
+        .map(|focus| derive_tsc_focus_resolution(&parsed_trace_data, focus));
+    let mismatch_category = classify_doctor_compare_mismatch(
+        status,
+        focus.as_ref(),
+        specgate_resolution.as_ref(),
+        tsc_trace_resolution.as_ref(),
+        &missing_in_specgate,
+        &extra_in_specgate,
+    );
 
     let actionable_mismatch_hint = build_actionable_mismatch_hint(
         status,
@@ -1319,13 +1473,18 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         schema_version: "2.2".to_string(),
         status: status.to_string(),
         parity_verdict: parity_verdict_for_status(status).to_string(),
+        parser_mode: args.parser_mode.as_str().to_string(),
+        trace_parser: Some(parsed_trace.parser_kind.as_str().to_string()),
         configured: true,
         reason: trace_source.reason,
         specgate_edge_count: compare_specgate_edges.len(),
         trace_edge_count: compare_trace_edges.len(),
         missing_in_specgate,
         extra_in_specgate,
+        mismatch_category,
         actionable_mismatch_hint,
+        structured_snapshot_in,
+        structured_snapshot_out,
         specgate_resolution,
         tsc_trace_resolution,
         focus: focus.as_ref().map(|focus| focus.output.clone()),
@@ -1437,6 +1596,25 @@ fn load_trace_source(
     project_root: &Path,
     args: &DoctorCompareArgs,
 ) -> std::result::Result<TraceSource, String> {
+    if let Some(snapshot_path) = &args.structured_snapshot_in {
+        let resolved = resolve_against_root(project_root, snapshot_path);
+        let source = fs::read_to_string(&resolved).map_err(|error| {
+            format!(
+                "failed to read structured snapshot file {}: {error}",
+                resolved.display()
+            )
+        })?;
+
+        return Ok(TraceSource {
+            configured: true,
+            payload: Some(source),
+            reason: Some(format!(
+                "loaded structured snapshot file '{}'",
+                normalize_repo_relative(project_root, &resolved)
+            )),
+        });
+    }
+
     if let Some(trace_path) = &args.tsc_trace {
         let resolved = resolve_against_root(project_root, trace_path);
         let source = fs::read_to_string(&resolved).map_err(|error| {
@@ -1536,6 +1714,7 @@ fn is_command_available(command: &str) -> bool {
 const TRACE_JSON_MAX_DEPTH: usize = 256;
 const TRACE_JSON_MAX_VISITED_NODES: usize = 1_000_000;
 const TRACE_STEPS_MAX_LINES: usize = 48;
+const STRUCTURED_TRACE_SCHEMA_VERSION: &str = "1";
 
 #[derive(Debug, Clone)]
 struct ParsedTraceData {
@@ -1553,26 +1732,281 @@ struct TraceResolutionRecord {
     trace: Vec<String>,
 }
 
-fn parse_trace_data(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TraceParserKind {
+    StructuredSnapshot,
+    LegacyTraceText,
+}
+
+impl TraceParserKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StructuredSnapshot => "structured_snapshot",
+            Self::LegacyTraceText => "legacy_trace_text",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ParsedTraceResult {
+    data: ParsedTraceData,
+    parser_kind: TraceParserKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StructuredTraceSnapshot {
+    #[serde(default = "structured_trace_schema_version")]
+    schema_version: String,
+    #[serde(default)]
+    edges: Vec<StructuredTraceEdge>,
+    #[serde(default)]
+    resolutions: Vec<StructuredTraceResolution>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StructuredTraceEdge {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StructuredTraceResolution {
+    from: String,
+    #[serde(alias = "import", alias = "specifier")]
+    import_specifier: String,
+    #[serde(default, alias = "resolution_kind")]
+    result_kind: Option<String>,
+    #[serde(default, alias = "resolvedTo", alias = "to")]
+    resolved_to: Option<String>,
+    #[serde(default, alias = "packageName")]
+    package_name: Option<String>,
+    #[serde(default)]
+    trace: Vec<String>,
+}
+
+fn structured_trace_schema_version() -> String {
+    STRUCTURED_TRACE_SCHEMA_VERSION.to_string()
+}
+
+fn parse_structured_trace_data(
     project_root: &Path,
     trace_source: &str,
 ) -> std::result::Result<ParsedTraceData, String> {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trace_source) {
-        let mut edges = BTreeSet::new();
-        let mut resolutions = Vec::new();
-        collect_trace_data_iterative(project_root, &value, &mut edges, &mut resolutions)?;
-        return Ok(ParsedTraceData { edges, resolutions });
+    let value = serde_json::from_str::<serde_json::Value>(trace_source)
+        .map_err(|error| format!("structured snapshot JSON parse failed: {error}"))?;
+
+    if let Ok(snapshot) = serde_json::from_value::<StructuredTraceSnapshot>(value.clone()) {
+        if snapshot.schema_version != STRUCTURED_TRACE_SCHEMA_VERSION
+            && snapshot.schema_version != "1.0.0"
+        {
+            return Err(format!(
+                "structured snapshot schema_version '{}' is not supported (expected '{}' or '1.0.0')",
+                snapshot.schema_version, STRUCTURED_TRACE_SCHEMA_VERSION
+            ));
+        }
+        return Ok(parsed_trace_data_from_structured_snapshot(
+            project_root,
+            snapshot,
+        ));
     }
 
+    let mut edges = BTreeSet::new();
+    let mut resolutions = Vec::new();
+    collect_trace_data_iterative(project_root, &value, &mut edges, &mut resolutions)?;
+    if edges.is_empty() && resolutions.is_empty() {
+        return Err(
+            "structured snapshot JSON did not contain any trace edges or resolution records"
+                .to_string(),
+        );
+    }
+
+    Ok(ParsedTraceData { edges, resolutions })
+}
+
+fn parse_legacy_trace_data(
+    project_root: &Path,
+    trace_source: &str,
+) -> std::result::Result<ParsedTraceData, String> {
     let parsed_text = parse_tsc_trace_text_records(project_root, trace_source);
     if parsed_text.edges.is_empty() && parsed_text.resolutions.is_empty() {
         return Err(
-            "trace parse error: expected JSON edge payload or `tsc --traceResolution` text output"
+            "legacy parser expected raw `tsc --traceResolution` text with resolvable records"
                 .to_string(),
         );
     }
 
     Ok(parsed_text)
+}
+
+fn parse_trace_data(
+    project_root: &Path,
+    trace_source: &str,
+    parser_mode: DoctorCompareParserMode,
+    legacy_trace_allowed: bool,
+) -> std::result::Result<ParsedTraceResult, String> {
+    match parser_mode {
+        DoctorCompareParserMode::Structured => {
+            let parsed = parse_structured_trace_data(project_root, trace_source)
+                .map_err(|error| format!("parser mode `structured` failed: {error}"))?;
+            Ok(ParsedTraceResult {
+                data: parsed,
+                parser_kind: TraceParserKind::StructuredSnapshot,
+            })
+        }
+        DoctorCompareParserMode::Legacy => {
+            if !legacy_trace_allowed {
+                return Err(
+                    "parser mode `legacy` is beta-only right now; enable the beta path before using raw traceResolution text"
+                        .to_string(),
+                );
+            }
+
+            let parsed = parse_legacy_trace_data(project_root, trace_source)
+                .map_err(|error| format!("parser mode `legacy` failed: {error}"))?;
+            Ok(ParsedTraceResult {
+                data: parsed,
+                parser_kind: TraceParserKind::LegacyTraceText,
+            })
+        }
+        DoctorCompareParserMode::Auto => {
+            match parse_structured_trace_data(project_root, trace_source) {
+                Ok(parsed) => Ok(ParsedTraceResult {
+                    data: parsed,
+                    parser_kind: TraceParserKind::StructuredSnapshot,
+                }),
+                Err(structured_error) => {
+                    if !legacy_trace_allowed {
+                        return Err(format!(
+                            "parser mode `auto` failed structured parsing: {structured_error}; legacy raw-trace fallback is beta-only and currently disabled"
+                        ));
+                    }
+
+                    let parsed = parse_legacy_trace_data(project_root, trace_source).map_err(
+                        |legacy_error| {
+                            format!(
+                                "parser mode `auto` failed structured parsing ({structured_error}) and legacy parsing ({legacy_error})"
+                            )
+                        },
+                    )?;
+                    Ok(ParsedTraceResult {
+                        data: parsed,
+                        parser_kind: TraceParserKind::LegacyTraceText,
+                    })
+                }
+            }
+        }
+    }
+}
+
+fn parsed_trace_data_from_structured_snapshot(
+    project_root: &Path,
+    snapshot: StructuredTraceSnapshot,
+) -> ParsedTraceData {
+    let edges = snapshot
+        .edges
+        .into_iter()
+        .map(|edge| {
+            (
+                normalize_trace_path(project_root, &edge.from),
+                normalize_trace_path(project_root, &edge.to),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+
+    let resolutions = snapshot
+        .resolutions
+        .into_iter()
+        .map(|resolution| {
+            let resolved_to = resolution
+                .resolved_to
+                .as_deref()
+                .map(|raw| normalize_trace_path(project_root, raw));
+            let package_name = resolution.package_name;
+            let result_kind = resolution.result_kind.unwrap_or_else(|| {
+                infer_trace_result_kind(resolved_to.as_deref(), package_name.as_deref())
+            });
+
+            TraceResolutionRecord {
+                from: normalize_trace_path(project_root, &resolution.from),
+                import_specifier: resolution.import_specifier,
+                result_kind,
+                resolved_to,
+                package_name,
+                trace: resolution.trace,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    ParsedTraceData { edges, resolutions }
+}
+
+fn structured_snapshot_from_parsed_trace(
+    parsed_trace: &ParsedTraceData,
+) -> StructuredTraceSnapshot {
+    let edges = parsed_trace
+        .edges
+        .iter()
+        .map(|(from, to)| StructuredTraceEdge {
+            from: from.clone(),
+            to: to.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut resolutions = parsed_trace
+        .resolutions
+        .iter()
+        .map(|record| StructuredTraceResolution {
+            from: record.from.clone(),
+            import_specifier: record.import_specifier.clone(),
+            result_kind: Some(record.result_kind.clone()),
+            resolved_to: record.resolved_to.clone(),
+            package_name: record.package_name.clone(),
+            trace: record.trace.clone(),
+        })
+        .collect::<Vec<_>>();
+    resolutions.sort_by(|a, b| {
+        a.from
+            .cmp(&b.from)
+            .then_with(|| a.import_specifier.cmp(&b.import_specifier))
+            .then_with(|| a.result_kind.cmp(&b.result_kind))
+            .then_with(|| a.resolved_to.cmp(&b.resolved_to))
+            .then_with(|| a.package_name.cmp(&b.package_name))
+            .then_with(|| a.trace.cmp(&b.trace))
+    });
+
+    StructuredTraceSnapshot {
+        schema_version: structured_trace_schema_version(),
+        edges,
+        resolutions,
+    }
+}
+
+fn write_structured_snapshot(
+    project_root: &Path,
+    output_path: &Path,
+    parsed_trace: &ParsedTraceData,
+) -> std::result::Result<String, String> {
+    let resolved = resolve_against_root(project_root, output_path);
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create snapshot output directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let snapshot = structured_snapshot_from_parsed_trace(parsed_trace);
+    let rendered = serde_json::to_string_pretty(&snapshot)
+        .map_err(|error| format!("failed to serialize structured snapshot JSON: {error}"))?;
+    fs::write(&resolved, format!("{rendered}\n")).map_err(|error| {
+        format!(
+            "failed to write structured snapshot file {}: {error}",
+            resolved.display()
+        )
+    })?;
+
+    Ok(normalize_repo_relative(project_root, &resolved))
 }
 
 fn collect_trace_data_iterative(
@@ -1931,6 +2365,51 @@ fn parity_verdict_for_status(status: &str) -> &'static str {
     }
 }
 
+fn classify_doctor_compare_mismatch(
+    status: &str,
+    focus: Option<&DoctorCompareFocus>,
+    specgate_resolution: Option<&DoctorCompareResolutionOutput>,
+    tsc_trace_resolution: Option<&DoctorCompareResolutionOutput>,
+    missing_in_specgate: &[String],
+    extra_in_specgate: &[String],
+) -> Option<String> {
+    if status != "mismatch" {
+        return None;
+    }
+
+    let Some(_focus) = focus else {
+        return Some("edge_set_diff".to_string());
+    };
+
+    let (Some(specgate_resolution), Some(tsc_trace_resolution)) =
+        (specgate_resolution, tsc_trace_resolution)
+    else {
+        return Some("focused_unknown".to_string());
+    };
+
+    let category = match (
+        specgate_resolution.result_kind.as_str(),
+        tsc_trace_resolution.result_kind.as_str(),
+    ) {
+        ("first_party", "first_party")
+            if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
+        {
+            "focused_target_mismatch"
+        }
+        ("unresolvable" | "not_observed", "first_party") => "focused_specgate_missing_resolution",
+        ("first_party", "unresolvable" | "not_observed") => "focused_tsc_missing_resolution",
+        ("third_party", "first_party") | ("first_party", "third_party") => {
+            "focused_classification_mismatch"
+        }
+        _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => {
+            "focused_edge_set_diff"
+        }
+        _ => "focused_resolution_mismatch",
+    };
+
+    Some(category.to_string())
+}
+
 fn build_actionable_mismatch_hint(
     status: &str,
     focus: Option<&DoctorCompareFocus>,
@@ -1990,6 +2469,10 @@ fn build_actionable_mismatch_hint(
             "Focused parity mismatch detected; {shared_guidance}."
         )),
     }
+}
+
+fn doctor_compare_beta_channel_enabled(config: &SpecConfig) -> bool {
+    config.release_channel == ReleaseChannel::Beta
 }
 
 fn load_project(project_root: &Path) -> std::result::Result<LoadedProject, String> {
@@ -2294,6 +2777,39 @@ fn compute_governance_hashes(
     })
 }
 
+fn build_anonymized_telemetry_event(
+    project_root: &Path,
+    config_hash: &str,
+    spec_hash: &str,
+    verdict: &verdict::Verdict,
+) -> AnonymizedTelemetryEvent {
+    AnonymizedTelemetryEvent {
+        schema_version: "1".to_string(),
+        event: TelemetryEventName::CheckCompleted,
+        project_fingerprint: project_fingerprint(project_root),
+        config_hash: config_hash.to_string(),
+        spec_hash: spec_hash.to_string(),
+        status: verdict.status,
+        summary: AnonymizedTelemetrySummary {
+            total_violations: verdict.summary.total_violations,
+            new_violations: verdict.summary.new_violations,
+            baseline_violations: verdict.summary.baseline_violations,
+            new_error_violations: verdict.summary.new_error_violations,
+            new_warning_violations: verdict.summary.new_warning_violations,
+            stale_baseline_entries: verdict.summary.stale_baseline_entries,
+        },
+    }
+}
+
+fn project_fingerprint(project_root: &Path) -> String {
+    let canonical =
+        std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    format!(
+        "sha256:{}",
+        stable_hash_hex(canonical.to_string_lossy().as_bytes())
+    )
+}
+
 #[derive(Debug, Serialize)]
 struct HashedSpec {
     module: String,
@@ -2365,6 +2881,15 @@ mod tests {
             root,
             "specgate.config.yml",
             "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        );
+    }
+
+    fn write_basic_project_with_edge(root: &Path) {
+        write_basic_project(root);
+        write_file(
+            root,
+            "src/app/main.ts",
+            "import { core } from '../core/index';\nexport const app = core;\n",
         );
     }
 
@@ -2622,6 +3147,140 @@ mod tests {
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"skipped\""));
         assert!(result.stdout.contains("\"parity_verdict\": \"SKIPPED\""));
+    }
+
+    #[test]
+    fn doctor_compare_legacy_parser_mode_requires_beta_channel() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project_with_edge(temp.path());
+        let from = temp.path().join("src/app/main.ts");
+        let to = temp.path().join("src/core/index.ts");
+        write_file(
+            temp.path(),
+            "trace.log",
+            &format!(
+                "======== Resolving module '../core/index' from '{}'. ========\n======== Module name '../core/index' was successfully resolved to '{}'. ========\n",
+                from.display(),
+                to.display()
+            ),
+        );
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "compare",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--tsc-trace",
+            temp.path().join("trace.log").to_str().expect("utf8 path"),
+            "--parser-mode",
+            "legacy",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+        assert!(result.stdout.contains("beta-only"));
+    }
+
+    #[test]
+    fn doctor_compare_legacy_parser_mode_succeeds_with_beta_channel() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project_with_edge(temp.path());
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nrelease_channel: beta\n",
+        );
+        let from = temp.path().join("src/app/main.ts");
+        let to = temp.path().join("src/core/index.ts");
+        write_file(
+            temp.path(),
+            "trace.log",
+            &format!(
+                "======== Resolving module '../core/index' from '{}'. ========\n======== Module name '../core/index' was successfully resolved to '{}'. ========\n",
+                from.display(),
+                to.display()
+            ),
+        );
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "compare",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--tsc-trace",
+            temp.path().join("trace.log").to_str().expect("utf8 path"),
+            "--parser-mode",
+            "legacy",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        assert!(result.stdout.contains("\"status\": \"match\""));
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"legacy_trace_text\"")
+        );
+    }
+
+    #[test]
+    fn doctor_compare_writes_structured_snapshot_output() {
+        let temp = TempDir::new().expect("tempdir");
+        write_basic_project_with_edge(temp.path());
+        write_file(
+            temp.path(),
+            "snapshot.json",
+            r#"{
+  "schema_version": "1",
+  "edges": [
+    { "from": "src/app/main.ts", "to": "src/core/index.ts" }
+  ],
+  "resolutions": [
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "resolved_to": "src/core/index.ts"
+    }
+  ]
+}
+"#,
+        );
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "compare",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--structured-snapshot-in",
+            temp.path()
+                .join("snapshot.json")
+                .to_str()
+                .expect("utf8 path"),
+            "--structured-snapshot-out",
+            "snapshots/normalized.json",
+            "--parser-mode",
+            "structured",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"structured_snapshot\"")
+        );
+        assert!(
+            result
+                .stdout
+                .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\"")
+        );
+
+        let snapshot = fs::read_to_string(temp.path().join("snapshots/normalized.json"))
+            .expect("structured snapshot output");
+        let parsed = parse_json(&snapshot);
+        assert_eq!(parsed["schema_version"], STRUCTURED_TRACE_SCHEMA_VERSION);
+        assert_eq!(parsed["edges"][0]["from"], "src/app/main.ts");
+        assert_eq!(parsed["edges"][0]["to"], "src/core/index.ts");
     }
 
     #[test]

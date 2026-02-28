@@ -2,3 +2,4 @@ spec_dirs:
   - modules
 exclude: []
 test_patterns: []
+release_channel: beta

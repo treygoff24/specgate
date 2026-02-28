@@ -177,6 +177,42 @@ pub fn build_baseline_with_metadata(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineRefreshResult {
+    pub baseline: BaselineFile,
+    pub stale_entries_pruned: usize,
+}
+
+/// Refresh baseline entries from current violations in a deterministic way.
+///
+/// - Entries not present in current violations are pruned as stale.
+/// - Current violations are re-materialized into a fully sorted, deduped baseline.
+/// - Existing metadata is preserved when a prior baseline is provided.
+pub fn refresh_baseline(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+) -> BaselineRefreshResult {
+    let stale_entries_pruned = count_stale_baseline_entries(project_root, violations, baseline);
+    let generated_from = baseline
+        .map(|existing| existing.generated_from.clone())
+        .unwrap_or_default();
+
+    BaselineRefreshResult {
+        baseline: build_baseline_with_metadata(project_root, violations, generated_from),
+        stale_entries_pruned,
+    }
+}
+
+/// Prune stale entries while rebuilding baseline from current violations.
+pub fn prune_stale_baseline_entries(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+) -> BaselineRefreshResult {
+    refresh_baseline(project_root, violations, baseline)
+}
+
 /// Count stale baseline entries without returning the classified violations.
 ///
 /// This is useful when you only need the stale count for summary reporting.
@@ -671,5 +707,64 @@ mod tests {
 
         let stale_count = count_stale_baseline_entries(project_root, &[], Some(&baseline));
         assert_eq!(stale_count, 1);
+    }
+
+    #[test]
+    fn refresh_baseline_prunes_stale_entries_and_is_deterministic() {
+        let project_root = Path::new(".");
+
+        let stale = violation("stale", "src/stale.ts");
+        let keep = violation("keep", "src/keep.ts");
+        let add = violation("add", "src/add.ts");
+
+        let existing = build_baseline(project_root, &[stale, keep.clone()]);
+        let refreshed =
+            refresh_baseline(project_root, &[add.clone(), keep.clone()], Some(&existing));
+        let refreshed_reversed =
+            refresh_baseline(project_root, &[keep.clone(), add.clone()], Some(&existing));
+
+        assert_eq!(refreshed.stale_entries_pruned, 1);
+        assert_eq!(refreshed.baseline, refreshed_reversed.baseline);
+
+        let expected = build_baseline_with_metadata(
+            project_root,
+            &[keep, add],
+            existing.generated_from.clone(),
+        );
+        assert_eq!(refreshed.baseline, expected);
+    }
+
+    #[test]
+    fn refresh_baseline_preserves_existing_metadata() {
+        let project_root = Path::new(".");
+        let violation = violation("A", "src/a.ts");
+
+        let existing = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom {
+                tool_version: "1.2.3".to_string(),
+                git_sha: "deadbeef".to_string(),
+                config_hash: "sha256:config".to_string(),
+                spec_hash: "sha256:spec".to_string(),
+            },
+            entries: build_baseline(project_root, std::slice::from_ref(&violation)).entries,
+        };
+
+        let refreshed = refresh_baseline(project_root, &[violation], Some(&existing));
+        assert_eq!(refreshed.stale_entries_pruned, 0);
+        assert_eq!(refreshed.baseline.generated_from, existing.generated_from);
+    }
+
+    #[test]
+    fn prune_stale_baseline_entries_alias_matches_refresh() {
+        let project_root = Path::new(".");
+        let v1 = violation("A", "src/a.ts");
+        let v2 = violation("B", "src/b.ts");
+        let existing = build_baseline(project_root, &[v1.clone(), v2.clone()]);
+
+        let refreshed = refresh_baseline(project_root, &[v2.clone()], Some(&existing));
+        let pruned = prune_stale_baseline_entries(project_root, &[v2], Some(&existing));
+
+        assert_eq!(pruned, refreshed);
     }
 }
