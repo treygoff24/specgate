@@ -118,10 +118,23 @@ jobs:
             "$SHA_ASSET_URL"
 
           cd "$WORKDIR"
+          EXPECTED_HASH="$(awk '{print $1}' "$SHA_NAME")"
+          if [ -z "$EXPECTED_HASH" ]; then
+            echo "Could not parse expected checksum from ${SHA_NAME}."
+            exit 1
+          fi
+
           if command -v sha256sum >/dev/null; then
-            sha256sum --check "$SHA_NAME"
+            ACTUAL_HASH="$(sha256sum "$TARBALL_NAME" | awk '{print $1}')"
           else
-            shasum -a 256 --check "$SHA_NAME"
+            ACTUAL_HASH="$(shasum -a 256 "$TARBALL_NAME" | awk '{print $1}')"
+          fi
+
+          if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+            echo "Checksum mismatch for ${TARBALL_NAME}."
+            echo "Expected: ${EXPECTED_HASH}"
+            echo "Actual:   ${ACTUAL_HASH}"
+            exit 1
           fi
 
           mkdir -p extracted
