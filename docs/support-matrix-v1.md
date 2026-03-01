@@ -4,6 +4,8 @@ This matrix defines support commitments for the TypeScript/JavaScript v1 surface
 
 For channel semantics, see [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md).
 
+> **Note:** This document is the authoritative source for tier definitions. For detailed promotion gates and semver policy, see [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md).
+
 ## Tier Definitions
 
 | Tier | Targets | Channel Availability | Release Gating | Support Expectation |

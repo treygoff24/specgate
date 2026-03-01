@@ -7,6 +7,8 @@ const { builtinModules } = require("node:module");
 
 const TRACE_LINE_LIMIT = 48;
 
+// flatMap creates both the bare name (fs) and node: prefixed name (node:fs) to handle
+// both forms that appear in import statements and TypeScript's internal module list.
 const BUILTIN_MODULES = new Set(
   builtinModules.flatMap((name) => [name, name.startsWith("node:") ? name.slice(5) : `node:${name}`])
 );
@@ -404,6 +406,13 @@ function printHelp() {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+/**
+ * Run the CLI with the given argument vector.
+ *
+ * @param {string[]} [argv] - Command-line arguments (defaults to process.argv.slice(2) when undefined).
+ *   Library consumers should pass their own argv array explicitly rather than relying on this default.
+ * @returns {number} Exit code (0 for success, 1 for failure)
+ */
 function runCli(argv) {
   if (argv === undefined) {
     argv = process.argv.slice(2);

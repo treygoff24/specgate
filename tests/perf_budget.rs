@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, run};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);
@@ -19,6 +19,8 @@ fn write_file(root: &Path, relative_path: &str, content: &str) {
     fs::write(path, content).expect("write file");
 }
 
+/// Build a clean perf fixture with `module_count` modules and `files_per_module` files each.
+/// All inter-module imports are allowed (no policy violations).
 fn build_tier1_perf_fixture(root: &Path, module_count: usize, files_per_module: usize) {
     write_file(
         root,
@@ -33,7 +35,7 @@ fn build_tier1_perf_fixture(root: &Path, module_count: usize, files_per_module: 
             root,
             &format!("modules/{module}.spec.yml"),
             &format!(
-                "version: \"2.2\"\nmodule: {module}\nboundaries:\n  path: {module_dir}/**/*\n  never_imports:\n    - nonexistent_module\nconstraints:\n  - rule: boundary.never_imports\n    severity: warning\n"
+                "version: \"2.2\"\nmodule: {module}\nboundaries:\n  path: {module_dir}/**/*\n"
             ),
         );
 
@@ -48,6 +50,25 @@ fn build_tier1_perf_fixture(root: &Path, module_count: usize, files_per_module: 
             );
         }
     }
+}
+
+/// Build a small fixture that includes a policy violation (forbidden cross-module import).
+/// Used to exercise the policy evaluation path in perf tests.
+fn build_violation_perf_fixture(root: &Path, module_count: usize, files_per_module: usize) {
+    build_tier1_perf_fixture(root, module_count, files_per_module);
+
+    // Add a module with a never_imports constraint and a file that violates it.
+    // m000 is guaranteed to exist from build_tier1_perf_fixture when module_count >= 1.
+    write_file(
+        root,
+        "modules/restricted.spec.yml",
+        "version: \"2.2\"\nmodule: restricted\nboundaries:\n  path: src/restricted/**/*\n  never_imports:\n    - m000\nconstraints:\n  - rule: boundary.never_imports\n    severity: error\n",
+    );
+    write_file(
+        root,
+        "src/restricted/index.ts",
+        "import { v } from '../m000/f0';\nexport const result = v;\n",
+    );
 }
 
 #[test]
@@ -74,7 +95,6 @@ fn tier1_perf_budget_check_mode() {
         "check",
         "--project-root",
         temp.path().to_str().expect("utf8"),
-        "--no-baseline",
     ]);
     let elapsed_ms = start.elapsed().as_millis();
 
@@ -85,5 +105,38 @@ fn tier1_perf_budget_check_mode() {
     assert!(
         elapsed_ms <= budget_ms,
         "perf budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms modules={module_count} files/module={files_per_module}"
+    );
+}
+
+/// Exercises the policy evaluation path (violations present) to ensure perf holds
+/// even when specgate must evaluate constraints and classify violations.
+#[test]
+fn tier1_perf_budget_policy_violation_path() {
+    let temp = TempDir::new().expect("tempdir");
+    let budget_ms = std::env::var("SPECGATE_PERF_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse::<u128>().ok())
+        .unwrap_or(7_000);
+
+    build_violation_perf_fixture(temp.path(), 10, 2);
+
+    // Run without baseline so the violation causes a policy failure (exit code 1).
+    let start = Instant::now();
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "specgate check should fail due to policy violation (restricted module imports m000)"
+    );
+    assert!(
+        elapsed_ms <= budget_ms,
+        "perf budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms"
     );
 }

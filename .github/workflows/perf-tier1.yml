@@ -15,6 +15,7 @@ jobs:
   perf-budget:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # NOTE: These defaults should be kept in sync with the shell script env defaults.
     env:
       SPECGATE_PERF_MODULES: "120"
       SPECGATE_PERF_FILES_PER_MODULE: "4"
