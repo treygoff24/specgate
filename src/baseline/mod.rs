@@ -234,15 +234,16 @@ pub struct BaselineRefreshResult {
 ///
 /// - Entries not present in current violations are pruned as stale.
 /// - Current violations are re-materialized into a fully sorted, deduped baseline.
-/// - Metadata is preserved from the provided baseline when available.
+/// - Fresh build metadata is used (current tool_version, git_sha, etc.).
 pub fn refresh_baseline(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> BaselineRefreshResult {
-    let generated_from = baseline
-        .map(|existing| existing.generated_from.clone())
-        .unwrap_or_default();
+    // Use fresh metadata from current build rather than preserving stale provenance.
+    // This ensures that running `specgate baseline --refresh` after a tool upgrade
+    // updates the provenance to reflect the current tool version.
+    let generated_from = BaselineGeneratedFrom::default();
 
     refresh_baseline_with_metadata(project_root, violations, baseline, generated_from)
 }
@@ -257,15 +258,74 @@ pub fn refresh_baseline_with_metadata(
     baseline: Option<&BaselineFile>,
     generated_from: BaselineGeneratedFrom,
 ) -> BaselineRefreshResult {
-    let (classified, stale_count) =
-        classify_violations_with_stale(project_root, violations, baseline);
+    // Build baseline in a single walk (classify + transform)
+    let mut ordered_violations = violations.to_vec();
+    sort_policy_violations(&mut ordered_violations);
+
+    let mut remaining_by_primary = baseline.map(build_baseline_match_index).unwrap_or_default();
+    let mut remaining_legacy = baseline
+        .map(build_legacy_fingerprint_counts)
+        .unwrap_or_default();
+
+    let baseline_entry_count = baseline.map(|b| b.entries.len()).unwrap_or(0);
+    let mut matched_baseline_entries = 0usize;
+
+    // Single walk: classify violations and directly build baseline entries
+    let mut entries = ordered_violations
+        .iter()
+        .map(|violation| {
+            let fingerprint = fingerprint_violation(project_root, violation);
+            let positional_fingerprint = positional_fingerprint_for_violation(violation);
+
+            let _disposition = if let Some(remaining) = remaining_by_primary.get_mut(&fingerprint) {
+                if consume_baseline_match(remaining, positional_fingerprint.as_deref()) {
+                    matched_baseline_entries += 1;
+                    ViolationDisposition::Baseline
+                } else {
+                    ViolationDisposition::New
+                }
+            } else {
+                let legacy_fingerprint = legacy_fingerprint_violation(project_root, violation);
+                if consume_legacy_fingerprint(&mut remaining_legacy, &legacy_fingerprint) {
+                    matched_baseline_entries += 1;
+                    ViolationDisposition::Baseline
+                } else {
+                    ViolationDisposition::New
+                }
+            };
+
+            // Directly build BaselineEntry instead of FingerprintedViolation
+            BaselineEntry {
+                fingerprint,
+                positional_fingerprint,
+                rule: violation.rule.clone(),
+                severity: violation.severity,
+                message: violation.message.clone(),
+                from_file: normalize_repo_relative(project_root, &violation.from_file),
+                to_file: violation
+                    .to_file
+                    .as_ref()
+                    .map(|path| normalize_repo_relative(project_root, path)),
+                from_module: violation.from_module.clone(),
+                to_module: violation.to_module.clone(),
+                line: violation.line,
+                column: violation.column,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Sort and dedup the entries
+    sort_baseline_entries(&mut entries);
+    dedup_entries_by_identity(&mut entries);
+
+    let stale_count = baseline_entry_count.saturating_sub(matched_baseline_entries);
 
     BaselineRefreshResult {
-        baseline: build_baseline_from_classified_with_metadata(
-            project_root,
-            classified,
+        baseline: BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
             generated_from,
-        ),
+            entries,
+        },
         stale_entries_pruned: stale_count,
     }
 }
@@ -791,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_baseline_preserves_provided_metadata() {
+    fn refresh_baseline_uses_fresh_metadata() {
         let project_root = Path::new(".");
         let violation = violation("A", "src/a.ts");
 
@@ -810,7 +870,17 @@ mod tests {
 
         let refreshed = refresh_baseline(project_root, &[violation], Some(&existing));
         assert_eq!(refreshed.stale_entries_pruned, 0);
-        assert_eq!(refreshed.baseline.generated_from, provided_metadata);
+        // After the fix, refresh_baseline uses fresh metadata, not the stale provided metadata
+        assert_ne!(refreshed.baseline.generated_from, provided_metadata);
+        // Verify fresh metadata uses current build info
+        assert_eq!(
+            refreshed.baseline.generated_from.tool_version,
+            build_info::tool_version()
+        );
+        assert_eq!(
+            refreshed.baseline.generated_from.git_sha,
+            build_info::git_sha()
+        );
     }
 
     #[test]

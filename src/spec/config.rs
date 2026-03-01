@@ -75,6 +75,11 @@ pub enum ReleaseChannel {
     Beta,
 }
 
+/// Telemetry configuration for the specgate tool.
+///
+/// Wraps a single bool to allow for future expansion (e.g., adding opt-out reasons,
+/// sampling rates, or endpoint configuration) without breaking the config file format.
+/// This provides forward compatibility for telemetry settings.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 pub struct TelemetryConfig {
     /// Enables telemetry emission when downstream callers opt in to publishing.

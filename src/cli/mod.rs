@@ -122,7 +122,7 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
-    /// Refresh an existing baseline by rebuilding from current violations and pruning stale entries.
+    /// Rebuild baseline from current violations (prunes stale entries, re-sorts and dedupes).
     #[arg(long)]
     refresh: bool,
 }
@@ -1891,6 +1891,7 @@ fn parse_structured_trace_data(
         // "1.0.0" is accepted as a migration aid for snapshots generated before the
         // schema_version was normalised to the short form "1". Once all in-flight
         // snapshot files have been regenerated this fallback can be removed.
+        // TODO: remove after 2026-04-01 or specgate v2.0.0
         if snapshot.schema_version == "1.0.0" {
             eprintln!(
                 "WARNING: schema_version '1.0.0' is deprecated; please regenerate the snapshot file with version '{STRUCTURED_TRACE_SCHEMA_VERSION}'"
