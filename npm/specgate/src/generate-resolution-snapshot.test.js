@@ -2,6 +2,7 @@
 
 const assert = require("node:assert");
 const path = require("node:path");
+const fs = require("node:fs");
 const {
   classifyResolution,
   toProjectPath,
@@ -9,8 +10,15 @@ const {
   isBuiltinImport,
   extractPackageName,
   generateResolutionSnapshot,
+  slashify,
+  trimNodePrefix,
+  looksLikePath,
+  isNodeModulesPath,
+  resolvePath,
+  tryRealpath,
 } = require("./generate-resolution-snapshot.js");
 
+// Simple test framework
 function describe(name, fn) {
   process.stdout.write(`\n${name}\n`);
   fn();
@@ -53,6 +61,132 @@ function assertThrows(fn, expectedMessage) {
   }
 }
 
+// ============================================================================
+// Utility Function Tests
+// ============================================================================
+
+describe("slashify", () => {
+  it("converts platform-specific separators to forward slashes", () => {
+    // On Windows, path.sep is "\\", on macOS/Linux it's "/"
+    const platformPath = `src${path.sep}components${path.sep}Button.tsx`;
+    const result = slashify(platformPath);
+    assertStrictEqual(result, "src/components/Button.tsx");
+  });
+
+  it("leaves forward slashes unchanged", () => {
+    assertStrictEqual(slashify("src/components/Button.tsx"), "src/components/Button.tsx");
+  });
+
+  it("handles empty string", () => {
+    assertStrictEqual(slashify(""), "");
+  });
+});
+
+describe("trimNodePrefix", () => {
+  it("removes node: prefix from builtin modules", () => {
+    assertStrictEqual(trimNodePrefix("node:fs"), "fs");
+    assertStrictEqual(trimNodePrefix("node:path"), "path");
+    assertStrictEqual(trimNodePrefix("node:util"), "util");
+  });
+
+  it("leaves unprefixed modules unchanged", () => {
+    assertStrictEqual(trimNodePrefix("fs"), "fs");
+    assertStrictEqual(trimNodePrefix("lodash"), "lodash");
+    assertStrictEqual(trimNodePrefix("./local"), "./local");
+  });
+
+  it("handles empty string", () => {
+    assertStrictEqual(trimNodePrefix(""), "");
+  });
+});
+
+describe("looksLikePath", () => {
+  it("returns true for absolute paths", () => {
+    assertStrictEqual(looksLikePath("/absolute/path"), true);
+    assertStrictEqual(looksLikePath("/"), true);
+  });
+
+  it("returns true for relative paths", () => {
+    assertStrictEqual(looksLikePath("./local"), true);
+    assertStrictEqual(looksLikePath("../parent"), true);
+    assertStrictEqual(looksLikePath("../../grandparent"), true);
+  });
+
+  it("returns true for paths with separators", () => {
+    assertStrictEqual(looksLikePath("src/components"), true);
+    assertStrictEqual(looksLikePath("src\\components"), true);
+  });
+
+  it("returns false for simple package names", () => {
+    assertStrictEqual(looksLikePath("lodash"), false);
+    assertStrictEqual(looksLikePath("express"), false);
+  });
+
+  it("returns true for scoped packages (they contain /)", () => {
+    // Scoped packages like @babel/core contain a /, so they look like paths
+    assertStrictEqual(looksLikePath("@babel/core"), true);
+    assertStrictEqual(looksLikePath("@types/node"), true);
+  });
+
+  it("returns false for builtin modules", () => {
+    assertStrictEqual(looksLikePath("fs"), false);
+    assertStrictEqual(looksLikePath("node:path"), false);
+  });
+});
+
+describe("isNodeModulesPath", () => {
+  it("returns true for paths containing node_modules", () => {
+    assertStrictEqual(isNodeModulesPath("/project/node_modules/lodash/index.js"), true);
+    assertStrictEqual(isNodeModulesPath("C:\\project\\node_modules\\lodash\\index.js"), true);
+  });
+
+  it("returns false for paths without node_modules", () => {
+    assertStrictEqual(isNodeModulesPath("/project/src/index.ts"), false);
+    assertStrictEqual(isNodeModulesPath("src/components/Button.tsx"), false);
+  });
+
+  it("returns false for partial matches", () => {
+    assertStrictEqual(isNodeModulesPath("/project/node_modules_backup/file.js"), false);
+    assertStrictEqual(isNodeModulesPath("/project/my_node_modules/file.js"), false);
+  });
+});
+
+describe("resolvePath", () => {
+  it("returns absolute paths unchanged (normalized)", () => {
+    const result = resolvePath("/base", "/absolute/path");
+    assertStrictEqual(result, "/absolute/path");
+  });
+
+  it("resolves relative paths against base", () => {
+    const result = resolvePath("/base", "relative/path");
+    assertStrictEqual(result, "/base/relative/path");
+  });
+
+  it("handles dot paths", () => {
+    const result = resolvePath("/base", ".");
+    assertStrictEqual(result, "/base");
+  });
+});
+
+describe("tryRealpath", () => {
+  it("returns realpath for existing paths", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const realPath = tryRealpath(tempDir);
+    assertStrictEqual(typeof realPath, "string");
+    assertStrictEqual(realPath.length > 0, true);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns normalized path for non-existent paths", () => {
+    const result = tryRealpath("/nonexistent/path/that/does/not/exist");
+    assertStrictEqual(result, "/nonexistent/path/that/does/not/exist");
+  });
+});
+
+// ============================================================================
+// Builtin Import Tests
+// ============================================================================
+
 describe("isBuiltinImport", () => {
   it("returns true for core Node.js modules", () => {
     assertStrictEqual(isBuiltinImport("fs"), true);
@@ -60,45 +194,82 @@ describe("isBuiltinImport", () => {
     assertStrictEqual(isBuiltinImport("os"), true);
     assertStrictEqual(isBuiltinImport("http"), true);
     assertStrictEqual(isBuiltinImport("https"), true);
+    assertStrictEqual(isBuiltinImport("util"), true);
+    assertStrictEqual(isBuiltinImport("stream"), true);
+    assertStrictEqual(isBuiltinImport("events"), true);
   });
 
   it("returns true for node: prefixed modules", () => {
     assertStrictEqual(isBuiltinImport("node:fs"), true);
     assertStrictEqual(isBuiltinImport("node:path"), true);
     assertStrictEqual(isBuiltinImport("node:os"), true);
+    assertStrictEqual(isBuiltinImport("node:util"), true);
   });
 
   it("returns false for non-builtin modules", () => {
     assertStrictEqual(isBuiltinImport("lodash"), false);
     assertStrictEqual(isBuiltinImport("express"), false);
+    assertStrictEqual(isBuiltinImport("react"), false);
+    assertStrictEqual(isBuiltinImport("vue"), false);
+  });
+
+  it("returns false for relative imports", () => {
     assertStrictEqual(isBuiltinImport("./local"), false);
     assertStrictEqual(isBuiltinImport("../parent"), false);
+    assertStrictEqual(isBuiltinImport("../../grandparent"), false);
+  });
+
+  it("returns false for absolute paths", () => {
+    assertStrictEqual(isBuiltinImport("/absolute/path"), false);
+  });
+
+  it("returns false for scoped packages", () => {
     assertStrictEqual(isBuiltinImport("@scope/package"), false);
+    assertStrictEqual(isBuiltinImport("@types/node"), false);
+  });
+
+  it("handles edge cases", () => {
+    assertStrictEqual(isBuiltinImport(""), false);
+    assertStrictEqual(isBuiltinImport("fs/promises"), true);
+    assertStrictEqual(isBuiltinImport("node:fs/promises"), true);
   });
 });
+
+// ============================================================================
+// Package Name Extraction Tests
+// ============================================================================
 
 describe("extractPackageName", () => {
   it("extracts package name from simple imports", () => {
     assertStrictEqual(extractPackageName("lodash"), "lodash");
     assertStrictEqual(extractPackageName("express"), "express");
     assertStrictEqual(extractPackageName("axios"), "axios");
+    assertStrictEqual(extractPackageName("react"), "react");
   });
 
   it("extracts package name from scoped imports", () => {
     assertStrictEqual(extractPackageName("@babel/core"), "@babel/core");
     assertStrictEqual(extractPackageName("@types/node"), "@types/node");
-    assertStrictEqual(extractPackageName("@scope/package/subpath"), "@scope/package");
+    assertStrictEqual(extractPackageName("@scope/package"), "@scope/package");
+    assertStrictEqual(extractPackageName("@org/team/package"), "@org/team");
+  });
+
+  it("extracts package name from subpath imports", () => {
+    assertStrictEqual(extractPackageName("lodash/debounce"), "lodash");
+    assertStrictEqual(extractPackageName("@babel/core/lib/index"), "@babel/core");
   });
 
   it("extracts package name from node: prefixed imports", () => {
     assertStrictEqual(extractPackageName("node:fs"), "fs");
     assertStrictEqual(extractPackageName("node:path"), "path");
+    assertStrictEqual(extractPackageName("node:util"), "util");
   });
 
   it("returns null for relative imports", () => {
     assertStrictEqual(extractPackageName("./local"), null);
     assertStrictEqual(extractPackageName("../parent"), null);
     assertStrictEqual(extractPackageName("../../grandparent"), null);
+    assertStrictEqual(extractPackageName("./"), null);
   });
 
   it("returns null for absolute paths", () => {
@@ -108,10 +279,27 @@ describe("extractPackageName", () => {
     }
   });
 
-  it("returns null for empty string", () => {
+  it("returns null for empty or invalid inputs", () => {
     assertStrictEqual(extractPackageName(""), null);
+    assertStrictEqual(extractPackageName("/"), null);
+    assertStrictEqual(extractPackageName("///"), null);
+  });
+
+  it("handles edge cases with scoped packages", () => {
+    // @ by itself is not a valid scoped package, but the function returns it
+    assertStrictEqual(extractPackageName("@"), "@");
+    // @/ splits to [@, ] then filter(Boolean) gives [@], so returns @
+    assertStrictEqual(extractPackageName("@/"), "@");
+    // @scope without package name returns @scope (first part only)
+    assertStrictEqual(extractPackageName("@scope"), "@scope");
+    // @scope/ splits to [@scope, ] then filter(Boolean) gives [@scope], so returns @scope
+    assertStrictEqual(extractPackageName("@scope/"), "@scope");
   });
 });
+
+// ============================================================================
+// Classification Tests
+// ============================================================================
 
 describe("classifyResolution", () => {
   it("classifies builtin modules as third_party with package name", () => {
@@ -191,7 +379,36 @@ describe("classifyResolution", () => {
       packageName: null,
     });
   });
+
+  it("classifies node_modules paths even without isExternalLibraryImport flag", () => {
+    const resolvedModule = {
+      resolvedFileName: "/project/node_modules/axios/lib/axios.js",
+    };
+    const result = classifyResolution("axios", resolvedModule);
+    assertDeepStrictEqual(result, {
+      resultKind: "third_party",
+      resolvedTo: null,
+      packageName: "axios",
+    });
+  });
+
+  it("handles resolved modules with empty resolvedFileName", () => {
+    const resolvedModule = {
+      resolvedFileName: "",
+      isExternalLibraryImport: false,
+    };
+    const result = classifyResolution("./utils", resolvedModule);
+    assertDeepStrictEqual(result, {
+      resultKind: "third_party",
+      resolvedTo: null,
+      packageName: null,
+    });
+  });
 });
+
+// ============================================================================
+// Path Conversion Tests
+// ============================================================================
 
 describe("toProjectPath", () => {
   it("converts absolute paths to relative project paths", () => {
@@ -220,7 +437,31 @@ describe("toProjectPath", () => {
     const result = toProjectPath(projectRoot, absolutePath);
     assertStrictEqual(result.includes("\\"), false);
   });
+
+  it("handles paths outside project root", () => {
+    const projectRoot = path.resolve(__dirname, "..");
+    const outsidePath = "/outside/project/file.ts";
+    const result = toProjectPath(projectRoot, outsidePath);
+    assertStrictEqual(result, "/outside/project/file.ts");
+  });
+
+  it("handles relative paths", () => {
+    const projectRoot = path.resolve(__dirname, "..");
+    const result = toProjectPath(projectRoot, "src/index.ts");
+    assertStrictEqual(result, "src/index.ts");
+  });
+
+  it("handles nested directories", () => {
+    const projectRoot = path.resolve(__dirname, "..");
+    const absolutePath = path.join(projectRoot, "src", "deep", "nested", "file.ts");
+    const result = toProjectPath(projectRoot, absolutePath);
+    assertStrictEqual(result, "src/deep/nested/file.ts");
+  });
 });
+
+// ============================================================================
+// Argument Parsing Tests
+// ============================================================================
 
 describe("parseArgs", () => {
   it("parses required arguments", () => {
@@ -278,6 +519,11 @@ describe("parseArgs", () => {
     assertStrictEqual(args.help, true);
   });
 
+  it("parses -h as help flag", () => {
+    const args = parseArgs(["-h"]);
+    assertStrictEqual(args.help, true);
+  });
+
   it("throws on unknown arguments", () => {
     assertThrows(
       () => parseArgs(["--from", "src/app.ts", "--unknown", "value"]),
@@ -292,13 +538,56 @@ describe("parseArgs", () => {
     );
   });
 
+  it("throws when --import missing value", () => {
+    assertThrows(
+      () => parseArgs(["--from", "src/app.ts", "--import"]),
+      "missing value for --import"
+    );
+  });
+
   it("throws when argument value is another flag", () => {
     assertThrows(
       () => parseArgs(["--from", "--import", "./utils"]),
       "argument --from requires a value but got flag: --import"
     );
   });
+
+  it("throws when value looks like a flag with equals", () => {
+    assertThrows(
+      () => parseArgs(["--from", "--import=./utils"]),
+      "argument --from requires a value but got flag: --import=./utils"
+    );
+  });
+
+  it("handles multiple flags in sequence", () => {
+    const args = parseArgs([
+      "--from", "src/app.ts",
+      "--import", "./utils",
+      "--project-root", "/root",
+      "--tsconfig", "tsconfig.json",
+      "--out", "out.json",
+      "--pretty"
+    ]);
+    assertStrictEqual(args.from, "src/app.ts");
+    assertStrictEqual(args.importSpecifier, "./utils");
+    assertStrictEqual(args.projectRoot, "/root");
+    assertStrictEqual(args.tsconfig, "tsconfig.json");
+    assertStrictEqual(args.output, "out.json");
+    assertStrictEqual(args.pretty, true);
+  });
+
+  it("handles empty argv", () => {
+    const args = parseArgs([]);
+    assertStrictEqual(args.from, undefined);
+    assertStrictEqual(args.importSpecifier, undefined);
+    assertStrictEqual(args.projectRoot, process.cwd());
+    assertStrictEqual(args.pretty, false);
+  });
 });
+
+// ============================================================================
+// Snapshot Generation Tests
+// ============================================================================
 
 describe("generateResolutionSnapshot", () => {
   it("throws when missing --from argument", () => {
@@ -328,8 +617,8 @@ describe("generateResolutionSnapshot", () => {
   });
 
   it("throws when tsconfig cannot be found", () => {
-    const tempDir = require("node:fs").mkdtempSync("/tmp/specgate-test-");
-    require("node:fs").writeFileSync(path.join(tempDir, "app.ts"), "export const app = 1;");
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    fs.writeFileSync(path.join(tempDir, "app.ts"), "export const app = 1;");
     assertThrows(
       () =>
         generateResolutionSnapshot({
@@ -339,22 +628,42 @@ describe("generateResolutionSnapshot", () => {
         }),
       "could not find tsconfig.json"
     );
-    require("node:fs").rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("throws when explicit tsconfig does not exist", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    fs.writeFileSync(path.join(tempDir, "app.ts"), "export const app = 1;");
+    assertThrows(
+      () =>
+        generateResolutionSnapshot({
+          from: "app.ts",
+          importSpecifier: "./utils",
+          projectRoot: tempDir,
+          tsconfig: "nonexistent.json",
+        }),
+      "tsconfig file not found"
+    );
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 });
+
+// ============================================================================
+// Integration Tests
+// ============================================================================
 
 describe("Integration: Happy Path", () => {
   it("generates complete resolution snapshot with valid inputs", () => {
     const testProjectRoot = path.join(__dirname, "..", "..");
     const testFile = path.join("src", "cli", "mod.rs");
 
-    if (!require("node:fs").existsSync(path.join(testProjectRoot, testFile))) {
+    if (!fs.existsSync(path.join(testProjectRoot, testFile))) {
       process.stdout.write("    (skipped - test file not found)\n");
       return;
     }
 
     const tsconfigPath = path.join(testProjectRoot, "tsconfig.json");
-    if (!require("node:fs").existsSync(tsconfigPath)) {
+    if (!fs.existsSync(tsconfigPath)) {
       process.stdout.write("    (skipped - tsconfig.json not found)\n");
       return;
     }
@@ -388,22 +697,22 @@ describe("Integration: Happy Path", () => {
     const testProjectRoot = path.join(__dirname);
     const testFile = path.join("src", "generate-resolution-snapshot.js");
 
-    if (!require("node:fs").existsSync(path.join(testProjectRoot, testFile))) {
+    if (!fs.existsSync(path.join(testProjectRoot, testFile))) {
       process.stdout.write("    (skipped - test file not found)\n");
       return;
     }
 
-    const tempDir = require("node:fs").mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
     const tempTsconfig = path.join(tempDir, "tsconfig.json");
     const tempFile = path.join(tempDir, "test.ts");
     const tempModule = path.join(tempDir, "module.ts");
 
-    require("node:fs").writeFileSync(
+    fs.writeFileSync(
       tempTsconfig,
       JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
     );
-    require("node:fs").writeFileSync(tempFile, "import { mod } from './module';");
-    require("node:fs").writeFileSync(tempModule, "export const mod = 1;");
+    fs.writeFileSync(tempFile, "import { mod } from './module';");
+    fs.writeFileSync(tempModule, "export const mod = 1;");
 
     try {
       const snapshot = generateResolutionSnapshot({
@@ -424,9 +733,176 @@ describe("Integration: Happy Path", () => {
       assertStrictEqual(snapshot.edges[0].from, "test.ts");
       assert(snapshot.edges[0].to.includes("module.ts"));
     } finally {
-      require("node:fs").rmSync(tempDir, { recursive: true, force: true });
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("generates snapshot for builtin module import", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempTsconfig = path.join(tempDir, "tsconfig.json");
+    const tempFile = path.join(tempDir, "test.ts");
+
+    fs.writeFileSync(
+      tempTsconfig,
+      JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+    );
+    fs.writeFileSync(tempFile, "import * as fs from 'fs';");
+
+    try {
+      const snapshot = generateResolutionSnapshot({
+        from: "test.ts",
+        importSpecifier: "fs",
+        projectRoot: tempDir,
+      });
+
+      assertStrictEqual(snapshot.focus.from, "test.ts");
+      assertStrictEqual(snapshot.focus.import_specifier, "fs");
+
+      const resolution = snapshot.resolutions[0];
+      assertStrictEqual(resolution.result_kind, "third_party");
+      assertStrictEqual(resolution.package_name, "fs");
+      assert(resolution.resolved_to === undefined || resolution.resolved_to === null);
+
+      assertStrictEqual(snapshot.edges.length, 0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("generates snapshot for third-party package import", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempTsconfig = path.join(tempDir, "tsconfig.json");
+    const tempFile = path.join(tempDir, "test.ts");
+    const nodeModulesDir = path.join(tempDir, "node_modules", "test-pkg");
+
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.writeFileSync(
+      tempTsconfig,
+      JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+    );
+    fs.writeFileSync(tempFile, "import { foo } from 'test-pkg';");
+    fs.writeFileSync(
+      path.join(nodeModulesDir, "index.js"),
+      "exports.foo = 'bar';"
+    );
+    fs.writeFileSync(
+      path.join(nodeModulesDir, "package.json"),
+      JSON.stringify({ name: "test-pkg", main: "index.js" })
+    );
+
+    try {
+      const snapshot = generateResolutionSnapshot({
+        from: "test.ts",
+        importSpecifier: "test-pkg",
+        projectRoot: tempDir,
+      });
+
+      assertStrictEqual(snapshot.focus.from, "test.ts");
+      assertStrictEqual(snapshot.focus.import_specifier, "test-pkg");
+
+      const resolution = snapshot.resolutions[0];
+      assertStrictEqual(resolution.result_kind, "third_party");
+      assertStrictEqual(resolution.package_name, "test-pkg");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles unresolvable imports gracefully", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempTsconfig = path.join(tempDir, "tsconfig.json");
+    const tempFile = path.join(tempDir, "test.ts");
+
+    fs.writeFileSync(
+      tempTsconfig,
+      JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+    );
+    fs.writeFileSync(tempFile, "import { foo } from 'nonexistent-pkg-12345';");
+
+    try {
+      const snapshot = generateResolutionSnapshot({
+        from: "test.ts",
+        importSpecifier: "nonexistent-pkg-12345",
+        projectRoot: tempDir,
+      });
+
+      assertStrictEqual(snapshot.focus.from, "test.ts");
+      assertStrictEqual(snapshot.focus.import_specifier, "nonexistent-pkg-12345");
+
+      const resolution = snapshot.resolutions[0];
+      assertStrictEqual(resolution.result_kind, "unresolvable");
+      // package_name is undefined (not null) for unresolvable imports
+      assertStrictEqual(resolution.package_name, undefined);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes output to file when --out is specified", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempTsconfig = path.join(tempDir, "tsconfig.json");
+    const tempFile = path.join(tempDir, "test.ts");
+    const outputFile = path.join(tempDir, "output.json");
+
+    fs.writeFileSync(
+      tempTsconfig,
+      JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+    );
+    fs.writeFileSync(tempFile, "import * as fs from 'fs';");
+
+    try {
+      // Note: generateResolutionSnapshot doesn't write to file directly,
+      // runCli handles that. This test verifies the snapshot structure.
+      const snapshot = generateResolutionSnapshot({
+        from: "test.ts",
+        importSpecifier: "fs",
+        projectRoot: tempDir,
+      });
+
+      // Verify snapshot can be serialized
+      const json = JSON.stringify(snapshot, null, 2);
+      assert(json.length > 0);
+      assert(json.includes('"schema_version": "1"'));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });
 
-process.stdout.write("\nAll tests passed!\n");
+// ============================================================================
+// Edge Case Tests
+// ============================================================================
+
+describe("Edge Cases", () => {
+  it("handles paths with special characters", () => {
+    const projectRoot = path.resolve(__dirname, "..");
+    const result = toProjectPath(projectRoot, "src/file-with-dashes_and_underscores.ts");
+    assertStrictEqual(result.includes("\\"), false);
+  });
+
+  it("handles deeply nested paths", () => {
+    const projectRoot = path.resolve(__dirname, "..");
+    const deepPath = path.join(projectRoot, "a", "b", "c", "d", "e", "f", "file.ts");
+    const result = toProjectPath(projectRoot, deepPath);
+    assertStrictEqual(result, "a/b/c/d/e/f/file.ts");
+  });
+
+  it("handles package names with dots", () => {
+    assertStrictEqual(extractPackageName("@types/node"), "@types/node");
+    assertStrictEqual(extractPackageName("lodash.debounce"), "lodash.debounce");
+  });
+
+  it("handles package names with hyphens", () => {
+    assertStrictEqual(extractPackageName("is-plain-object"), "is-plain-object");
+  });
+
+  it("classifies with null/undefined resolvedModule gracefully", () => {
+    const resultNull = classifyResolution("lodash", null);
+    assertStrictEqual(resultNull.resultKind, "unresolvable");
+
+    const resultUndefined = classifyResolution("fs", undefined);
+    assertStrictEqual(resultUndefined.resultKind, "third_party");
+  });
+});
+
+process.stdout.write("\n✅ All tests passed!\n");

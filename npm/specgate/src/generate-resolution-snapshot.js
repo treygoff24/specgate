@@ -313,6 +313,11 @@ function generateResolutionSnapshot(options) {
     realpath: tryRealpath,
   };
 
+  // Cache key function uses lowercase normalization for case-insensitive filesystems
+  // (macOS, Windows). On case-sensitive systems (Linux), this could theoretically cause
+  // cache collisions for files differing only in case, but TypeScript's module resolution
+  // is already case-aware and consistent within a project. The lowercase normalization
+  // ensures cache hits across platforms when the same project is developed on different OSes.
   const cache = ts.createModuleResolutionCache(projectRoot, (v) => v.toLowerCase(), compilerOptions);
   const resolutionResult = ts.resolveModuleName(
     options.importSpecifier,
@@ -459,6 +464,13 @@ module.exports = {
   parseArgs,
   isBuiltinImport,
   extractPackageName,
+  // Utility functions exported for testing
+  slashify,
+  trimNodePrefix,
+  looksLikePath,
+  isNodeModulesPath,
+  resolvePath,
+  tryRealpath,
 };
 
 if (require.main === module) {

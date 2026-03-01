@@ -83,7 +83,6 @@ function printWrapperHelp() {
     "Resolution snapshot help:",
     "  specgate resolution-snapshot --help",
     "  specgate snapshot-resolution --help (alias)",
-    "  specgate snapshot-resolution --help (alias)"
   ];
 
   process.stdout.write(`${text.join("\n")}\n`);
@@ -108,6 +107,13 @@ function runNativeSpecgate(args) {
 
     if (result.error) {
       process.stderr.write(`Failed to launch native specgate binary '${path.relative(process.cwd(), candidate)}': ${result.error.message}\n`);
+      return 1;
+    }
+
+    // Handle edge case where status, signal, and error are all null/undefined
+    // This can happen when the process exits unexpectedly without a clear status
+    if (typeof result.status !== "number") {
+      process.stderr.write(`Native specgate binary exited unexpectedly (no status, signal, or error)\n`);
       return 1;
     }
 
