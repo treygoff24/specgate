@@ -29,7 +29,7 @@ Promote beta to stable only after all gate checks are green, artifact verificati
 | Tag Shape | Channel | GitHub Release Type | Binary Workflow | npm Wrapper Workflow |
 | --- | --- | --- | --- | --- |
 | `vX.Y.Z` | stable | non-prerelease | `.github/workflows/release-binaries.yml` publishes binaries and checksum assets | `.github/workflows/release-npm-wrapper.yml` publishes wrapper to `latest` and verifies dist-tag |
-| `vX.Y.Z-beta.N` (or any semver prerelease) | beta | prerelease | `.github/workflows/release-binaries.yml` publishes binaries and marks release as prerelease | `.github/workflows/release-npm-wrapper.yml` publishes wrapper to `beta` and verifies dist-tag |
+| `vX.Y.Z-beta.N` (or any semver prerelease) | beta | prerelease | `.github/workflows/release-binaries.yml` publishes binaries and marks release as prerelease | `.github/workflows/release-npm-wrapper.yml` skips npm publish for prereleases (binary-only distribution) |
 
 ## Install Preference
 

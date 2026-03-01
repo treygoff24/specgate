@@ -140,7 +140,7 @@ describe("classifyResolution", () => {
 
 describe("toProjectPath", () => {
   it("returns relative path for files inside project", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       const result = toProjectPath(tmpDir, path.join(tmpDir, "src", "utils.ts"));
       assertEqual(result, "src/utils.ts");
@@ -150,7 +150,7 @@ describe("toProjectPath", () => {
   });
 
   it("returns . for project root", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       const result = toProjectPath(tmpDir, tmpDir);
       assertEqual(result, ".");
@@ -160,7 +160,7 @@ describe("toProjectPath", () => {
   });
 
   it("returns absolute path for files outside project", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     const outsideFile = path.join(os.tmpdir(), "outside.ts");
     try {
       fs.writeFileSync(outsideFile, "");
@@ -178,7 +178,7 @@ describe("toProjectPath", () => {
   });
 
   it("normalizes path separators to forward slashes", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       const result = toProjectPath(tmpDir, path.join(tmpDir, "src", "utils.ts"));
       assertTrue(!result.includes("\\"), `path should not contain backslashes: ${result}`);
@@ -300,7 +300,7 @@ describe("generateResolutionSnapshot", () => {
   });
 
   it("generates snapshot for builtin import", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     const testFile = path.join(tmpDir, "test.ts");
     const tsconfigPath = path.join(tmpDir, "tsconfig.json");
 
@@ -335,7 +335,7 @@ describe("generateResolutionSnapshot", () => {
   });
 
   it("generates snapshot for relative import", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-"));
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     const testFile = path.join(tmpDir, "src", "test.ts");
     const targetFile = path.join(tmpDir, "src", "utils.ts");
     const tsconfigPath = path.join(tmpDir, "tsconfig.json");
