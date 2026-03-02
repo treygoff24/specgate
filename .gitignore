@@ -1,4 +1,7 @@
 /target
 .DS_Store
+.opencode/
+merge_blockers.md
+output/
 
 npm/specgate/node_modules/
