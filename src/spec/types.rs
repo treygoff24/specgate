@@ -235,34 +235,35 @@ pub enum EnvelopeRequirement {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ContractMatch {
-    /// Glob pattern for matching contract files.
-    pub pattern: String,
-    /// Optional file extensions filter (e.g., [".json", ".yaml"]).
+    /// Glob patterns for files containing this boundary crossing.
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// Symbol/function name for AST-level binding (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<Vec<String>>,
-    /// Optional path prefix for matching.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix: Option<String>,
+    pub pattern: Option<String>,
 }
 
-/// A boundary contract defining cross-boundary data exchange.
+/// A boundary contract defining cross-boundary data exchange (spec version 2.3+).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BoundaryContract {
-    /// Human-readable name for the contract.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// Description of the contract's purpose.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Direction of contract flow.
+    /// Unique identifier within the module.
+    #[serde(default)]
+    pub id: String,
+    /// Path to contract file, relative to project root.
+    #[serde(default)]
+    pub contract: String,
+    /// Code-site binding.
+    pub r#match: ContractMatch,
+    /// Data flow direction at this boundary.
     #[serde(default)]
     pub direction: ContractDirection,
-    /// Matching pattern for contract files.
-    pub r#match: ContractMatch,
-    /// Envelope requirement for contract validation.
+    /// Envelope validation requirement.
     #[serde(default)]
     pub envelope: EnvelopeRequirement,
+    /// Optional cross-module consumer references in format "module:contract_id".
+    #[serde(default)]
+    pub imports_contract: Vec<String>,
 }
 
 #[cfg(test)]
@@ -388,24 +389,26 @@ mod tests {
     #[test]
     fn boundary_contract_serde_roundtrip() {
         let original = BoundaryContract {
-            name: Some("API Contract".to_string()),
-            description: Some("Defines API responses".to_string()),
+            id: "api_contract".to_string(),
+            contract: "contracts/api.json".to_string(),
             direction: ContractDirection::Outbound,
             r#match: ContractMatch {
-                pattern: "contracts/**/*.json".to_string(),
-                extensions: Some(vec![".json".to_string(), ".yaml".to_string()]),
-                prefix: Some("contracts".to_string()),
+                files: vec!["src/api/handlers.ts".to_string()],
+                pattern: Some("handleRequest".to_string()),
             },
             envelope: EnvelopeRequirement::Required,
+            imports_contract: vec!["other_module:their_contract".to_string()],
         };
 
         let json = serde_json::to_string(&original).expect("failed to serialize");
         let deserialized: BoundaryContract =
             serde_json::from_str(&json).expect("failed to deserialize");
 
-        assert_eq!(original.name, deserialized.name);
+        assert_eq!(original.id, deserialized.id);
+        assert_eq!(original.contract, deserialized.contract);
         assert_eq!(original.direction, deserialized.direction);
         assert_eq!(original.envelope, deserialized.envelope);
+        assert_eq!(original.imports_contract, deserialized.imports_contract);
     }
 
     // === Default Tests ===
@@ -432,20 +435,20 @@ mod tests {
     #[test]
     fn boundary_contract_defaults() {
         let contract = BoundaryContract::default();
-        assert!(contract.name.is_none());
-        assert!(contract.description.is_none());
+        assert!(contract.id.is_empty());
+        assert!(contract.contract.is_empty());
         assert_eq!(contract.direction, ContractDirection::Bidirectional);
         assert_eq!(contract.envelope, EnvelopeRequirement::Optional);
-        // r#match is required, so it should be an empty default
-        assert!(contract.r#match.pattern.is_empty());
+        assert!(contract.imports_contract.is_empty());
+        // r#match.files defaults to empty
+        assert!(contract.r#match.files.is_empty());
     }
 
     #[test]
     fn contract_match_defaults() {
         let contract_match = ContractMatch::default();
-        assert!(contract_match.pattern.is_empty());
-        assert!(contract_match.extensions.is_none());
-        assert!(contract_match.prefix.is_none());
+        assert!(contract_match.files.is_empty());
+        assert!(contract_match.pattern.is_none());
     }
 
     #[test]
@@ -524,26 +527,26 @@ mod tests {
         let boundaries = Boundaries {
             contracts: vec![
                 BoundaryContract {
-                    name: Some("Inbound Contract".to_string()),
-                    description: Some("Handles incoming data".to_string()),
+                    id: "inbound".to_string(),
+                    contract: "contracts/inbound.json".to_string(),
                     direction: ContractDirection::Inbound,
                     r#match: ContractMatch {
-                        pattern: "input/**/*.json".to_string(),
-                        extensions: Some(vec![".json".to_string()]),
-                        prefix: None,
+                        files: vec!["src/input/**/*.ts".to_string()],
+                        pattern: Some("handleInput".to_string()),
                     },
                     envelope: EnvelopeRequirement::Optional,
+                    imports_contract: vec![],
                 },
                 BoundaryContract {
-                    name: Some("Outbound Contract".to_string()),
-                    description: Some("Handles outgoing data".to_string()),
+                    id: "outbound".to_string(),
+                    contract: "contracts/outbound.yaml".to_string(),
                     direction: ContractDirection::Outbound,
                     r#match: ContractMatch {
-                        pattern: "output/**/*".to_string(),
-                        extensions: None,
-                        prefix: Some("contracts".to_string()),
+                        files: vec!["src/output/**/*.ts".to_string()],
+                        pattern: None,
                     },
                     envelope: EnvelopeRequirement::Required,
+                    imports_contract: vec!["consumer:their_contract".to_string()],
                 },
             ],
             ..Default::default()
