@@ -35,7 +35,7 @@ use crate::rules::{
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
     self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
-    types::SUPPORTED_SPEC_VERSION,
+    types::CURRENT_SPEC_VERSION,
 };
 use crate::verdict::{
     self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
@@ -988,8 +988,8 @@ fn handle_init(args: InitArgs) -> CliRunResult {
             &args.spec_dir.join(format!("{spec_file_stem}.spec.yml")),
         );
         let spec_content = format!(
-            "version: \"{}\"\nmodule: \"{}\"\nboundaries:\n  path: \"{}\"\nconstraints: []\n",
-            SUPPORTED_SPEC_VERSION,
+            "version: \"{}\"\nmodule: \"{}\"\nboundaries:\n  path: \"{}\"\n  contracts: []\nconstraints: []\n",
+            CURRENT_SPEC_VERSION,
             escape_yaml_double_quoted(&scaffold.module),
             escape_yaml_double_quoted(&scaffold.path)
         );
@@ -3625,5 +3625,40 @@ mod tests {
         assert_eq!(second.exit_code, EXIT_CODE_PASS);
         assert!(second.stdout.contains("\"skipped_existing\""));
         assert!(second.stdout.contains("specgate.config.yml"));
+    }
+
+    #[test]
+    fn init_scaffold_includes_version_2_3_and_empty_contracts() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let result = run([
+            "specgate",
+            "init",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+        ]);
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+        let spec_path = temp.path().join("modules/app.spec.yml");
+        assert!(spec_path.exists(), "scaffold spec file should exist");
+
+        let spec_content = fs::read_to_string(&spec_path).expect("read scaffold spec");
+
+        // Verify scaffold uses current spec version (2.3)
+        assert!(
+            spec_content.contains("version: \"2.3\""),
+            "scaffold should use CURRENT_SPEC_VERSION (2.3), got: {spec_content}"
+        );
+
+        // Verify scaffold includes empty contracts array (new in 2.3)
+        assert!(
+            spec_content.contains("contracts: []"),
+            "scaffold should include empty contracts array, got: {spec_content}"
+        );
+
+        // Verify scaffold structure
+        assert!(spec_content.contains("module: \"app\""));
+        assert!(spec_content.contains("boundaries:"));
+        assert!(spec_content.contains("constraints: []"));
     }
 }

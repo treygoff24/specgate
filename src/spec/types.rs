@@ -36,6 +36,12 @@ use serde::{Deserialize, Serialize};
 /// See module documentation for version contract details.
 pub const SUPPORTED_SPEC_VERSION: &str = "2.2";
 
+/// Current spec language version used for scaffold generation.
+///
+/// This is the version used when generating new spec files via `specgate init`.
+/// It may be newer than SUPPORTED_SPEC_VERSION during transitional periods.
+pub const CURRENT_SPEC_VERSION: &str = "2.3";
+
 /// A single `.spec.yml` file (one per module).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
