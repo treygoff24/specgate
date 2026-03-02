@@ -27,9 +27,13 @@ pub struct SpecConfig {
     /// Release channel controls stable/beta behavior gates.
     #[serde(default)]
     pub release_channel: ReleaseChannel,
-    /// Telemetry configuration (opt-in, disabled by default).
-    #[serde(default)]
-    pub telemetry: TelemetryConfig,
+    /// Telemetry opt-in flag (disabled by default).
+    ///
+    /// Backward-compatible with both:
+    /// - `telemetry: true|false` (preferred)
+    /// - `telemetry: { enabled: true|false }` (legacy)
+    #[serde(default, deserialize_with = "deserialize_telemetry")]
+    pub telemetry: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq, Eq)]
@@ -75,16 +79,25 @@ pub enum ReleaseChannel {
     Beta,
 }
 
-/// Telemetry configuration for the specgate tool.
-///
-/// Wraps a single bool to allow for future expansion (e.g., adding opt-out reasons,
-/// sampling rates, or endpoint configuration) without breaking the config file format.
-/// This provides forward compatibility for telemetry settings.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-pub struct TelemetryConfig {
-    /// Enables telemetry emission when downstream callers opt in to publishing.
-    #[serde(default)]
-    pub enabled: bool,
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum TelemetryConfigCompat {
+    Bool(bool),
+    Object {
+        #[serde(default)]
+        enabled: bool,
+    },
+}
+
+fn deserialize_telemetry<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let parsed = TelemetryConfigCompat::deserialize(deserializer)?;
+    Ok(match parsed {
+        TelemetryConfigCompat::Bool(enabled) => enabled,
+        TelemetryConfigCompat::Object { enabled } => enabled,
+    })
 }
 
 fn default_spec_dirs() -> Vec<String> {
@@ -122,7 +135,7 @@ impl Default for SpecConfig {
             jest_mock_mode: JestMockMode::Warn,
             stale_baseline: StaleBaselinePolicy::Warn,
             release_channel: ReleaseChannel::Stable,
-            telemetry: TelemetryConfig::default(),
+            telemetry: false,
         }
     }
 }
@@ -138,7 +151,7 @@ mod tests {
         assert_eq!(config.jest_mock_mode, JestMockMode::Warn);
         assert_eq!(config.stale_baseline, StaleBaselinePolicy::Warn);
         assert_eq!(config.release_channel, ReleaseChannel::Stable);
-        assert!(!config.telemetry.enabled);
+        assert!(!config.telemetry);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
     }
 
@@ -156,7 +169,7 @@ telemetry:
 
         assert_eq!(parsed.stale_baseline, StaleBaselinePolicy::Fail);
         assert_eq!(parsed.release_channel, ReleaseChannel::Beta);
-        assert!(parsed.telemetry.enabled);
+        assert!(parsed.telemetry);
     }
 
     #[test]
@@ -167,11 +180,17 @@ telemetry:
     }
 
     #[test]
+    fn config_accepts_boolean_telemetry_short_form() {
+        let parsed: SpecConfig = yaml_serde::from_str("telemetry: true\n").expect("parse config");
+        assert!(parsed.telemetry);
+    }
+
+    #[test]
     fn config_serialization_includes_new_surfaces_deterministically() {
         let rendered = serde_json::to_string(&SpecConfig::default()).expect("serialize config");
 
         assert!(rendered.contains("\"stale_baseline\":\"warn\""));
         assert!(rendered.contains("\"release_channel\":\"stable\""));
-        assert!(rendered.contains("\"telemetry\":{\"enabled\":false}"));
+        assert!(rendered.contains("\"telemetry\":false"));
     }
 }

@@ -594,7 +594,7 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     } else if args.telemetry {
         true
     } else {
-        loaded.config.telemetry.enabled
+        loaded.config.telemetry
     };
 
     let config_hash_for_telemetry = governance.config_hash.clone();

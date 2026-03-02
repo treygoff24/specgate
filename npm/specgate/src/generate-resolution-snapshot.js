@@ -414,14 +414,15 @@ function printHelp() {
 /**
  * Run the CLI with the given argument vector.
  *
- * @param {string[]} [argv] - Command-line arguments (defaults to process.argv.slice(2) when undefined).
- *   Library consumers should pass their own argv array explicitly rather than relying on this default.
+ * @param {string[]} argv - Command-line arguments.
  * @returns {number} Exit code (0 for success, 1 for failure)
  */
 function runCli(argv) {
-  if (argv === undefined) {
-    argv = process.argv.slice(2);
+  if (!Array.isArray(argv)) {
+    process.stderr.write("Argument error: runCli(argv) requires an explicit argv array\n");
+    return 1;
   }
+
   let args;
   try {
     args = parseArgs(argv);

@@ -15,11 +15,11 @@ jobs:
   perf-budget:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # NOTE: These defaults should be kept in sync with the shell script env defaults.
+    # Optional repo-level overrides. If unset/empty, perf_budget.sh applies defaults.
     env:
-      SPECGATE_PERF_MODULES: "120"
-      SPECGATE_PERF_FILES_PER_MODULE: "4"
-      SPECGATE_PERF_BUDGET_MS: "7000"
+      SPECGATE_PERF_MODULES: ${{ vars.SPECGATE_PERF_MODULES }}
+      SPECGATE_PERF_FILES_PER_MODULE: ${{ vars.SPECGATE_PERF_FILES_PER_MODULE }}
+      SPECGATE_PERF_BUDGET_MS: ${{ vars.SPECGATE_PERF_BUDGET_MS }}
     steps:
       - uses: actions/checkout@v4
 

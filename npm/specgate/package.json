@@ -31,6 +31,7 @@
   },
   "scripts": {
     "release": "npm version patch && npm publish",
-    "check": "node --check bin/specgate.js && node --check bin/specgate-resolution-snapshot.js && node --check src/generate-resolution-snapshot.js && node --check src/index.js"
+    "check": "node --check bin/specgate.js && node --check bin/specgate-resolution-snapshot.js && node --check src/generate-resolution-snapshot.js && node --check src/index.js",
+    "test": "npm ci --no-fund --no-audit && node ./generate-resolution-snapshot.test.js && node ./bin/specgate.test.js"
   }
 }
