@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use miette::Diagnostic;
 use oxc_resolver::{ResolveOptions, TsconfigOptions, TsconfigReferences};
 use thiserror::Error;
@@ -190,11 +190,14 @@ impl ModuleResolver {
                 .and_then(|b| b.path.clone())
                 .unwrap_or_else(|| format!("{}/**/*", spec.module.trim_matches('/')));
 
-            let glob = Glob::new(&pattern).map_err(|source| ResolverError::InvalidModuleGlob {
-                module: spec.module.clone(),
-                pattern,
-                source,
-            })?;
+            let glob = GlobBuilder::new(&pattern)
+                .literal_separator(true)
+                .build()
+                .map_err(|source| ResolverError::InvalidModuleGlob {
+                    module: spec.module.clone(),
+                    pattern,
+                    source,
+                })?;
 
             globset_builder.add(glob);
             compiled_specs.push(CompiledModuleSpec {
@@ -448,6 +451,51 @@ mod tests {
         assert_eq!(overlaps.len(), 1);
         assert_eq!(overlaps[0].selected_module, "alpha");
         assert_eq!(overlaps[0].matched_modules, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn literal_separator_glob_does_not_cross_directories() {
+        let glob = GlobBuilder::new("src/server/*.ts")
+            .literal_separator(true)
+            .build()
+            .expect("glob");
+        let matcher = glob.compile_matcher();
+
+        assert!(matcher.is_match("src/server/index.ts"));
+        assert!(!matcher.is_match("src/server/bridge/index.ts"));
+    }
+
+    #[test]
+    fn nested_module_paths_do_not_overlap_when_parent_uses_single_star() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src/server/bridge")).expect("mkdir");
+        fs::write(
+            temp.path().join("src/server/index.ts"),
+            "export const server = 1;\n",
+        )
+        .expect("write server");
+        fs::write(
+            temp.path().join("src/server/bridge/index.ts"),
+            "export const bridge = 1;\n",
+        )
+        .expect("write bridge");
+
+        let specs = vec![
+            base_spec("server", "src/server/*.ts"),
+            base_spec("server/bridge", "src/server/bridge/**"),
+        ];
+
+        let resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("src/server/index.ts")),
+            Some("server")
+        );
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("src/server/bridge/index.ts")),
+            Some("server/bridge")
+        );
+        assert!(resolver.module_map_overlaps().is_empty());
     }
 
     #[test]
