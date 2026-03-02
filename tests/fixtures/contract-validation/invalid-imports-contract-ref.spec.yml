@@ -1,0 +1,18 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: "bad_imports_contract"
+      contract: "contracts/test.json"
+      direction: inbound
+      match:
+        files:
+          - "src/api/**/*.ts"
+      imports_contract:
+        - "invalid_format_no_colon"
+        - "module:id:extra_colons"
+        - ":empty_module"
+        - "empty_contract_id:"
+      envelope: optional
+constraints: []

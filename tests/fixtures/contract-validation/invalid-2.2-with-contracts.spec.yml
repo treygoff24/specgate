@@ -1,0 +1,13 @@
+version: "2.2"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: "invalid_contract_in_22"
+      contract: "contracts/test.json"
+      direction: inbound
+      match:
+        files:
+          - "src/api/**/*.ts"
+      envelope: optional
+constraints: []

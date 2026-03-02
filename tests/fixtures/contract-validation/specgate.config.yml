@@ -1,0 +1,4 @@
+spec_dirs:
+  - .
+exclude: []
+test_patterns: []

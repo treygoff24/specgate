@@ -1,0 +1,13 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: "invalid_glob"
+      contract: "contracts/test.json"
+      direction: inbound
+      match:
+        files:
+          - "[invalid[glob**"
+      envelope: optional
+constraints: []

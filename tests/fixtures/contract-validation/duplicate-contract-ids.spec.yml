@@ -1,0 +1,20 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: "same_id"
+      contract: "contracts/first.json"
+      direction: inbound
+      match:
+        files:
+          - "src/api/first.ts"
+      envelope: optional
+    - id: "same_id"
+      contract: "contracts/second.yaml"
+      direction: outbound
+      match:
+        files:
+          - "src/api/second.ts"
+      envelope: optional
+constraints: []

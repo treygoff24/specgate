@@ -1,0 +1,29 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: "create_user"
+      contract: "contracts/create_user.json"
+      direction: inbound
+      match:
+        files:
+          - "src/api/handlers.ts"
+      envelope: optional
+    - id: "update_user"
+      contract: "contracts/update_user.yaml"
+      direction: outbound
+      match:
+        files:
+          - "src/api/**/*.ts"
+      envelope: required
+    - id: "delete_user"
+      contract: "contracts/delete_user.yml"
+      direction: bidirectional
+      match:
+        files:
+          - "src/api/handlers/delete.ts"
+      imports_contract:
+        - "db:user_deletion"
+      envelope: required
+constraints: []
