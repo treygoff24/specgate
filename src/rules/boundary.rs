@@ -7,8 +7,8 @@ use globset::GlobSet;
 use crate::deterministic::normalize_repo_relative;
 use crate::graph::{DependencyEdge, EdgeKind};
 use crate::rules::{
-    GlobCompileError, Rule, RuleContext, RuleViolation, compile_optional_globset_strict,
-    matches_test_file, sort_violations_stable,
+    compile_optional_globset_strict, matches_test_file, sort_violations_stable, GlobCompileError,
+    Rule, RuleContext, RuleViolation,
 };
 use crate::spec::{Boundaries, Visibility};
 
@@ -16,6 +16,8 @@ use crate::spec::{Boundaries, Visibility};
 pub const BOUNDARY_CANONICAL_IMPORT_RULE_ID: &str = "boundary.canonical_import";
 /// Backward-compatible alias for older emitted id.
 pub const BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS: &str = "boundary.canonical_imports";
+/// Rule id for contract version mismatch (contracts in 2.2 spec).
+pub const BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID: &str = "boundary.contract_version_mismatch";
 
 /// Boundary rule engine for importer/provider constraints.
 #[derive(Debug, Default, Clone, Copy)]

@@ -3,8 +3,11 @@ use std::path::PathBuf;
 
 use globset::Glob;
 
-use crate::rules::{BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS};
-use crate::spec::types::{SUPPORTED_SPEC_VERSION, SpecFile};
+use crate::rules::{
+    BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS, BOUNDARY_CANONICAL_IMPORT_RULE_ID,
+    BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
+};
+use crate::spec::types::{SpecFile, SUPPORTED_SPEC_VERSIONS};
 
 const KNOWN_CONSTRAINT_RULES: &[&str] = &[
     "no-circular-deps",
@@ -135,14 +138,30 @@ pub fn validate_specs(specs: &[SpecFile]) -> ValidationReport {
 }
 
 fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
-    if spec.version.trim() != SUPPORTED_SPEC_VERSION {
+    let version = spec.version.trim();
+    if !SUPPORTED_SPEC_VERSIONS.contains(&version) {
         report.push_error(
             spec,
             format!(
-                "unsupported spec version '{}'; expected '{}'",
-                spec.version, SUPPORTED_SPEC_VERSION
+                "unsupported spec version '{}'; expected one of {:?}",
+                spec.version, SUPPORTED_SPEC_VERSIONS
             ),
         );
+    }
+
+    // Check for contracts in 2.2 spec (version mismatch violation)
+    if version == "2.2" {
+        if let Some(boundaries) = &spec.boundaries {
+            if !boundaries.contracts.is_empty() {
+                report.push_error(
+                    spec,
+                    format!(
+                        "{}: contracts are not supported in spec version 2.2; upgrade to 2.3 to use boundary contracts",
+                        BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID
+                    ),
+                );
+            }
+        }
     }
 
     if spec.module.trim().is_empty() {
@@ -253,12 +272,10 @@ mod tests {
         let specs = vec![base_spec("orders"), base_spec("orders")];
         let report = validate_specs(&specs);
         assert!(report.has_errors());
-        assert!(
-            report
-                .errors()
-                .iter()
-                .any(|issue| issue.message.contains("duplicate module"))
-        );
+        assert!(report
+            .errors()
+            .iter()
+            .any(|issue| issue.message.contains("duplicate module")));
     }
 
     #[test]
@@ -359,11 +376,112 @@ mod tests {
         b.import_ids = vec!["@app/core".to_string()];
 
         let report = validate_specs(&[a, b]);
+        assert!(report
+            .errors()
+            .iter()
+            .any(|issue| issue.message.contains("canonical import id")));
+    }
+
+    // === Version Handling Tests ===
+
+    #[test]
+    fn spec_version_2_2_is_valid() {
+        let spec = base_spec("orders");
+        let report = validate_specs(&[spec]);
+        assert!(!report.has_errors(), "spec version 2.2 should be valid");
+    }
+
+    #[test]
+    fn spec_version_2_3_is_valid() {
+        let mut spec = base_spec("orders");
+        spec.version = "2.3".to_string();
+        let report = validate_specs(&[spec]);
+        assert!(!report.has_errors(), "spec version 2.3 should be valid");
+    }
+
+    #[test]
+    fn unsupported_spec_version_is_error() {
+        let mut spec = base_spec("orders");
+        spec.version = "2.0".to_string();
+        let report = validate_specs(&[spec]);
+        assert!(report.has_errors(), "unsupported version should be error");
         assert!(
-            report
-                .errors()
-                .iter()
-                .any(|issue| issue.message.contains("canonical import id"))
+            report.errors().iter().any(|issue| {
+                issue.message.contains("unsupported spec version") && issue.message.contains("2.0")
+            }),
+            "error should mention unsupported version 2.0"
+        );
+    }
+
+    #[test]
+    fn contracts_in_2_2_spec_emits_version_mismatch_error() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            contracts: vec![crate::spec::types::BoundaryContract {
+                name: Some("Test Contract".to_string()),
+                description: None,
+                direction: crate::spec::types::ContractDirection::Bidirectional,
+                r#match: crate::spec::types::ContractMatch {
+                    pattern: "contracts/**/*.json".to_string(),
+                    extensions: None,
+                    prefix: None,
+                },
+                envelope: crate::spec::types::EnvelopeRequirement::Optional,
+            }],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(report.has_errors(), "contracts in 2.2 spec should be error");
+        assert!(
+            report.errors().iter().any(|issue| {
+                issue
+                    .message
+                    .contains(BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID)
+                    && issue.message.contains("upgrade to 2.3")
+            }),
+            "error should mention boundary.contract_version_mismatch and upgrade hint"
+        );
+    }
+
+    #[test]
+    fn contracts_in_2_3_spec_is_valid() {
+        let mut spec = base_spec("orders");
+        spec.version = "2.3".to_string();
+        spec.boundaries = Some(Boundaries {
+            contracts: vec![crate::spec::types::BoundaryContract {
+                name: Some("Test Contract".to_string()),
+                description: None,
+                direction: crate::spec::types::ContractDirection::Bidirectional,
+                r#match: crate::spec::types::ContractMatch {
+                    pattern: "contracts/**/*.json".to_string(),
+                    extensions: None,
+                    prefix: None,
+                },
+                envelope: crate::spec::types::EnvelopeRequirement::Optional,
+            }],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(
+            !report.has_errors(),
+            "contracts in 2.3 spec should be valid"
+        );
+    }
+
+    #[test]
+    fn empty_contracts_in_2_2_spec_is_valid() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            contracts: vec![],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(
+            !report.has_errors(),
+            "empty contracts in 2.2 spec should be valid"
         );
     }
 }
