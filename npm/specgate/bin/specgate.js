@@ -4,7 +4,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { runCli } = require("../src/generate-resolution-snapshot");
 
 const signals = {
   SIGHUP: 1,
@@ -88,6 +87,11 @@ function printWrapperHelp() {
   process.stdout.write(`${text.join("\n")}\n`);
 }
 
+function runResolutionSnapshot(args) {
+  const { runCli } = require("../src/generate-resolution-snapshot");
+  return runCli(args);
+}
+
 function runNativeSpecgate(args) {
   for (const candidate of nativeCandidates()) {
     if (!isFile(candidate)) {
@@ -136,7 +140,7 @@ function main(argv) {
   }
 
   if (subcommand === "resolution-snapshot" || subcommand === "snapshot-resolution") {
-    return runCli(rest);
+    return runResolutionSnapshot(rest);
   }
 
   return runNativeSpecgate(argv);

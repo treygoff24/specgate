@@ -38,6 +38,7 @@ jobs:
           DISPATCH_TAG: ${{ github.event.inputs.tag }}
           DISPATCH_PACKAGE_DIR: ${{ github.event.inputs.package_dir }}
           DEFAULT_PACKAGE_DIR: ${{ vars.NPM_WRAPPER_PACKAGE_DIR }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -127,6 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.resolve.outputs.has_binaries == 'true'
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
