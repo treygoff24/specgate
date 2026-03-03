@@ -321,7 +321,9 @@ impl ModuleResolver {
         let tsconfig_key = fs::canonicalize(&tsconfig_path).unwrap_or(tsconfig_path);
         self.resolvers_by_tsconfig
             .entry(tsconfig_key.clone())
-            .or_insert_with(|| oxc_resolver::Resolver::new(build_resolve_options(Some(tsconfig_key.clone()))))
+            .or_insert_with(|| {
+                oxc_resolver::Resolver::new(build_resolve_options(Some(tsconfig_key.clone())))
+            })
     }
 }
 
@@ -441,8 +443,9 @@ fn containing_dir(from_file: &Path, project_root: &Path) -> PathBuf {
     } else {
         project_root.join(from_file)
     };
+    let normalized_from_file = fs::canonicalize(&absolute_from_file).unwrap_or(absolute_from_file);
 
-    absolute_from_file
+    normalized_from_file
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| project_root.to_path_buf())
@@ -782,7 +785,7 @@ mod tests {
             temp.path().join("src/root/value.ts"),
             "export const rootTarget = 1;\n",
         )
-            .expect("write root target");
+        .expect("write root target");
         fs::write(
             temp.path().join("packages/web/nested/value.ts"),
             "export const nestedTarget = 1;\n",
@@ -793,8 +796,11 @@ mod tests {
             "import '@cfg/value';\n",
         )
         .expect("write app");
-        fs::write(temp.path().join("src/root-user.ts"), "import '@cfg/value';\n")
-            .expect("write root user");
+        fs::write(
+            temp.path().join("src/root-user.ts"),
+            "import '@cfg/value';\n",
+        )
+        .expect("write root user");
 
         let specs = vec![
             base_spec("root", "src/**/*"),
@@ -803,21 +809,27 @@ mod tests {
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
 
         let nested = resolver.resolve(&temp.path().join("packages/web/src/app.ts"), "@cfg/value");
-        assert!(matches!(
-            nested,
-            ResolvedImport::FirstParty {
-                module_id: Some(ref module),
-                resolved_path: ref path,
-            } if module == "web" && path.ends_with(Path::new("packages/web/nested/value.ts"))
-        ), "unexpected nested resolution: {nested:?}");
+        assert!(
+            matches!(
+                nested,
+                ResolvedImport::FirstParty {
+                    module_id: Some(ref module),
+                    resolved_path: ref path,
+                } if module == "web" && path.ends_with(Path::new("packages/web/nested/value.ts"))
+            ),
+            "unexpected nested resolution: {nested:?}"
+        );
 
         let root = resolver.resolve(&temp.path().join("src/root-user.ts"), "@cfg/value");
-        assert!(matches!(
-            root,
-            ResolvedImport::FirstParty {
-                module_id: Some(ref module),
-                resolved_path: ref path,
-            } if module == "root" && path.ends_with(Path::new("src/root/value.ts"))
-        ), "unexpected root resolution: {root:?}");
+        assert!(
+            matches!(
+                root,
+                ResolvedImport::FirstParty {
+                    module_id: Some(ref module),
+                    resolved_path: ref path,
+                } if module == "root" && path.ends_with(Path::new("src/root/value.ts"))
+            ),
+            "unexpected root resolution: {root:?}"
+        );
     }
 }
