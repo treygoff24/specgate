@@ -1,0 +1,7 @@
+version: "2.2"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from:
+    - shared
+constraints: []

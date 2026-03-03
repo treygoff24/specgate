@@ -1,0 +1,6 @@
+version: "2.2"
+module: shared
+import_id: "@shared"
+boundaries:
+  path: src/**/*
+constraints: []

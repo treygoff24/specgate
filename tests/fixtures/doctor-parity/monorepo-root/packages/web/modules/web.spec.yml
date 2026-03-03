@@ -1,0 +1,8 @@
+version: "2.2"
+module: web
+import_id: "@web"
+boundaries:
+  path: src/**/*
+  allow_imports_from:
+    - shared
+constraints: []

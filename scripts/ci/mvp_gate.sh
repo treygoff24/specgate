@@ -75,6 +75,7 @@ render_summary() {
   echo "12. cargo test --locked --test integration"
   echo "13. cargo test --locked --test wave2c_cli_integration"
   echo "14. cargo test --locked --test mvp_gate_baseline"
+  echo "15. cargo test --locked --test doctor_parity_fixtures"
   echo
 
   if [[ ${overall_status} -eq 0 ]]; then
@@ -118,6 +119,7 @@ run_step contract "Integration semantics" cargo test --locked --test integration
 run_step contract "Wave2-C CLI integration semantics" cargo test --locked --test wave2c_cli_integration
 
 run_step policy "Baseline/new-violation behavior" cargo test --locked --test mvp_gate_baseline
+run_step contract "Doctor parity fixtures" cargo test --locked --test doctor_parity_fixtures
 
 emit_summary
 
