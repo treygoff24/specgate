@@ -17,9 +17,8 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
-    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations_with_stale, load_optional_baseline, refresh_baseline_with_metadata,
-    write_baseline,
+    build_baseline_with_metadata, classify_violations_with_stale, load_optional_baseline,
+    refresh_baseline_with_metadata, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -28,19 +27,19 @@ use crate::resolver::classify::extract_package_name;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
-    RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
-    is_canonical_import_rule_id,
+    evaluate_enforce_layer, evaluate_no_circular_deps, is_canonical_import_rule_id, DependencyRule,
+    RuleContext, RuleViolation, RuleWithResolver, DEPENDENCY_FORBIDDEN_RULE_ID,
+    DEPENDENCY_NOT_ALLOWED_RULE_ID,
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
-    types::CURRENT_SPEC_VERSION,
+    self, types::CURRENT_SPEC_VERSION, Severity, SpecConfig, SpecFile, ValidationLevel,
+    ValidationReport,
 };
 use crate::verdict::{
-    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
-    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    build_verdict_with_options,
+    self, build_verdict_with_options, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary,
+    GovernanceContext, PolicyViolation, TelemetryEventName, VerdictBuildOptions, VerdictIdentity,
+    VerdictMetrics, VerdictStatus,
 };
 
 // Re-export from submodules for convenience
@@ -483,8 +482,25 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         );
     }
 
+    // Handle --since blast-radius mode - compute affected modules before analysis
+    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &BTreeSet::new()) {
+        Ok(radius) => radius,
+        Err(error) => {
+            return runtime_error_json("git", "failed to compute blast radius", vec![error]);
+        }
+    };
+
+    // Compute affected modules from blast radius for contract rule scoping
+    let affected_modules: Option<BTreeSet<String>> = blast_radius.as_ref().map(|radius| {
+        radius
+            .affected_modules
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    });
+
     let analyze_start = Instant::now();
-    let artifacts = match analyze_project(&loaded) {
+    let artifacts = match analyze_project(&loaded, affected_modules.as_ref()) {
         Ok(artifacts) => artifacts,
         Err(error) => {
             return runtime_error_json("runtime", "failed to analyze project", vec![error]);
@@ -499,15 +515,6 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             artifacts.layer_config_issues,
         );
     }
-
-    // Handle --since blast-radius mode
-    let blast_radius =
-        match build_blast_radius(&loaded, args.since.as_deref(), &artifacts.edge_pairs) {
-            Ok(radius) => radius,
-            Err(error) => {
-                return runtime_error_json("git", "failed to compute blast radius", vec![error]);
-            }
-        };
     let baseline_start = Instant::now();
     let baseline = if args.no_baseline {
         None
@@ -794,7 +801,24 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         );
     }
 
-    let artifacts = match analyze_project(&loaded) {
+    // Handle --since blast-radius mode - compute affected modules before analysis
+    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &BTreeSet::new()) {
+        Ok(radius) => radius,
+        Err(error) => {
+            return runtime_error_json("git", "failed to compute blast radius", vec![error]);
+        }
+    };
+
+    // Compute affected modules from blast radius for contract rule scoping
+    let affected_modules: Option<BTreeSet<String>> = blast_radius.as_ref().map(|radius| {
+        radius
+            .affected_modules
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    });
+
+    let artifacts = match analyze_project(&loaded, affected_modules.as_ref()) {
         Ok(artifacts) => artifacts,
         Err(error) => {
             return runtime_error_json("runtime", "failed to analyze project", vec![error]);
@@ -808,14 +832,6 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
             artifacts.layer_config_issues,
         );
     }
-
-    let blast_radius =
-        match build_blast_radius(&loaded, args.since.as_deref(), &artifacts.edge_pairs) {
-            Ok(radius) => radius,
-            Err(error) => {
-                return runtime_error_json("git", "failed to compute blast radius", vec![error]);
-            }
-        };
 
     let policy_violations = if let Some(radius) = &blast_radius {
         artifacts
@@ -1172,7 +1188,7 @@ fn handle_baseline(args: BaselineArgs) -> CliRunResult {
         );
     }
 
-    let artifacts = match analyze_project(&loaded) {
+    let artifacts = match analyze_project(&loaded, None) {
         Ok(artifacts) => artifacts,
         Err(error) => {
             return runtime_error_json("runtime", "failed to analyze project", vec![error]);
@@ -1298,7 +1314,7 @@ fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         );
     }
 
-    let artifacts = match analyze_project(&loaded) {
+    let artifacts = match analyze_project(&loaded, None) {
         Ok(artifacts) => artifacts,
         Err(error) => {
             return runtime_error_json("runtime", "failed to analyze project", vec![error]);
@@ -1364,7 +1380,7 @@ fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         );
     }
 
-    let artifacts = match analyze_project(&loaded) {
+    let artifacts = match analyze_project(&loaded, None) {
         Ok(artifacts) => artifacts,
         Err(error) => {
             return runtime_error_json("runtime", "failed to analyze project", vec![error]);
@@ -2682,7 +2698,10 @@ fn boundary_violation_severity(
         .unwrap_or(Severity::Error)
 }
 
-fn analyze_project(loaded: &LoadedProject) -> std::result::Result<AnalysisArtifacts, String> {
+fn analyze_project(
+    loaded: &LoadedProject,
+    affected_modules: Option<&BTreeSet<String>>,
+) -> std::result::Result<AnalysisArtifacts, String> {
     let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
         .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
     let module_map_overlaps = resolver.module_map_overlaps().to_vec();
@@ -2810,6 +2829,23 @@ fn analyze_project(loaded: &LoadedProject) -> std::result::Result<AnalysisArtifa
         })
         .collect::<Vec<_>>();
     policy_violations.extend(layer_violations);
+
+    // Evaluate contract rules with affected_modules scoping
+    let contract_violations = crate::rules::evaluate_contract_rules(&ctx, affected_modules)
+        .into_iter()
+        .map(|contract_violation| PolicyViolation {
+            rule: contract_violation.violation.rule,
+            severity: Severity::Error,
+            message: contract_violation.violation.message,
+            from_file: contract_violation.violation.from_file,
+            to_file: contract_violation.violation.to_file,
+            from_module: contract_violation.violation.from_module,
+            to_module: contract_violation.violation.to_module,
+            line: contract_violation.violation.line,
+            column: contract_violation.violation.column,
+        })
+        .collect::<Vec<_>>();
+    policy_violations.extend(contract_violations);
 
     let layer_config_issues = layer_report
         .config_issues
@@ -3380,11 +3416,9 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"match\""));
-        assert!(
-            result
-                .stdout
-                .contains("\"trace_parser\": \"legacy_trace_text\"")
-        );
+        assert!(result
+            .stdout
+            .contains("\"trace_parser\": \"legacy_trace_text\""));
     }
 
     #[test]
@@ -3428,16 +3462,12 @@ mod tests {
         ]);
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
-        assert!(
-            result
-                .stdout
-                .contains("\"trace_parser\": \"structured_snapshot\"")
-        );
-        assert!(
-            result
-                .stdout
-                .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\"")
-        );
+        assert!(result
+            .stdout
+            .contains("\"trace_parser\": \"structured_snapshot\""));
+        assert!(result
+            .stdout
+            .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\""));
 
         let snapshot = fs::read_to_string(temp.path().join("snapshots/normalized.json"))
             .expect("structured snapshot output");
