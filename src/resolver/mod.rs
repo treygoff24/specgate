@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -12,7 +12,10 @@ use crate::deterministic::normalize_path;
 use crate::resolver::classify::{
     classify_resolution, extract_package_name, is_explicit_node_builtin, is_node_builtin,
 };
-use crate::spec::SpecFile;
+use crate::spec::{
+    SpecFile,
+    config::{DEFAULT_EXCLUDED_DIRS, include_dir_set},
+};
 
 pub mod classify;
 
@@ -76,6 +79,7 @@ pub struct ModuleResolver {
     project_root: PathBuf,
     resolver_without_tsconfig: oxc_resolver::Resolver,
     resolvers_by_tsconfig: BTreeMap<PathBuf, oxc_resolver::Resolver>,
+    tsconfig_cache: BTreeMap<PathBuf, Option<PathBuf>>,
     cache: BTreeMap<(PathBuf, String), ResolvedImport>,
     module_map: BTreeMap<PathBuf, String>,
     module_map_overlaps: Vec<ModuleMapOverlap>,
@@ -84,15 +88,27 @@ pub struct ModuleResolver {
 impl ModuleResolver {
     /// Create resolver from project root + loaded specs.
     pub fn new(project_root: &Path, specs: &[SpecFile]) -> Result<Self> {
+        Self::new_with_include_dirs(project_root, specs, &[])
+    }
+
+    /// Create resolver with explicit directory re-includes for default excluded directories.
+    pub fn new_with_include_dirs(
+        project_root: &Path,
+        specs: &[SpecFile],
+        include_dirs: &[String],
+    ) -> Result<Self> {
         let project_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-        let module_map_build = Self::build_module_map_with_diagnostics(&project_root, specs)?;
+        let include_dirs = include_dir_set(include_dirs);
+        let module_map_build =
+            Self::build_module_map_with_diagnostics(&project_root, specs, &include_dirs)?;
         let resolver_without_tsconfig = oxc_resolver::Resolver::new(build_resolve_options(None));
 
         Ok(Self {
             project_root,
             resolver_without_tsconfig,
             resolvers_by_tsconfig: BTreeMap::new(),
+            tsconfig_cache: BTreeMap::new(),
             cache: BTreeMap::new(),
             module_map: module_map_build.module_map,
             module_map_overlaps: module_map_build.overlaps,
@@ -159,18 +175,24 @@ impl ModuleResolver {
         project_root: &Path,
         specs: &[SpecFile],
     ) -> Result<BTreeMap<PathBuf, String>> {
-        Ok(Self::build_module_map_with_diagnostics(project_root, specs)?.module_map)
+        Ok(
+            Self::build_module_map_with_diagnostics(project_root, specs, &BTreeSet::new())?
+                .module_map,
+        )
     }
 
     fn build_module_map_with_diagnostics(
         project_root: &Path,
         specs: &[SpecFile],
+        include_dirs: &BTreeSet<String>,
     ) -> Result<ModuleMapBuild> {
         let mut files = Vec::new();
         for entry in WalkDir::new(project_root)
             .follow_links(true)
             .into_iter()
-            .filter_entry(|entry| !should_skip_module_map_entry(project_root, entry.path()))
+            .filter_entry(|entry| {
+                !should_skip_module_map_entry(project_root, entry.path(), include_dirs)
+            })
             .filter_map(std::result::Result::ok)
         {
             if entry.file_type().is_file() {
@@ -270,6 +292,11 @@ impl ModuleResolver {
         self.cache.clear();
     }
 
+    /// Current nearest-tsconfig cache size (for tests/diagnostics).
+    pub fn tsconfig_cache_len(&self) -> usize {
+        self.tsconfig_cache.len()
+    }
+
     fn resolve_uncached(&mut self, containing_dir: &Path, specifier: &str) -> ResolvedImport {
         if is_explicit_node_builtin(specifier) {
             return ResolvedImport::ThirdParty {
@@ -314,8 +341,7 @@ impl ModuleResolver {
         &mut self,
         containing_dir: &Path,
     ) -> &mut oxc_resolver::Resolver {
-        let Some(tsconfig_path) = nearest_tsconfig_for_dir(&self.project_root, containing_dir)
-        else {
+        let Some(tsconfig_path) = self.nearest_tsconfig_for_dir(containing_dir) else {
             return &mut self.resolver_without_tsconfig;
         };
         let tsconfig_key = fs::canonicalize(&tsconfig_path).unwrap_or(tsconfig_path);
@@ -324,6 +350,22 @@ impl ModuleResolver {
             .or_insert_with(|| {
                 oxc_resolver::Resolver::new(build_resolve_options(Some(tsconfig_key.clone())))
             })
+    }
+
+    fn nearest_tsconfig_for_dir(&mut self, containing_dir: &Path) -> Option<PathBuf> {
+        let cache_key = if containing_dir.starts_with(&self.project_root) {
+            containing_dir.to_path_buf()
+        } else {
+            self.project_root.clone()
+        };
+
+        if let Some(cached) = self.tsconfig_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
+        let resolved = nearest_tsconfig_for_dir_uncached(&self.project_root, &cache_key);
+        self.tsconfig_cache.insert(cache_key, resolved.clone());
+        resolved
     }
 }
 
@@ -385,7 +427,10 @@ fn build_resolve_options(tsconfig_path: Option<PathBuf>) -> ResolveOptions {
     }
 }
 
-fn nearest_tsconfig_for_dir(project_root: &Path, containing_dir: &Path) -> Option<PathBuf> {
+fn nearest_tsconfig_for_dir_uncached(
+    project_root: &Path,
+    containing_dir: &Path,
+) -> Option<PathBuf> {
     let mut current = if containing_dir.starts_with(project_root) {
         containing_dir.to_path_buf()
     } else {
@@ -414,7 +459,15 @@ fn nearest_tsconfig_for_dir(project_root: &Path, containing_dir: &Path) -> Optio
     None
 }
 
-fn should_skip_module_map_entry(project_root: &Path, path: &Path) -> bool {
+pub(crate) fn excluded_dir_names() -> &'static [&'static str] {
+    DEFAULT_EXCLUDED_DIRS
+}
+
+fn should_skip_module_map_entry(
+    project_root: &Path,
+    path: &Path,
+    include_dirs: &BTreeSet<String>,
+) -> bool {
     let Ok(relative) = path.strip_prefix(project_root) else {
         return false;
     };
@@ -423,17 +476,9 @@ fn should_skip_module_map_entry(project_root: &Path, path: &Path) -> bool {
         let Component::Normal(name) = component else {
             return false;
         };
-        matches!(
-            name.to_string_lossy().as_ref(),
-            "node_modules"
-                | "dist"
-                | "build"
-                | ".git"
-                | "generated"
-                | "target"
-                | "coverage"
-                | "vendor"
-        )
+        let name = name.to_string_lossy();
+        let segment = name.as_ref();
+        excluded_dir_names().contains(&segment) && !include_dirs.contains(segment)
     })
 }
 
@@ -639,6 +684,39 @@ mod tests {
     }
 
     #[test]
+    fn resolver_and_workspace_discovery_share_default_excluded_dirs() {
+        assert_eq!(
+            excluded_dir_names(),
+            crate::spec::workspace_discovery::excluded_dir_names()
+        );
+        assert_eq!(
+            excluded_dir_names(),
+            crate::spec::config::DEFAULT_EXCLUDED_DIRS
+        );
+    }
+
+    #[test]
+    fn module_map_can_reinclude_default_excluded_vendor_dir() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("vendor/lib")).expect("mkdir vendor");
+        fs::write(
+            temp.path().join("vendor/lib/x.ts"),
+            "export const vendor = 1;\n",
+        )
+        .expect("write vendor");
+
+        let specs = vec![base_spec("vendor", "vendor/**/*")];
+        let resolver =
+            ModuleResolver::new_with_include_dirs(temp.path(), &specs, &["vendor".to_string()])
+                .expect("resolver");
+
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("vendor/lib/x.ts")),
+            Some("vendor")
+        );
+    }
+
+    #[test]
     fn module_map_prunes_heavy_directories() {
         let temp = TempDir::new().expect("tempdir");
         fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
@@ -736,12 +814,51 @@ mod tests {
         fs::write(temp.path().join("packages/web/tsconfig.json"), "{}\n")
             .expect("write nested tsconfig");
 
-        let selected = nearest_tsconfig_for_dir(temp.path(), &temp.path().join("packages/web/src"))
-            .expect("nearest tsconfig");
+        let selected =
+            nearest_tsconfig_for_dir_uncached(temp.path(), &temp.path().join("packages/web/src"))
+                .expect("nearest tsconfig");
         assert_eq!(
             selected,
             temp.path().join("packages/web/tsconfig.json"),
             "nested context should take precedence over root tsconfig"
+        );
+    }
+
+    #[test]
+    fn tsconfig_lookup_is_cached_per_directory() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("packages/web/src")).expect("mkdir nested src");
+        fs::write(temp.path().join("tsconfig.json"), "{}\n").expect("write root tsconfig");
+        fs::write(temp.path().join("packages/web/tsconfig.json"), "{}\n")
+            .expect("write nested tsconfig");
+
+        fs::write(
+            temp.path().join("packages/web/src/a.ts"),
+            "import './b'; import './c';\n",
+        )
+        .expect("write a");
+        fs::write(
+            temp.path().join("packages/web/src/b.ts"),
+            "export const b = 1;\n",
+        )
+        .expect("write b");
+        fs::write(
+            temp.path().join("packages/web/src/c.ts"),
+            "export const c = 1;\n",
+        )
+        .expect("write c");
+
+        let specs = vec![base_spec("web", "packages/web/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let from = temp.path().join("packages/web/src/a.ts");
+
+        let _ = resolver.resolve(&from, "./b");
+        let _ = resolver.resolve(&from, "./c");
+
+        assert_eq!(
+            resolver.tsconfig_cache_len(),
+            1,
+            "nearest tsconfig walk should be cached per containing dir"
         );
     }
 

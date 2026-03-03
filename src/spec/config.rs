@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,9 @@ pub struct SpecConfig {
     /// Patterns treated as test files.
     #[serde(default = "default_test_patterns")]
     pub test_patterns: Vec<String>,
+    /// Directory names re-included when they also match the default excluded directory list.
+    #[serde(default)]
+    pub include_dirs: Vec<String>,
     /// Escape hatch governance settings.
     #[serde(default)]
     pub escape_hatches: EscapeHatchConfig,
@@ -107,17 +112,43 @@ fn default_spec_dirs() -> Vec<String> {
     vec![".".to_string()]
 }
 
+pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
+    "node_modules",
+    "dist",
+    "build",
+    ".git",
+    "generated",
+    "target",
+    "coverage",
+    "vendor",
+];
+
 fn default_excludes() -> Vec<String> {
-    vec![
-        "**/node_modules/**".to_string(),
-        "**/dist/**".to_string(),
-        "**/build/**".to_string(),
-        "**/.git/**".to_string(),
-        "**/generated/**".to_string(),
-        "**/target/**".to_string(),
-        "**/coverage/**".to_string(),
-        "**/vendor/**".to_string(),
-    ]
+    DEFAULT_EXCLUDED_DIRS
+        .iter()
+        .map(|name| format!("**/{name}/**"))
+        .collect()
+}
+
+pub fn normalize_dir_token(raw: &str) -> Option<String> {
+    let normalized = raw.trim().trim_matches('/').trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let token = normalized.rsplit('/').next().unwrap_or(normalized);
+    if token.is_empty() {
+        return None;
+    }
+
+    Some(token.to_string())
+}
+
+pub fn include_dir_set(include_dirs: &[String]) -> BTreeSet<String> {
+    include_dirs
+        .iter()
+        .filter_map(|entry| normalize_dir_token(entry))
+        .collect()
 }
 
 fn default_test_patterns() -> Vec<String> {
@@ -141,6 +172,7 @@ impl Default for SpecConfig {
             spec_dirs: default_spec_dirs(),
             exclude: default_excludes(),
             test_patterns: default_test_patterns(),
+            include_dirs: Vec::new(),
             escape_hatches: EscapeHatchConfig::default(),
             jest_mock_mode: JestMockMode::Warn,
             stale_baseline: StaleBaselinePolicy::Warn,
@@ -164,6 +196,7 @@ mod tests {
         assert_eq!(config.release_channel, ReleaseChannel::Stable);
         assert!(!config.telemetry);
         assert!(!config.enforce_type_only_imports);
+        assert!(config.include_dirs.is_empty());
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
@@ -196,6 +229,13 @@ telemetry:
     }
 
     #[test]
+    fn config_parses_include_dirs() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("include_dirs:\n  - vendor\n").expect("parse config");
+        assert_eq!(parsed.include_dirs, vec!["vendor"]);
+    }
+
+    #[test]
     fn config_accepts_legacy_stale_baseline_policy_alias() {
         let parsed: SpecConfig =
             yaml_serde::from_str("stale_baseline_policy: fail\n").expect("parse config");
@@ -216,5 +256,6 @@ telemetry:
         assert!(rendered.contains("\"release_channel\":\"stable\""));
         assert!(rendered.contains("\"telemetry\":false"));
         assert!(rendered.contains("\"enforce_type_only_imports\":false"));
+        assert!(rendered.contains("\"include_dirs\":[]"));
     }
 }

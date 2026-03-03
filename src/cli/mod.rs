@@ -736,10 +736,12 @@ fn derive_blast_edge_pairs(
         return Ok(BTreeSet::new());
     }
 
-    let mut resolver =
-        ModuleResolver::new(&loaded.project_root, &loaded.specs).map_err(|error| {
-            format!("failed to initialize module resolver for blast radius: {error}")
-        })?;
+    let mut resolver = ModuleResolver::new_with_include_dirs(
+        &loaded.project_root,
+        &loaded.specs,
+        &loaded.config.include_dirs,
+    )
+    .map_err(|error| format!("failed to initialize module resolver for blast radius: {error}"))?;
 
     let graph = DependencyGraph::build(&loaded.project_root, &mut resolver, &loaded.config)
         .map_err(|error| format!("failed to build dependency graph for blast radius: {error}"))?;
@@ -1391,8 +1393,12 @@ fn build_doctor_compare_focus(
             let from_file = resolve_against_root(&loaded.project_root, from);
             let from_normalized = normalize_repo_relative(&loaded.project_root, &from_file);
 
-            let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
-                .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
+            let mut resolver = ModuleResolver::new_with_include_dirs(
+                &loaded.project_root,
+                &loaded.specs,
+                &loaded.config.include_dirs,
+            )
+            .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
             let explanation = resolver.explain_resolution(&from_file, import_specifier);
             let specgate_trace = explanation.steps.clone();
 
@@ -2566,8 +2572,12 @@ fn analyze_project(
     loaded: &LoadedProject,
     affected_modules: Option<&BTreeSet<String>>,
 ) -> std::result::Result<AnalysisArtifacts, String> {
-    let mut resolver = ModuleResolver::new(&loaded.project_root, &loaded.specs)
-        .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
+    let mut resolver = ModuleResolver::new_with_include_dirs(
+        &loaded.project_root,
+        &loaded.specs,
+        &loaded.config.include_dirs,
+    )
+    .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
     let module_map_overlaps = resolver.module_map_overlaps().to_vec();
 
     let graph = DependencyGraph::build(&loaded.project_root, &mut resolver, &loaded.config)

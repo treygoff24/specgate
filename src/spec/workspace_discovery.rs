@@ -8,6 +8,10 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::deterministic::normalize_path;
+use crate::spec::{
+    SpecConfig,
+    config::{DEFAULT_EXCLUDED_DIRS, include_dir_set},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorkspacePackage {
@@ -23,6 +27,14 @@ struct PnpmWorkspaceConfig {
 }
 
 pub fn discover_workspace_packages(project_root: &Path) -> Vec<WorkspacePackage> {
+    discover_workspace_packages_with_config(project_root, &SpecConfig::default())
+}
+
+pub fn discover_workspace_packages_with_config(
+    project_root: &Path,
+    config: &SpecConfig,
+) -> Vec<WorkspacePackage> {
+    let include_dirs = include_dir_set(&config.include_dirs);
     let mut patterns = workspace_patterns(project_root);
     if patterns.is_empty() {
         return Vec::new();
@@ -40,7 +52,7 @@ pub fn discover_workspace_packages(project_root: &Path) -> Vec<WorkspacePackage>
     let mut used_modules = BTreeSet::new();
 
     for relative_dir in candidate_dirs {
-        if should_skip_workspace_dir(&relative_dir) {
+        if should_skip_workspace_dir(&relative_dir, &include_dirs) {
             continue;
         }
 
@@ -216,13 +228,14 @@ fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Vec<String> {
     candidates.into_iter().collect()
 }
 
-fn should_skip_workspace_dir(relative_dir: &str) -> bool {
-    relative_dir.split('/').any(|segment| {
-        matches!(
-            segment,
-            "node_modules" | "dist" | "build" | ".git" | "generated" | "target" | "coverage"
-        )
-    })
+pub(crate) fn excluded_dir_names() -> &'static [&'static str] {
+    DEFAULT_EXCLUDED_DIRS
+}
+
+fn should_skip_workspace_dir(relative_dir: &str, include_dirs: &BTreeSet<String>) -> bool {
+    relative_dir
+        .split('/')
+        .any(|segment| excluded_dir_names().contains(&segment) && !include_dirs.contains(segment))
 }
 
 #[cfg(test)]
@@ -230,6 +243,8 @@ mod tests {
     use std::fs;
 
     use tempfile::TempDir;
+
+    use crate::spec::SpecConfig;
 
     use super::*;
 
@@ -306,5 +321,89 @@ mod tests {
         assert_eq!(packages[0].module, "alpha");
         assert_eq!(packages[0].relative_dir, "packages/alpha");
         assert_eq!(packages[0].module_path, "packages/alpha/src/**/*");
+    }
+
+    #[test]
+    fn workspace_discovery_skips_vendor_dirs_by_default() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - vendor/*\n",
+        );
+        write_file(
+            temp.path(),
+            "vendor/lib/package.json",
+            "{\"name\":\"lib\"}\n",
+        );
+        write_file(
+            temp.path(),
+            "vendor/lib/src/index.ts",
+            "export const lib = 1;\n",
+        );
+
+        let packages = discover_workspace_packages(temp.path());
+        assert!(packages.is_empty(), "vendor should be excluded by default");
+    }
+
+    #[test]
+    fn include_dirs_reincludes_default_excluded_vendor_workspace() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - vendor/*\n",
+        );
+        write_file(
+            temp.path(),
+            "vendor/lib/package.json",
+            "{\"name\":\"lib\"}\n",
+        );
+        write_file(
+            temp.path(),
+            "vendor/lib/src/index.ts",
+            "export const lib = 1;\n",
+        );
+
+        let config = SpecConfig {
+            include_dirs: vec!["vendor".to_string()],
+            ..SpecConfig::default()
+        };
+
+        let packages = discover_workspace_packages_with_config(temp.path(), &config);
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].relative_dir, "vendor/lib");
+    }
+
+    #[test]
+    fn include_dirs_noop_for_non_excluded_dirs() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - packages/*\n",
+        );
+        write_file(
+            temp.path(),
+            "packages/app/package.json",
+            "{\"name\":\"app\"}\n",
+        );
+        write_file(
+            temp.path(),
+            "packages/app/src/index.ts",
+            "export const app = 1;\n",
+        );
+
+        let default_packages = discover_workspace_packages(temp.path());
+        let include_packages = discover_workspace_packages_with_config(
+            temp.path(),
+            &SpecConfig {
+                include_dirs: vec!["packages".to_string()],
+                ..SpecConfig::default()
+            },
+        );
+
+        assert_eq!(include_packages, default_packages);
+        assert_eq!(include_packages.len(), 1);
     }
 }
