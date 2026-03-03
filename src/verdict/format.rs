@@ -229,32 +229,32 @@ fn format_violation_human_line(violation: &VerdictViolation) -> String {
     } else {
         violation.from_file.clone()
     };
-    lines.push(format!("  Location: {}", location));
+    lines.push(format!("  Location: {location}"));
 
     if let Some(to_file) = &violation.to_file {
-        lines.push(format!("  Target: {}", to_file));
+        lines.push(format!("  Target: {to_file}"));
     }
 
     if let Some(from_mod) = &violation.from_module {
         if let Some(to_mod) = &violation.to_module {
-            lines.push(format!("  Modules: {} → {}", from_mod, to_mod));
+            lines.push(format!("  Modules: {from_mod} → {to_mod}"));
         } else {
-            lines.push(format!("  Module: {}", from_mod));
+            lines.push(format!("  Module: {from_mod}"));
         }
     } else if let Some(to_mod) = &violation.to_module {
-        lines.push(format!("  Target Module: {}", to_mod));
+        lines.push(format!("  Target Module: {to_mod}"));
     }
 
     if let Some(hint) = &violation.remediation_hint {
-        lines.push(format!("  Hint: {}", hint));
+        lines.push(format!("  Hint: {hint}"));
     }
 
     if let Some(expected) = &violation.expected {
-        lines.push(format!("  Expected: {}", expected));
+        lines.push(format!("  Expected: {expected}"));
     }
 
     if let Some(actual) = &violation.actual {
-        lines.push(format!("  Actual: {}", actual));
+        lines.push(format!("  Actual: {actual}"));
     }
 
     lines.push(format!("  Fingerprint: {}", violation.fingerprint));
