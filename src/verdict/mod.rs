@@ -500,6 +500,7 @@ mod tests {
         let verdict = build_verdict(Path::new("."), &entries, 2, None, identity("deterministic"));
         let rendered = serde_json::to_string(&verdict).expect("serialize");
 
+        assert_eq!(verdict.verdict_schema, VERDICT_SCHEMA_VERSION);
         assert!(!rendered.contains("metrics"));
         assert!(rendered.contains("suppressed_violations"));
         assert!(rendered.contains("\"verdict_schema\":\"1.0\""));

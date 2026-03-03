@@ -304,8 +304,17 @@ fn format_summary_human(verdict: &Verdict) -> String {
 
     lines.push(String::new());
     lines.push(format!("Status: {:?}", verdict.status));
+    lines.push(format!("Verdict schema: {}", verdict.verdict_schema));
 
     lines.join("\n")
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NdjsonViolationRecord<'a> {
+    verdict_schema: &'a str,
+    schema_version: &'a str,
+    #[serde(flatten)]
+    violation: &'a VerdictViolation,
 }
 
 /// Format a verdict as NDJSON (one JSON object per violation per line).
@@ -317,7 +326,14 @@ pub fn format_verdict_ndjson(verdict: &Verdict) -> String {
     let lines: Vec<String> = verdict
         .violations
         .iter()
-        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .map(|violation| {
+            serde_json::to_string(&NdjsonViolationRecord {
+                verdict_schema: &verdict.verdict_schema,
+                schema_version: &verdict.schema_version,
+                violation,
+            })
+            .unwrap_or_default()
+        })
         .collect();
 
     lines.join("\n")
@@ -328,7 +344,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
-    use crate::verdict::{PolicyViolation, VerdictStatus, VerdictSummary};
+    use crate::verdict::{PolicyViolation, VERDICT_SCHEMA_VERSION, VerdictStatus, VerdictSummary};
 
     fn test_violation(rule: &str, severity: Severity, from_file: &str) -> PolicyViolation {
         PolicyViolation {
@@ -389,7 +405,7 @@ mod tests {
 
     fn empty_verdict() -> Verdict {
         Verdict {
-            verdict_schema: "1".to_string(),
+            verdict_schema: VERDICT_SCHEMA_VERSION.to_string(),
             schema_version: "2.2".to_string(),
             tool_version: "0.1.0".to_string(),
             git_sha: "abc123".to_string(),
@@ -430,7 +446,7 @@ mod tests {
             .count();
 
         Verdict {
-            verdict_schema: "1".to_string(),
+            verdict_schema: VERDICT_SCHEMA_VERSION.to_string(),
             schema_version: "2.2".to_string(),
             tool_version: "0.1.0".to_string(),
             git_sha: "abc123".to_string(),
@@ -550,6 +566,7 @@ mod tests {
         assert!(output.contains("No violations found"));
         assert!(output.contains("Total violations: 0"));
         assert!(output.contains("Status: Pass"));
+        assert!(output.contains("Verdict schema: 1.0"));
     }
 
     #[test]
@@ -658,6 +675,8 @@ mod tests {
 
         // Should be valid JSON and contain violation fields
         let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+        assert_eq!(parsed["verdict_schema"], VERDICT_SCHEMA_VERSION);
+        assert_eq!(parsed["schema_version"], "2.2");
         assert_eq!(parsed["rule"], "boundary.never_imports");
         assert_eq!(parsed["message"], "Import not allowed");
         assert_eq!(parsed["fingerprint"], "sha256:test123");
@@ -709,6 +728,8 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
 
+        assert_eq!(parsed["verdict_schema"], VERDICT_SCHEMA_VERSION);
+        assert_eq!(parsed["schema_version"], "2.2");
         assert_eq!(parsed["rule"], "boundary.test");
         assert_eq!(parsed["severity"], "error");
         assert_eq!(parsed["message"], "Test message");
