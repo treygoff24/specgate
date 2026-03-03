@@ -74,7 +74,8 @@ struct ModuleMapBuild {
 
 pub struct ModuleResolver {
     project_root: PathBuf,
-    oxc_resolver: oxc_resolver::Resolver,
+    resolver_without_tsconfig: oxc_resolver::Resolver,
+    resolvers_by_tsconfig: BTreeMap<PathBuf, oxc_resolver::Resolver>,
     cache: BTreeMap<(PathBuf, String), ResolvedImport>,
     module_map: BTreeMap<PathBuf, String>,
     module_map_overlaps: Vec<ModuleMapOverlap>,
@@ -86,11 +87,12 @@ impl ModuleResolver {
         let project_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
         let module_map_build = Self::build_module_map_with_diagnostics(&project_root, specs)?;
-        let options = build_resolve_options(&project_root);
+        let resolver_without_tsconfig = oxc_resolver::Resolver::new(build_resolve_options(None));
 
         Ok(Self {
             project_root,
-            oxc_resolver: oxc_resolver::Resolver::new(options),
+            resolver_without_tsconfig,
+            resolvers_by_tsconfig: BTreeMap::new(),
             cache: BTreeMap::new(),
             module_map: module_map_build.module_map,
             module_map_overlaps: module_map_build.overlaps,
@@ -268,14 +270,19 @@ impl ModuleResolver {
         self.cache.clear();
     }
 
-    fn resolve_uncached(&self, containing_dir: &Path, specifier: &str) -> ResolvedImport {
+    fn resolve_uncached(&mut self, containing_dir: &Path, specifier: &str) -> ResolvedImport {
         if is_explicit_node_builtin(specifier) {
             return ResolvedImport::ThirdParty {
                 package_name: extract_package_name(specifier).to_string(),
             };
         }
 
-        match self.oxc_resolver.resolve(containing_dir, specifier) {
+        let resolution = {
+            let resolver = self.resolver_for_containing_dir(containing_dir);
+            resolver.resolve(containing_dir, specifier)
+        };
+
+        match resolution {
             Ok(resolution) => {
                 let mut classified =
                     classify_resolution(&self.project_root, resolution.path(), specifier);
@@ -302,6 +309,20 @@ impl ModuleResolver {
             },
         }
     }
+
+    fn resolver_for_containing_dir(
+        &mut self,
+        containing_dir: &Path,
+    ) -> &mut oxc_resolver::Resolver {
+        let Some(tsconfig_path) = nearest_tsconfig_for_dir(&self.project_root, containing_dir)
+        else {
+            return &mut self.resolver_without_tsconfig;
+        };
+        let tsconfig_key = fs::canonicalize(&tsconfig_path).unwrap_or(tsconfig_path);
+        self.resolvers_by_tsconfig
+            .entry(tsconfig_key.clone())
+            .or_insert_with(|| oxc_resolver::Resolver::new(build_resolve_options(Some(tsconfig_key.clone()))))
+    }
 }
 
 fn sorted_globset_matches(globset: &GlobSet, candidate: &str) -> Vec<usize> {
@@ -310,16 +331,11 @@ fn sorted_globset_matches(globset: &GlobSet, candidate: &str) -> Vec<usize> {
     matches
 }
 
-fn build_resolve_options(project_root: &Path) -> ResolveOptions {
-    let tsconfig_path = project_root.join("tsconfig.json");
-    let tsconfig = if tsconfig_path.exists() {
-        Some(TsconfigOptions {
-            config_file: tsconfig_path,
-            references: TsconfigReferences::Auto,
-        })
-    } else {
-        None
-    };
+fn build_resolve_options(tsconfig_path: Option<PathBuf>) -> ResolveOptions {
+    let tsconfig = tsconfig_path.map(|path| TsconfigOptions {
+        config_file: path,
+        references: TsconfigReferences::Auto,
+    });
 
     ResolveOptions {
         extensions: vec![
@@ -365,6 +381,35 @@ fn build_resolve_options(project_root: &Path) -> ResolveOptions {
         tsconfig,
         ..ResolveOptions::default()
     }
+}
+
+fn nearest_tsconfig_for_dir(project_root: &Path, containing_dir: &Path) -> Option<PathBuf> {
+    let mut current = if containing_dir.starts_with(project_root) {
+        containing_dir.to_path_buf()
+    } else {
+        project_root.to_path_buf()
+    };
+
+    loop {
+        let candidate = current.join("tsconfig.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+
+        if current == project_root {
+            break;
+        }
+
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        if !parent.starts_with(project_root) {
+            break;
+        }
+        current = parent.to_path_buf();
+    }
+
+    None
 }
 
 fn should_skip_module_map_entry(project_root: &Path, path: &Path) -> bool {
@@ -658,7 +703,7 @@ mod tests {
 
     #[test]
     fn resolve_options_include_node_and_types_conditions_and_aliases() {
-        let options = build_resolve_options(Path::new("/tmp/specgate-test"));
+        let options = build_resolve_options(None);
 
         assert_eq!(
             options.condition_names,
@@ -678,5 +723,101 @@ mod tests {
                 .any(|(ext, aliases)| ext == ".js" && aliases.contains(&".ts".to_string())),
             "expected .js extension alias to include .ts"
         );
+    }
+
+    #[test]
+    fn nearest_tsconfig_prefers_nested_config() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("packages/web/src")).expect("mkdir nested");
+        fs::write(temp.path().join("tsconfig.json"), "{}\n").expect("write root tsconfig");
+        fs::write(temp.path().join("packages/web/tsconfig.json"), "{}\n")
+            .expect("write nested tsconfig");
+
+        let selected = nearest_tsconfig_for_dir(temp.path(), &temp.path().join("packages/web/src"))
+            .expect("nearest tsconfig");
+        assert_eq!(
+            selected,
+            temp.path().join("packages/web/tsconfig.json"),
+            "nested context should take precedence over root tsconfig"
+        );
+    }
+
+    #[test]
+    fn resolve_uses_nearest_tsconfig_context_for_aliases() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::create_dir_all(temp.path().join("packages/web/src")).expect("mkdir nested src");
+        fs::create_dir_all(temp.path().join("src/root")).expect("mkdir root alias dir");
+        fs::create_dir_all(temp.path().join("packages/web/nested"))
+            .expect("mkdir nested alias dir");
+
+        fs::write(
+            temp.path().join("tsconfig.json"),
+            r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@cfg/*": ["src/root/*"]
+    }
+  }
+}
+"#,
+        )
+        .expect("write root tsconfig");
+        fs::write(
+            temp.path().join("packages/web/tsconfig.json"),
+            r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@cfg/*": ["nested/*"]
+    }
+  }
+}
+"#,
+        )
+        .expect("write nested tsconfig");
+
+        fs::write(
+            temp.path().join("src/root/value.ts"),
+            "export const rootTarget = 1;\n",
+        )
+            .expect("write root target");
+        fs::write(
+            temp.path().join("packages/web/nested/value.ts"),
+            "export const nestedTarget = 1;\n",
+        )
+        .expect("write nested target");
+        fs::write(
+            temp.path().join("packages/web/src/app.ts"),
+            "import '@cfg/value';\n",
+        )
+        .expect("write app");
+        fs::write(temp.path().join("src/root-user.ts"), "import '@cfg/value';\n")
+            .expect("write root user");
+
+        let specs = vec![
+            base_spec("root", "src/**/*"),
+            base_spec("web", "packages/web/**/*"),
+        ];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+
+        let nested = resolver.resolve(&temp.path().join("packages/web/src/app.ts"), "@cfg/value");
+        assert!(matches!(
+            nested,
+            ResolvedImport::FirstParty {
+                module_id: Some(ref module),
+                resolved_path: ref path,
+            } if module == "web" && path.ends_with(Path::new("packages/web/nested/value.ts"))
+        ), "unexpected nested resolution: {nested:?}");
+
+        let root = resolver.resolve(&temp.path().join("src/root-user.ts"), "@cfg/value");
+        assert!(matches!(
+            root,
+            ResolvedImport::FirstParty {
+                module_id: Some(ref module),
+                resolved_path: ref path,
+            } if module == "root" && path.ends_with(Path::new("src/root/value.ts"))
+        ), "unexpected root resolution: {root:?}");
     }
 }
