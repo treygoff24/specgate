@@ -89,8 +89,7 @@ specgate check --output-mode metrics
 
 ## Baseline policy reference
 
-- See [BASELINE_POLICY.md](BASELINE_POLICY.md) for canonical stale-entry and refresh behavior.
-- In this release stage, stale baseline hits are tracked for triage and do not hard-fail the merge gate.
+Stale baseline entries are warn-by-default, opt-in fail via `stale_baseline: fail`, and never auto-pruned; see [BASELINE_POLICY.md](BASELINE_POLICY.md) for canonical policy and runbook.
 
 ### What It Does
 
@@ -174,6 +173,8 @@ module|rule|severity|file|line|import_source|resolved_target
 
 ```json
 {
+  "verdict_schema": "1.0",
+  "schema_version": "2.2",
   "status": "fail",
   "summary": {
     "total_violations": 6,
@@ -189,6 +190,8 @@ module|rule|severity|file|line|import_source|resolved_target
 }
 ```
 
+- `verdict_schema`: Version of the verdict output schema (currently `1.0`)
+- `schema_version`: Version of the spec language used for evaluation (currently `2.2`)
 - `summary.baseline_violations`: Violations matching fingerprints
 - `summary.new_violations`: Violations not in baseline
 - `summary.new_error_violations`: New error violations (drives exit `1`)

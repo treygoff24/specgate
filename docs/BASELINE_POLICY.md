@@ -24,12 +24,17 @@ and retired for this MVP.
    - A stale or missing match still reports in summary fields.
    - It does not convert the run to failure status.
 
-2. **Runbook for stale entries**
+2. **Strict stale policy is opt-in**
+   - Set `stale_baseline: fail` in `specgate.config.yml` to make stale baseline
+     entries policy-failing.
+   - Default is `stale_baseline: warn` so teams can triage before enforcing.
+
+3. **Runbook for stale entries**
    - Re-run `specgate baseline --output .specgate-baseline.json` intentionally
      when baseline debt is reviewed and accepted.
    - Stale entries must be reviewed during each dogfood window.
 
-3. **Owner + cadence**
+4. **Owner + cadence**
    - Owner: project operator on-call.
    - Review cadence: weekly.
    - No auto-prune in MVP to keep history traceable.

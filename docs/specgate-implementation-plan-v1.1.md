@@ -424,9 +424,7 @@ Add integration fixtures for:
    - Run clean-room verification (fresh clone + documented command path) to confirm onboarding/reproducibility.
 
 2. **Baseline lifecycle policy finalization (P0/P1)** ✅ DECIDED 2026-02-27
-   - **Stale entry policy:** Default `warn` — CI passes but reports stale baseline entries. Config flag `stale_baseline: fail` available for teams wanting strict hygiene. Auto-prune rejected (loses audit trail; can't distinguish "fixed" from "silently disappeared").
-   - **Refresh cadence:** Operator-defined. Specgate surfaces stale counts; teams decide review rhythm (per-release recommended, weekly for strict shops).
-   - **CLI:** `specgate baseline --refresh` to prune stale entries after review. `specgate check` output includes `stale_baseline_entries` count in summary.
+   - Canonical policy (warn-by-default, opt-in `stale_baseline: fail`, no auto-prune, review cadence/runbook) is maintained in [BASELINE_POLICY.md](BASELINE_POLICY.md).
 
 3. **Doctor parity depth for monorepos/project references (P1)**
    - Add focused fixtures covering project references and complex path alias overlaps.
@@ -444,7 +442,7 @@ Add integration fixtures for:
 
 - [x] Tag `v0.1.0-rc3` from the current verified head after quick smoke verification.
 - [x] Capture and archive gate artifacts for that SHA (`fmt`, `clippy`, `test`, `scripts/ci/mvp_gate.sh`) at `docs/release-artifacts/v0.1.0-rc3-gate-evidence.md` (historical `v0.1.0-rc2` evidence remains in `docs/release-artifacts/v0.1.0-rc2-gate-evidence.md`, with `v0.1.0-rc1` evidence in `docs/release-artifacts/v0.1.0-rc1-gate-evidence.md`).
-- [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location. ✅ DECIDED 2026-02-27 (warn default, opt-in fail, no auto-prune).
+- [x] Decide stale baseline policy and document enforce/warn behavior in one canonical location. ✅ DECIDED 2026-02-27; see [BASELINE_POLICY.md](BASELINE_POLICY.md).
 - [x] Add one monorepo/project-reference `doctor compare` fixture that currently lacks coverage.
 - [x] Run docs onboarding from a clean clone and fix any command or path ambiguity found.
 - [x] Draft release notes summarizing landed lanes, rule-impacting changes, and operator action items.

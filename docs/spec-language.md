@@ -103,7 +103,7 @@ telemetry:
   enabled: false
 ```
 
-- `stale_baseline: fail` makes stale baseline entries policy-failing.
+- `stale_baseline` follows canonical baseline policy (warn-by-default, opt-in fail via `stale_baseline: fail`, no auto-prune); see [BASELINE_POLICY.md](BASELINE_POLICY.md).
 - `release_channel: beta` enables beta-only doctor compare legacy trace fallback.
 - telemetry is opt-in by default and can be toggled per run with `--telemetry` / `--no-telemetry`.
 
