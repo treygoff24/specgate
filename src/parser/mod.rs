@@ -1147,6 +1147,41 @@ async function load(name: string) {
     }
 
     #[test]
+    fn import_attributes_preserve_dependency_edges() {
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("import-attributes.ts");
+
+        fs::write(
+            &file_path,
+            r#"
+import data from "./data.json" with { type: "json" };
+import("./lazy.json", { with: { type: "json" } });
+export const value = data;
+"#,
+        )
+        .expect("write import-attributes file");
+
+        let analysis = parse_file(&file_path).expect("analysis");
+
+        assert!(
+            analysis
+                .imports
+                .iter()
+                .any(|edge| edge.specifier == "./data.json")
+        );
+        assert!(
+            analysis
+                .dynamic_imports
+                .iter()
+                .any(|edge| edge.specifier == "./lazy.json")
+        );
+        assert!(
+            analysis.dynamic_warnings.is_empty(),
+            "literal import() with options should not emit unresolved warning"
+        );
+    }
+
+    #[test]
     fn marks_default_interface_export_as_type_only() {
         let temp = TempDir::new().expect("tempdir");
         let file_path = temp.path().join("default-interface.ts");
