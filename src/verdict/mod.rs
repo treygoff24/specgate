@@ -5,7 +5,6 @@ pub mod format;
 /// Schema version for the verdict format itself.
 pub const VERDICT_SCHEMA_VERSION: &str = "1.0";
 
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -503,6 +502,7 @@ mod tests {
 
         assert!(!rendered.contains("metrics"));
         assert!(rendered.contains("suppressed_violations"));
+        assert!(rendered.contains("\"verdict_schema\":\"1.0\""));
         assert!(rendered.contains("\"tool_version\""));
         assert!(rendered.contains("\"config_hash\""));
         assert!(rendered.contains("\"spec_hash\""));
@@ -537,6 +537,7 @@ mod tests {
         );
 
         let rendered = serde_json::to_string(&verdict).expect("serialize");
+        assert!(rendered.contains("\"verdict_schema\":\"1.0\""));
         assert!(rendered.contains("metrics"));
         assert!(rendered.contains("build_graph"));
         assert!(rendered.contains("\"output_mode\":\"metrics\""));
