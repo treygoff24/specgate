@@ -142,8 +142,7 @@ boundaries:
 
     assert!(
         has_duplicate,
-        "expected contract_ref_invalid for duplicate id in validation errors: {:?}",
-        details
+        "expected contract_ref_invalid for duplicate id in validation errors: {details:?}",
     );
 }
 
@@ -205,8 +204,7 @@ boundaries:
 
     assert!(
         has_invalid_format,
-        "expected contract_ref_invalid for bad imports_contract format: {:?}",
-        details
+        "expected contract_ref_invalid for bad imports_contract format: {details:?}",
     );
 }
 
@@ -583,8 +581,7 @@ boundaries:
     let baseline_count = baseline_verdict["summary"]["baseline_violations"].as_u64().unwrap_or(0);
     assert!(
         baseline_count >= 1,
-        "should have at least 1 baseline violation, got {}",
-        baseline_count
+        "should have at least 1 baseline violation, got {baseline_count}",
     );
     assert_eq!(baseline_verdict["summary"]["new_violations"], 0);
 }
@@ -754,8 +751,7 @@ fn fixture_duplicate_contract_ids_produces_ref_invalid() {
 
     assert!(
         has_duplicate,
-        "fixture should produce contract_ref_invalid for duplicate IDs: {:?}",
-        details
+        "fixture should produce contract_ref_invalid for duplicate IDs: {details:?}",
     );
 }
 
@@ -783,7 +779,6 @@ fn fixture_invalid_imports_contract_produces_ref_invalid() {
 
     assert!(
         has_invalid,
-        "fixture should produce contract_ref_invalid: {:?}",
-        details
+        "fixture should produce contract_ref_invalid: {details:?}",
     );
 }
