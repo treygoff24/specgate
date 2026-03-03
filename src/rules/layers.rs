@@ -493,9 +493,11 @@ mod tests {
 
         assert!(report.violations.is_empty());
         assert_eq!(report.config_issues.len(), 1);
-        assert!(report.config_issues[0]
-            .message
-            .contains("which is not listed in params.layers"));
+        assert!(
+            report.config_issues[0]
+                .message
+                .contains("which is not listed in params.layers")
+        );
     }
 
     #[test]
@@ -523,9 +525,11 @@ mod tests {
         assert!(report.violations.is_empty());
         assert_eq!(report.config_issues.len(), 1);
         assert_eq!(report.config_issues[0].module, "feature/search");
-        assert!(report.config_issues[0]
-            .message
-            .contains("which is not listed in params.layers"));
+        assert!(
+            report.config_issues[0]
+                .message
+                .contains("which is not listed in params.layers")
+        );
     }
 
     #[test]
@@ -578,12 +582,16 @@ mod tests {
 
         let issue = &report_left.config_issues[0];
         assert_eq!(issue.module, "ui/checkout");
-        assert!(issue
-            .message
-            .contains("using canonical layers [\"core\", \"ui\"] from module 'core/orders'"));
-        assert!(issue
-            .message
-            .contains("deterministic: lexicographically first module id"));
+        assert!(
+            issue
+                .message
+                .contains("using canonical layers [\"core\", \"ui\"] from module 'core/orders'")
+        );
+        assert!(
+            issue
+                .message
+                .contains("deterministic: lexicographically first module id")
+        );
     }
 
     #[test]

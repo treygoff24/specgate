@@ -14,26 +14,26 @@ pub mod dependencies;
 pub mod layers;
 
 pub use boundary::{
-    is_canonical_import_rule_id, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
-    BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
+    BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
+    BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID, is_canonical_import_rule_id,
 };
 pub use circular::{
-    evaluate_no_circular_deps, CircularDependencyViolation, CircularScopeParam,
-    NO_CIRCULAR_DEPS_RULE_ID,
+    CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
+    evaluate_no_circular_deps,
 };
 pub use contracts::{
-    evaluate_contract_rules, ContractRuleViolation, BOUNDARY_CONTRACT_EMPTY_RULE_ID,
-    BOUNDARY_CONTRACT_MISSING_RULE_ID, BOUNDARY_CONTRACT_REF_INVALID_RULE_ID,
-    BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
+    BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
+    BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
+    ContractRuleViolation, evaluate_contract_rules,
 };
 pub use dependencies::{
-    evaluate_dependency_rules, DependencyRule, DependencyRuleError, DependencyViolation,
-    DependencyViolationKind, DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID,
+    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule,
+    DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
 };
 pub use layers::{
-    evaluate_enforce_layer, layer_for_module, parse_enforce_layer_config, EnforceLayerConfig,
-    EnforceLayerReport, LayerConfigIssue, LayerConfigParseError, LayerViolation,
-    ENFORCE_LAYER_RULE_ID,
+    ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,
+    LayerConfigParseError, LayerViolation, evaluate_enforce_layer, layer_for_module,
+    parse_enforce_layer_config,
 };
 
 /// Shared evaluation context passed into rules.

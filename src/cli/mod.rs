@@ -17,8 +17,9 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
-    build_baseline_with_metadata, classify_violations_with_stale, load_optional_baseline,
-    refresh_baseline_with_metadata, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
+    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
+    classify_violations_with_stale, load_optional_baseline, refresh_baseline_with_metadata,
+    write_baseline,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -27,19 +28,19 @@ use crate::resolver::classify::extract_package_name;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    evaluate_enforce_layer, evaluate_no_circular_deps, is_canonical_import_rule_id, DependencyRule,
-    RuleContext, RuleViolation, RuleWithResolver, DEPENDENCY_FORBIDDEN_RULE_ID,
-    DEPENDENCY_NOT_ALLOWED_RULE_ID,
+    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
+    RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
+    is_canonical_import_rule_id,
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, types::CURRENT_SPEC_VERSION, Severity, SpecConfig, SpecFile, ValidationLevel,
-    ValidationReport,
+    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
+    types::CURRENT_SPEC_VERSION,
 };
 use crate::verdict::{
-    self, build_verdict_with_options, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary,
-    GovernanceContext, PolicyViolation, TelemetryEventName, VerdictBuildOptions, VerdictIdentity,
-    VerdictMetrics, VerdictStatus,
+    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
+    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
+    build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience
@@ -3416,9 +3417,11 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"match\""));
-        assert!(result
-            .stdout
-            .contains("\"trace_parser\": \"legacy_trace_text\""));
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"legacy_trace_text\"")
+        );
     }
 
     #[test]
@@ -3462,12 +3465,16 @@ mod tests {
         ]);
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
-        assert!(result
-            .stdout
-            .contains("\"trace_parser\": \"structured_snapshot\""));
-        assert!(result
-            .stdout
-            .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\""));
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"structured_snapshot\"")
+        );
+        assert!(
+            result
+                .stdout
+                .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\"")
+        );
 
         let snapshot = fs::read_to_string(temp.path().join("snapshots/normalized.json"))
             .expect("structured snapshot output");

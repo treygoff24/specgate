@@ -11,8 +11,9 @@ use crate::resolver::{ModuleResolver, ResolvedImport};
 use crate::spec::{Boundaries, SpecConfig, SpecFile};
 
 use super::{
+    GlobCompileError, RuleContext, RuleViolation, RuleWithResolver,
     compile_optional_globset_strict, matches_test_file, normalized_string_set,
-    sort_violations_stable, GlobCompileError, RuleContext, RuleViolation, RuleWithResolver,
+    sort_violations_stable,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -244,7 +245,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::deterministic::normalize_repo_relative;
-    use crate::rules::{write_test_file, RuleContext, RuleWithResolver};
+    use crate::rules::{RuleContext, RuleWithResolver, write_test_file};
     use crate::spec::{Boundaries, SpecConfig};
 
     use super::*;

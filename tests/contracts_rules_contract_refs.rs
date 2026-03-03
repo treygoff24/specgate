@@ -14,13 +14,14 @@ use tempfile::TempDir;
 use specgate::graph::DependencyGraph;
 use specgate::resolver::ModuleResolver;
 use specgate::rules::contracts::{
-    evaluate_contract_rules, BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
+    BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
     BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
+    evaluate_contract_rules,
 };
+use specgate::spec::SpecConfig;
 use specgate::spec::types::{
     Boundaries, BoundaryContract, ContractDirection, ContractMatch, EnvelopeRequirement,
 };
-use specgate::spec::SpecConfig;
 
 fn spec_with_contracts(
     module: &str,
@@ -177,10 +178,12 @@ fn cross_module_imports_contract_nonexistent_contract_detected() {
         violations[0].violation.rule,
         BOUNDARY_CONTRACT_REF_INVALID_RULE_ID
     );
-    assert!(violations[0]
-        .violation
-        .message
-        .contains("nonexistent_contract"));
+    assert!(
+        violations[0]
+            .violation
+            .message
+            .contains("nonexistent_contract")
+    );
 }
 
 /// Test that invalid imports_contract format (missing colon) is detected.
@@ -345,10 +348,12 @@ fn affected_modules_filter_limits_evaluation() {
     // Evaluate all modules - should report missing contract for "other"
     let all_violations = evaluate_contract_rules(&ctx, None);
     assert_eq!(all_violations.len(), 1);
-    assert!(all_violations[0]
-        .violation
-        .message
-        .contains("other_contract"));
+    assert!(
+        all_violations[0]
+            .violation
+            .message
+            .contains("other_contract")
+    );
 }
 
 /// Test that empty affected_modules set returns no violations.

@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use globset::{Glob, GlobBuilder};
 
 use crate::rules::{
-    BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS, BOUNDARY_CANONICAL_IMPORT_RULE_ID,
+    BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
     BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
 };
-use crate::spec::types::{SpecFile, SUPPORTED_SPEC_VERSIONS};
+use crate::spec::types::{SUPPORTED_SPEC_VERSIONS, SpecFile};
 
 const KNOWN_CONSTRAINT_RULES: &[&str] = &[
     "no-circular-deps",
@@ -406,10 +406,12 @@ mod tests {
         let specs = vec![base_spec("orders"), base_spec("orders")];
         let report = validate_specs(&specs);
         assert!(report.has_errors());
-        assert!(report
-            .errors()
-            .iter()
-            .any(|issue| issue.message.contains("duplicate module")));
+        assert!(
+            report
+                .errors()
+                .iter()
+                .any(|issue| issue.message.contains("duplicate module"))
+        );
     }
 
     #[test]
@@ -510,10 +512,12 @@ mod tests {
         b.import_ids = vec!["@app/core".to_string()];
 
         let report = validate_specs(&[a, b]);
-        assert!(report
-            .errors()
-            .iter()
-            .any(|issue| issue.message.contains("canonical import id")));
+        assert!(
+            report
+                .errors()
+                .iter()
+                .any(|issue| issue.message.contains("canonical import id"))
+        );
     }
 
     // === Version Handling Tests ===

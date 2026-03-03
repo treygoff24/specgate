@@ -242,7 +242,10 @@ fn check_match_patterns(
                     "Match patterns for contract '{}' in module '{}' did not resolve to any files: {:?}",
                     contract.id, spec.module, failed_patterns
                 ),
-                from_file: spec.spec_path.clone().unwrap_or_else(|| ctx.project_root.to_path_buf()),
+                from_file: spec
+                    .spec_path
+                    .clone()
+                    .unwrap_or_else(|| ctx.project_root.to_path_buf()),
                 to_file: None,
                 from_module: Some(spec.module.clone()),
                 to_module: None,
@@ -349,8 +352,8 @@ fn check_contract_refs(
 mod tests {
     use super::*;
     use crate::resolver::ModuleResolver;
-    use crate::spec::types::{Boundaries, ContractDirection, ContractMatch, EnvelopeRequirement};
     use crate::spec::SpecConfig;
+    use crate::spec::types::{Boundaries, ContractDirection, ContractMatch, EnvelopeRequirement};
     use tempfile::TempDir;
 
     fn spec_with_contracts(module: &str, contracts: Vec<BoundaryContract>) -> SpecFile {
@@ -441,9 +444,11 @@ mod tests {
             BOUNDARY_CONTRACT_MISSING_RULE_ID
         );
         assert_eq!(violations[0].contract_id, "contract1");
-        assert!(violations[0]
-            .remediation_hint
-            .contains("Create the contract file"));
+        assert!(
+            violations[0]
+                .remediation_hint
+                .contains("Create the contract file")
+        );
     }
 
     #[test]
@@ -482,9 +487,11 @@ mod tests {
             BOUNDARY_CONTRACT_EMPTY_RULE_ID
         );
         assert_eq!(violations[0].contract_id, "contract1");
-        assert!(violations[0]
-            .remediation_hint
-            .contains("Add contract content"));
+        assert!(
+            violations[0]
+                .remediation_hint
+                .contains("Add contract content")
+        );
     }
 
     #[test]
@@ -655,10 +662,12 @@ mod tests {
             violations[0].violation.rule,
             BOUNDARY_CONTRACT_REF_INVALID_RULE_ID
         );
-        assert!(violations[0]
-            .violation
-            .message
-            .contains("contract not found"));
+        assert!(
+            violations[0]
+                .violation
+                .message
+                .contains("contract not found")
+        );
     }
 
     #[test]

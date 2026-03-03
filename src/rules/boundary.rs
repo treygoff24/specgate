@@ -7,8 +7,8 @@ use globset::GlobSet;
 use crate::deterministic::normalize_repo_relative;
 use crate::graph::{DependencyEdge, EdgeKind};
 use crate::rules::{
-    compile_optional_globset_strict, matches_test_file, sort_violations_stable, GlobCompileError,
-    Rule, RuleContext, RuleViolation,
+    GlobCompileError, Rule, RuleContext, RuleViolation, compile_optional_globset_strict,
+    matches_test_file, sort_violations_stable,
 };
 use crate::spec::{Boundaries, Visibility};
 
