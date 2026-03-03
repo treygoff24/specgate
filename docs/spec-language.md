@@ -4,18 +4,20 @@
 
 Specgate enforces strict version compatibility for spec files.
 
-### Supported Version
+### Supported Versions
 
-- **Current version**: `2.2`
-- **Policy**: Exact match required
+- **Current version**: `2.3`
+- **Backward compatibility**: `2.2` remains supported
+- **Policy**: Exact version match against supported versions
 
 ### Version Compatibility
 
 | Version | Status | Notes |
 |---------|--------|-------|
-| 2.2 | ✅ Supported | Current version |
-| 2.0 | ❌ Not supported | Must upgrade to 2.2 |
-| 2 | ❌ Not supported | Must upgrade to 2.2 |
+| 2.3 | ✅ Supported | Current version; required for `boundaries.contracts` |
+| 2.2 | ✅ Supported | Backward-compatible legacy version (no `boundaries.contracts`) |
+| 2.0 | ❌ Not supported | Must upgrade to 2.2 or 2.3 |
+| 2 | ❌ Not supported | Must upgrade to 2.2 or 2.3 |
 
 ### Why Strict Matching?
 
@@ -27,17 +29,41 @@ The spec language is evolving rapidly during foundation phases. We enforce exact
 
 ### Migration
 
-To update your spec files, change:
+#### Legacy `2` → supported versions
+
+Change:
 
 ```yaml
 version: "2"
 ```
 
-to:
+To either supported version:
 
 ```yaml
 version: "2.2"
 ```
+
+or:
+
+```yaml
+version: "2.3"
+```
+
+#### `2.2` → `2.3` upgrade path
+
+If you need contract boundaries, upgrade spec files from:
+
+```yaml
+version: "2.2"
+```
+
+to:
+
+```yaml
+version: "2.3"
+```
+
+`boundaries.contracts` is only valid in version `2.3`.
 
 ## CLI Semantics (Wave 0 Lock)
 
@@ -183,3 +209,9 @@ boundaries:
 - Glob patterns matched against normalized file paths
 - Files NOT matching `public_api` are considered internal
 - Importing from internal files triggers `boundary.public_api` violation
+
+### `contracts` (version `2.3`)
+
+`boundaries.contracts` is available only in spec version `2.3`.
+For the full schema and enforcement semantics, see
+[specgate-boundary-contracts-v2.md](specgate-boundary-contracts-v2.md).
