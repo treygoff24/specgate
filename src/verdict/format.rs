@@ -201,6 +201,10 @@ mod tests {
             to_module: Some("core".to_string()),
             line: Some(10),
             column: Some(5),
+            expected: None,
+            actual: None,
+            remediation_hint: None,
+            contract_id: None,
         }
     }
 
