@@ -1126,6 +1126,30 @@ fn infer_init_scaffold_specs(
         }];
     }
 
+    let workspace_packages = spec::workspace_discovery::discover_workspace_packages(project_root);
+    if !workspace_packages.is_empty() {
+        let mut scaffolds = Vec::new();
+        if let Some(root_path) = infer_root_module_path(project_root) {
+            scaffolds.push(InitScaffoldSpec {
+                module: "root".to_string(),
+                path: root_path,
+            });
+        }
+
+        scaffolds.extend(
+            workspace_packages
+                .into_iter()
+                .map(|workspace| InitScaffoldSpec {
+                    module: workspace.module,
+                    path: workspace.module_path,
+                }),
+        );
+
+        if !scaffolds.is_empty() {
+            return scaffolds;
+        }
+    }
+
     if project_root.join("src").join("app").is_dir() {
         return vec![InitScaffoldSpec {
             module: "app".to_string(),
@@ -1163,12 +1187,16 @@ fn infer_init_scaffold_specs(
 }
 
 fn infer_single_module_path(project_root: &Path) -> String {
+    infer_root_module_path(project_root).unwrap_or_else(|| "src/app/**/*".to_string())
+}
+
+fn infer_root_module_path(project_root: &Path) -> Option<String> {
     if project_root.join("src").join("app").is_dir() {
-        return "src/app/**/*".to_string();
+        return Some("src/app/**/*".to_string());
     }
 
     if project_root.join("src").is_dir() {
-        return "src/**/*".to_string();
+        return Some("src/**/*".to_string());
     }
 
     INIT_COMMON_ROOT_MODULE_DIRS
@@ -1176,7 +1204,6 @@ fn infer_single_module_path(project_root: &Path) -> String {
         .copied()
         .find(|dir| project_root.join(dir).is_dir())
         .map(|dir| format!("{dir}/**/*"))
-        .unwrap_or_else(|| "src/app/**/*".to_string())
 }
 
 fn write_scaffold_file(

@@ -279,6 +279,78 @@ fn init_module_path_override_still_wins() {
     assert!(app_spec.contains("path: \"custom/**/*\""));
 }
 
+#[test]
+fn init_detects_pnpm_and_package_workspaces() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("src/app")).expect("mkdir src/app");
+    fs::create_dir_all(temp.path().join("packages/web/src")).expect("mkdir web");
+    fs::create_dir_all(temp.path().join("packages/shared/src")).expect("mkdir shared");
+
+    write_file(
+        temp.path(),
+        "pnpm-workspace.yaml",
+        "packages:\n  - packages/*\n",
+    );
+    write_file(
+        temp.path(),
+        "packages/web/package.json",
+        "{\"name\":\"web\"}\n",
+    );
+    write_file(
+        temp.path(),
+        "packages/shared/package.json",
+        "{\"name\":\"shared\"}\n",
+    );
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let root_spec =
+        fs::read_to_string(temp.path().join("modules/root.spec.yml")).expect("read root");
+    assert!(root_spec.contains("path: \"src/app/**/*\""));
+
+    let web_spec = fs::read_to_string(temp.path().join("modules/web.spec.yml")).expect("read web");
+    assert!(web_spec.contains("path: \"packages/web/src/**/*\""));
+
+    let shared_spec =
+        fs::read_to_string(temp.path().join("modules/shared.spec.yml")).expect("read shared");
+    assert!(shared_spec.contains("path: \"packages/shared/src/**/*\""));
+}
+
+#[test]
+fn init_detects_package_json_workspaces_when_pnpm_missing() {
+    let temp = TempDir::new().expect("tempdir");
+    fs::create_dir_all(temp.path().join("extensions/alpha/src")).expect("mkdir alpha");
+    write_file(
+        temp.path(),
+        "package.json",
+        "{\"name\":\"root\",\"workspaces\":[\"extensions/*\"]}",
+    );
+    write_file(
+        temp.path(),
+        "extensions/alpha/package.json",
+        "{\"name\":\"alpha\"}\n",
+    );
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let alpha_spec =
+        fs::read_to_string(temp.path().join("modules/alpha.spec.yml")).expect("read alpha");
+    assert!(alpha_spec.contains("path: \"extensions/alpha/src/**/*\""));
+}
+
 // ============================================================================
 // VALIDATE COMMAND TESTS
 // ============================================================================

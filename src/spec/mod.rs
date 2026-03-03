@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 pub mod config;
 pub mod types;
 pub mod validation;
+pub mod workspace_discovery;
 
 pub use config::{EscapeHatchConfig, JestMockMode, SpecConfig};
 pub use types::{Boundaries, Constraint, Severity, SpecFile, Visibility};
