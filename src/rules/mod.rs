@@ -9,6 +9,7 @@ use crate::spec::{SpecConfig, SpecFile};
 
 pub mod boundary;
 pub mod circular;
+pub mod contracts;
 pub mod dependencies;
 pub mod layers;
 
@@ -19,6 +20,11 @@ pub use boundary::{
 pub use circular::{
     evaluate_no_circular_deps, CircularDependencyViolation, CircularScopeParam,
     NO_CIRCULAR_DEPS_RULE_ID,
+};
+pub use contracts::{
+    evaluate_contract_rules, ContractRuleViolation, BOUNDARY_CONTRACT_EMPTY_RULE_ID,
+    BOUNDARY_CONTRACT_MISSING_RULE_ID, BOUNDARY_CONTRACT_REF_INVALID_RULE_ID,
+    BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
 };
 pub use dependencies::{
     evaluate_dependency_rules, DependencyRule, DependencyRuleError, DependencyViolation,
