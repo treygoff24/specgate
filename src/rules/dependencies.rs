@@ -117,7 +117,11 @@ pub fn evaluate_dependency_rules(
         let analysis = parser::parse_file(&file)?;
         let is_test = matches_test_file(project_root, &file, test_matcher.as_ref());
 
-        for specifier in analysis.dependency_specifiers() {
+        for (specifier, has_runtime_usage) in dependency_specifiers_with_runtime_usage(&analysis) {
+            if !has_runtime_usage && !config.enforce_type_only_imports {
+                continue;
+            }
+
             let ResolvedImport::ThirdParty { package_name } = resolver.resolve(&file, &specifier)
             else {
                 continue;
@@ -167,6 +171,49 @@ pub fn evaluate_dependency_rules(
     });
 
     Ok(violations)
+}
+
+fn dependency_specifiers_with_runtime_usage(
+    analysis: &parser::FileAnalysis,
+) -> Vec<(String, bool)> {
+    let mut specifier_runtime_usage = BTreeMap::new();
+
+    for import in &analysis.imports {
+        let entry = specifier_runtime_usage
+            .entry(import.specifier.clone())
+            .or_insert(false);
+        if !import.is_type_only {
+            *entry = true;
+        }
+    }
+
+    for specifier in analysis
+        .re_exports
+        .iter()
+        .map(|edge| edge.specifier.clone())
+        .chain(
+            analysis
+                .require_calls
+                .iter()
+                .map(|edge| edge.specifier.clone()),
+        )
+        .chain(
+            analysis
+                .dynamic_imports
+                .iter()
+                .map(|edge| edge.specifier.clone()),
+        )
+        .chain(
+            analysis
+                .jest_mock_calls
+                .iter()
+                .map(|edge| edge.specifier.clone()),
+        )
+    {
+        specifier_runtime_usage.insert(specifier, true);
+    }
+
+    specifier_runtime_usage.into_iter().collect()
 }
 
 fn typed_violations_to_rule_violations(typed: Vec<DependencyViolation>) -> Vec<RuleViolation> {
@@ -567,5 +614,70 @@ import 'node:fs/promises';
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].rule, DEPENDENCY_NOT_ALLOWED_RULE_ID);
         assert_eq!(violations[0].from_module.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn type_only_imports_are_ignored_by_default_for_dependency_policies() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import type { AxiosRequestConfig } from 'axios';\n",
+        );
+        write_npm_package(temp.path(), "axios");
+
+        let specs = vec![spec_with_boundaries(
+            "app",
+            "src/app/**/*",
+            Boundaries {
+                allowed_dependencies: vec!["lodash".to_string()],
+                ..Boundaries::default()
+            },
+        )];
+
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+
+        let violations =
+            evaluate_dependency_rules(temp.path(), &mut resolver, &specs, &config).expect("rules");
+        assert!(
+            violations.is_empty(),
+            "type-only imports should not violate dependency policy by default"
+        );
+    }
+
+    #[test]
+    fn type_only_imports_are_enforced_when_toggle_is_enabled() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import type { AxiosRequestConfig } from 'axios';\n",
+        );
+        write_npm_package(temp.path(), "axios");
+
+        let specs = vec![spec_with_boundaries(
+            "app",
+            "src/app/**/*",
+            Boundaries {
+                allowed_dependencies: vec!["lodash".to_string()],
+                ..Boundaries::default()
+            },
+        )];
+
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig {
+            enforce_type_only_imports: true,
+            ..SpecConfig::default()
+        };
+
+        let violations =
+            evaluate_dependency_rules(temp.path(), &mut resolver, &specs, &config).expect("rules");
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].specifier, "axios");
+        assert_eq!(
+            violations[0].kind,
+            DependencyViolationKind::DependencyNotAllowed
+        );
     }
 }

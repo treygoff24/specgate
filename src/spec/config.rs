@@ -34,6 +34,9 @@ pub struct SpecConfig {
     /// - `telemetry: { enabled: true|false }` (legacy)
     #[serde(default, deserialize_with = "deserialize_telemetry")]
     pub telemetry: bool,
+    /// Whether type-only imports are enforced by dependency and boundary policy rules.
+    #[serde(default = "default_enforce_type_only_imports")]
+    pub enforce_type_only_imports: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq, Eq)]
@@ -128,6 +131,10 @@ fn default_test_patterns() -> Vec<String> {
     ]
 }
 
+fn default_enforce_type_only_imports() -> bool {
+    false
+}
+
 impl Default for SpecConfig {
     fn default() -> Self {
         Self {
@@ -139,6 +146,7 @@ impl Default for SpecConfig {
             stale_baseline: StaleBaselinePolicy::Warn,
             release_channel: ReleaseChannel::Stable,
             telemetry: false,
+            enforce_type_only_imports: default_enforce_type_only_imports(),
         }
     }
 }
@@ -155,6 +163,7 @@ mod tests {
         assert_eq!(config.stale_baseline, StaleBaselinePolicy::Warn);
         assert_eq!(config.release_channel, ReleaseChannel::Stable);
         assert!(!config.telemetry);
+        assert!(!config.enforce_type_only_imports);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
@@ -176,6 +185,14 @@ telemetry:
         assert_eq!(parsed.stale_baseline, StaleBaselinePolicy::Fail);
         assert_eq!(parsed.release_channel, ReleaseChannel::Beta);
         assert!(parsed.telemetry);
+        assert!(!parsed.enforce_type_only_imports);
+    }
+
+    #[test]
+    fn config_parses_type_only_enforcement_toggle() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("enforce_type_only_imports: true\n").expect("parse config");
+        assert!(parsed.enforce_type_only_imports);
     }
 
     #[test]
@@ -198,5 +215,6 @@ telemetry:
         assert!(rendered.contains("\"stale_baseline\":\"warn\""));
         assert!(rendered.contains("\"release_channel\":\"stable\""));
         assert!(rendered.contains("\"telemetry\":false"));
+        assert!(rendered.contains("\"enforce_type_only_imports\":false"));
     }
 }

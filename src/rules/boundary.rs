@@ -74,6 +74,10 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
         );
 
         for edge in ctx.graph.dependencies_from(&node.path) {
+            if edge.kind == EdgeKind::TypeOnlyImport && !ctx.config.enforce_type_only_imports {
+                continue;
+            }
+
             let Some(provider_module) = ctx.graph.module_of_file(&edge.to) else {
                 continue;
             };
