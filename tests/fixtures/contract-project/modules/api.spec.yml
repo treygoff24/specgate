@@ -1,0 +1,11 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: create_user
+      contract: contracts/create-user.json
+      match:
+        files:
+          - src/api/handlers/users.ts
+constraints: []
