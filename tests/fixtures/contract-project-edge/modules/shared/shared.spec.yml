@@ -1,0 +1,19 @@
+version: "2.3"
+module: shared
+boundaries:
+  path: src/shared/**
+  contracts:
+    - id: shared_contract
+      contract: contracts/shared.json
+      direction: outbound
+      match:
+        files:
+          - src/shared/types.ts
+      envelope: optional
+    - id: shared_contract
+      contract: contracts/shared.yaml
+      match:
+        files:
+          - src/shared/util.ts
+      envelope: optional
+constraints: []

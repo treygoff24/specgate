@@ -1,0 +1,16 @@
+version: "2.3"
+module: consumer
+boundaries:
+  path: src/consumer/**
+  contracts:
+    - id: consumer_contract
+      contract: contracts/consumer.json
+      imports_contract:
+        - "invalid_no_colon"
+        - "shared:extra:parts"
+        - ":empty_module"
+      match:
+        files:
+          - src/consumer/index.ts
+      envelope: optional
+constraints: []
