@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::deterministic::normalize_repo_relative;
 use crate::spec::Severity;
 
-use super::{FingerprintedViolation, ViolationDisposition};
+use super::{FingerprintedViolation, Verdict, VerdictDisposition, VerdictViolation, ViolationDisposition};
 
 /// Render a violation for human-readable output.
 pub fn format_violation_human(project_root: &Path, entry: &FingerprintedViolation) -> String {
@@ -183,12 +183,136 @@ impl ViolationStats {
     }
 }
 
+/// Format a verdict for human-readable output.
+/// Shows rule, message, hint/suggestion for each violation, plus a summary.
+pub fn format_verdict_human(verdict: &Verdict) -> String {
+    if verdict.violations.is_empty() {
+        return format!("✓ No violations found\n\n{}", format_summary_human(verdict));
+    }
+
+    let mut lines = Vec::new();
+
+    for violation in &verdict.violations {
+        lines.push(format_violation_human_line(violation));
+        lines.push(String::new());
+    }
+
+    lines.push(format_summary_human(verdict));
+
+    lines.join("\n")
+}
+
+/// Format a single verdict violation for human output.
+fn format_violation_human_line(violation: &VerdictViolation) -> String {
+    let severity_icon = match violation.severity {
+        Severity::Error => "✗",
+        Severity::Warning => "⚠",
+    };
+
+    let disposition_label = match violation.disposition {
+        VerdictDisposition::New => "[NEW] ",
+        VerdictDisposition::Baseline => "[BASELINE] ",
+    };
+
+    let mut lines = vec![format!(
+        "{} {}{} ({:?})",
+        severity_icon, disposition_label, violation.rule, violation.severity
+    )];
+
+    lines.push(format!("  Message: {}", violation.message));
+
+    let location = if let Some(line) = violation.line {
+        let col = violation.column.unwrap_or(0);
+        format!("{}:{}:{}", violation.from_file, line, col)
+    } else {
+        violation.from_file.clone()
+    };
+    lines.push(format!("  Location: {}", location));
+
+    if let Some(to_file) = &violation.to_file {
+        lines.push(format!("  Target: {}", to_file));
+    }
+
+    if let Some(from_mod) = &violation.from_module {
+        if let Some(to_mod) = &violation.to_module {
+            lines.push(format!("  Modules: {} → {}", from_mod, to_mod));
+        } else {
+            lines.push(format!("  Module: {}", from_mod));
+        }
+    } else if let Some(to_mod) = &violation.to_module {
+        lines.push(format!("  Target Module: {}", to_mod));
+    }
+
+    if let Some(hint) = &violation.remediation_hint {
+        lines.push(format!("  Hint: {}", hint));
+    }
+
+    if let Some(expected) = &violation.expected {
+        lines.push(format!("  Expected: {}", expected));
+    }
+
+    if let Some(actual) = &violation.actual {
+        lines.push(format!("  Actual: {}", actual));
+    }
+
+    lines.push(format!("  Fingerprint: {}", violation.fingerprint));
+
+    lines.join("\n")
+}
+
+/// Format summary section for human output.
+fn format_summary_human(verdict: &Verdict) -> String {
+    let mut lines = vec!["Summary:".to_string()];
+
+    let summary = &verdict.summary;
+    lines.push(format!("  Total violations: {}", summary.total_violations));
+
+    if summary.new_violations > 0 {
+        lines.push(format!("  New violations: {}", summary.new_violations));
+    }
+
+    if summary.baseline_violations > 0 {
+        lines.push(format!("  Baseline violations: {}", summary.baseline_violations));
+    }
+
+    if summary.suppressed_violations > 0 {
+        lines.push(format!("  Suppressed violations: {}", summary.suppressed_violations));
+    }
+
+    lines.push(format!("  Errors: {}", summary.error_violations));
+    lines.push(format!("  Warnings: {}", summary.warning_violations));
+
+    if summary.stale_baseline_entries > 0 {
+        lines.push(format!("  Stale baseline entries: {}", summary.stale_baseline_entries));
+    }
+
+    lines.push(String::new());
+    lines.push(format!("Status: {:?}", verdict.status));
+
+    lines.join("\n")
+}
+
+/// Format a verdict as NDJSON (one JSON object per violation per line).
+pub fn format_verdict_ndjson(verdict: &Verdict) -> String {
+    if verdict.violations.is_empty() {
+        return String::new();
+    }
+
+    let lines: Vec<String> = verdict
+        .violations
+        .iter()
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .collect();
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
-    use crate::verdict::PolicyViolation;
+    use crate::verdict::{PolicyViolation, VerdictStatus, VerdictSummary};
 
     fn test_violation(rule: &str, severity: Severity, from_file: &str) -> PolicyViolation {
         PolicyViolation {
@@ -218,6 +342,102 @@ mod tests {
             violation: test_violation(rule, severity, from_file),
             fingerprint: "sha256:abc123def456789".to_string(),
             disposition,
+        }
+    }
+
+    fn test_verdict_violation(
+        rule: &str,
+        severity: Severity,
+        from_file: &str,
+        disposition: VerdictDisposition,
+        message: &str,
+    ) -> VerdictViolation {
+        VerdictViolation {
+            rule: rule.to_string(),
+            severity,
+            message: message.to_string(),
+            fingerprint: "sha256:test123".to_string(),
+            disposition,
+            from_file: from_file.to_string(),
+            to_file: Some("src/to.ts".to_string()),
+            from_module: Some("app".to_string()),
+            to_module: Some("core".to_string()),
+            line: Some(10),
+            column: Some(5),
+            expected: Some("expected_value".to_string()),
+            actual: Some("actual_value".to_string()),
+            remediation_hint: Some("Fix this issue".to_string()),
+            contract_id: None,
+        }
+    }
+
+    fn empty_verdict() -> Verdict {
+        Verdict {
+            schema_version: "2.2".to_string(),
+            tool_version: "0.1.0".to_string(),
+            git_sha: "abc123".to_string(),
+            config_hash: "sha256:config".to_string(),
+            spec_hash: "sha256:spec".to_string(),
+            output_mode: "human".to_string(),
+            spec_files_changed: vec![],
+            rule_deltas: vec![],
+            policy_change_detected: false,
+            status: VerdictStatus::Pass,
+            summary: VerdictSummary {
+                total_violations: 0,
+                new_violations: 0,
+                baseline_violations: 0,
+                suppressed_violations: 0,
+                error_violations: 0,
+                warning_violations: 0,
+                new_error_violations: 0,
+                new_warning_violations: 0,
+                stale_baseline_entries: 0,
+            },
+            violations: vec![],
+            metrics: None,
+            governance: None,
+            telemetry: None,
+        }
+    }
+
+    fn verdict_with_violations(violations: Vec<VerdictViolation>) -> Verdict {
+        let total = violations.len();
+        let new_count = violations
+            .iter()
+            .filter(|v| matches!(v.disposition, VerdictDisposition::New))
+            .count();
+        let error_count = violations
+            .iter()
+            .filter(|v| v.severity == Severity::Error)
+            .count();
+
+        Verdict {
+            schema_version: "2.2".to_string(),
+            tool_version: "0.1.0".to_string(),
+            git_sha: "abc123".to_string(),
+            config_hash: "sha256:config".to_string(),
+            spec_hash: "sha256:spec".to_string(),
+            output_mode: "human".to_string(),
+            spec_files_changed: vec![],
+            rule_deltas: vec![],
+            policy_change_detected: false,
+            status: if error_count > 0 { VerdictStatus::Fail } else { VerdictStatus::Pass },
+            summary: VerdictSummary {
+                total_violations: total,
+                new_violations: new_count,
+                baseline_violations: total - new_count,
+                suppressed_violations: 0,
+                error_violations: error_count,
+                warning_violations: total - error_count,
+                new_error_violations: new_count,
+                new_warning_violations: 0,
+                stale_baseline_entries: 0,
+            },
+            violations,
+            metrics: None,
+            governance: None,
+            telemetry: None,
         }
     }
 
@@ -296,5 +516,192 @@ mod tests {
         assert!(human.contains("3 total"));
         assert!(human.contains("2 new"));
         assert!(human.contains("1 baseline"));
+    }
+
+    // Tests for format_verdict_human
+
+    #[test]
+    fn format_verdict_human_empty_shows_success() {
+        let verdict = empty_verdict();
+        let output = format_verdict_human(&verdict);
+
+        assert!(output.contains("No violations found"));
+        assert!(output.contains("Total violations: 0"));
+        assert!(output.contains("Status: Pass"));
+    }
+
+    #[test]
+    fn format_verdict_human_shows_violations() {
+        let violations = vec![
+            test_verdict_violation(
+                "boundary.never_imports",
+                Severity::Error,
+                "src/app/main.ts",
+                VerdictDisposition::New,
+                "Import not allowed",
+            ),
+        ];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_human(&verdict);
+
+        assert!(output.contains("boundary.never_imports"));
+        assert!(output.contains("Import not allowed"));
+        assert!(output.contains("NEW"));
+        assert!(output.contains("Error"));
+        assert!(output.contains("Location:"));
+        assert!(output.contains("Hint:"));
+        assert!(output.contains("Expected:"));
+        assert!(output.contains("Actual:"));
+        assert!(output.contains("Fingerprint:"));
+    }
+
+    #[test]
+    fn format_verdict_human_shows_multiple_violations() {
+        let violations = vec![
+            test_verdict_violation(
+                "rule1",
+                Severity::Error,
+                "src/a.ts",
+                VerdictDisposition::New,
+                "Error message",
+            ),
+            test_verdict_violation(
+                "rule2",
+                Severity::Warning,
+                "src/b.ts",
+                VerdictDisposition::Baseline,
+                "Warning message",
+            ),
+        ];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_human(&verdict);
+
+        assert!(output.contains("rule1"));
+        assert!(output.contains("rule2"));
+        assert!(output.contains("Error message"));
+        assert!(output.contains("Warning message"));
+        assert!(output.contains("NEW"));
+        assert!(output.contains("BASELINE"));
+        assert!(output.contains("Total violations: 2"));
+    }
+
+    #[test]
+    fn format_verdict_human_includes_summary_stats() {
+        let violations = vec![
+            test_verdict_violation(
+                "rule1",
+                Severity::Error,
+                "src/a.ts",
+                VerdictDisposition::New,
+                "Error",
+            ),
+            test_verdict_violation(
+                "rule2",
+                Severity::Warning,
+                "src/b.ts",
+                VerdictDisposition::Baseline,
+                "Warning",
+            ),
+        ];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_human(&verdict);
+
+        assert!(output.contains("Summary:"));
+        assert!(output.contains("Total violations: 2"));
+        assert!(output.contains("New violations: 1"));
+        assert!(output.contains("Baseline violations: 1"));
+        assert!(output.contains("Errors: 1"));
+        assert!(output.contains("Warnings: 1"));
+    }
+
+    // Tests for format_verdict_ndjson
+
+    #[test]
+    fn format_verdict_ndjson_empty_returns_empty() {
+        let verdict = empty_verdict();
+        let output = format_verdict_ndjson(&verdict);
+
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn format_verdict_ndjson_single_violation() {
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Error,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import not allowed",
+        )];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_ndjson(&verdict);
+
+        // Should be valid JSON and contain violation fields
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+        assert_eq!(parsed["rule"], "boundary.never_imports");
+        assert_eq!(parsed["message"], "Import not allowed");
+        assert_eq!(parsed["fingerprint"], "sha256:test123");
+    }
+
+    #[test]
+    fn format_verdict_ndjson_multiple_violations_one_per_line() {
+        let violations = vec![
+            test_verdict_violation(
+                "rule1",
+                Severity::Error,
+                "src/a.ts",
+                VerdictDisposition::New,
+                "Error",
+            ),
+            test_verdict_violation(
+                "rule2",
+                Severity::Warning,
+                "src/b.ts",
+                VerdictDisposition::Baseline,
+                "Warning",
+            ),
+        ];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_ndjson(&verdict);
+
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+
+        // Each line should be valid JSON
+        let first: serde_json::Value = serde_json::from_str(lines[0]).expect("Valid JSON");
+        let second: serde_json::Value = serde_json::from_str(lines[1]).expect("Valid JSON");
+
+        assert_eq!(first["rule"], "rule1");
+        assert_eq!(second["rule"], "rule2");
+    }
+
+    #[test]
+    fn format_verdict_ndjson_includes_all_violation_fields() {
+        let violation = test_verdict_violation(
+            "boundary.test",
+            Severity::Error,
+            "src/test.ts",
+            VerdictDisposition::New,
+            "Test message",
+        );
+        let verdict = verdict_with_violations(vec![violation]);
+        let output = format_verdict_ndjson(&verdict);
+
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        assert_eq!(parsed["rule"], "boundary.test");
+        assert_eq!(parsed["severity"], "error");
+        assert_eq!(parsed["message"], "Test message");
+        assert_eq!(parsed["fingerprint"], "sha256:test123");
+        assert_eq!(parsed["disposition"], "new");
+        assert_eq!(parsed["from_file"], "src/test.ts");
+        assert_eq!(parsed["to_file"], "src/to.ts");
+        assert_eq!(parsed["from_module"], "app");
+        assert_eq!(parsed["to_module"], "core");
+        assert_eq!(parsed["line"], 10);
+        assert_eq!(parsed["column"], 5);
+        assert_eq!(parsed["expected"], "expected_value");
+        assert_eq!(parsed["actual"], "actual_value");
+        assert_eq!(parsed["remediation_hint"], "Fix this issue");
     }
 }
