@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::spec::{load_spec, validate_specs};
 
 #[derive(Debug, Clone, Copy)]
 struct ViolationIdentity<'a> {
@@ -269,5 +270,18 @@ fn d02_dependency_not_allowed_fix_passes_gate_contract() {
             .len(),
         0,
         "D02 fix should emit no violations: {verdict:#}"
+    );
+}
+
+#[test]
+fn contract_23_golden_fixture_validates_cleanly() {
+    let spec_path = fixtures_dir().join("contract-2.3.spec.yml");
+    let spec = load_spec(&spec_path).expect("load contract 2.3 golden fixture");
+
+    let report = validate_specs(&[spec]);
+
+    assert!(
+        !report.has_errors(),
+        "contract 2.3 golden fixture should validate without errors: {report:#?}"
     );
 }

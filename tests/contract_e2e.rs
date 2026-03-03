@@ -13,8 +13,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{run, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR};
-
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn parse_json(source: &str) -> Value {
     serde_json::from_str(source).expect("valid json")

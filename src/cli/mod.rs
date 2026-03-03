@@ -17,8 +17,9 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
-    build_baseline_with_metadata, classify_violations_with_stale, load_optional_baseline,
-    refresh_baseline_with_metadata, write_baseline, BaselineGeneratedFrom, DEFAULT_BASELINE_PATH,
+    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
+    classify_violations_with_stale, load_optional_baseline, refresh_baseline_with_metadata,
+    write_baseline,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
@@ -27,19 +28,19 @@ use crate::resolver::classify::extract_package_name;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    evaluate_enforce_layer, evaluate_no_circular_deps, is_canonical_import_rule_id, DependencyRule,
-    RuleContext, RuleViolation, RuleWithResolver, DEPENDENCY_FORBIDDEN_RULE_ID,
-    DEPENDENCY_NOT_ALLOWED_RULE_ID,
+    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
+    RuleViolation, RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
+    is_canonical_import_rule_id,
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, types::CURRENT_SPEC_VERSION, Severity, SpecConfig, SpecFile, ValidationLevel,
-    ValidationReport,
+    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
+    types::CURRENT_SPEC_VERSION,
 };
 use crate::verdict::{
-    self, build_verdict_with_options, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary,
-    GovernanceContext, PolicyViolation, TelemetryEventName, VerdictBuildOptions, VerdictIdentity,
-    VerdictMetrics, VerdictStatus,
+    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
+    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
+    build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience
@@ -482,8 +483,15 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         );
     }
 
+    let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
+        Ok(edge_pairs) => edge_pairs,
+        Err(error) => {
+            return runtime_error_json("git", "failed to compute blast edge pairs", vec![error]);
+        }
+    };
+
     // Handle --since blast-radius mode - compute affected modules before analysis
-    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &BTreeSet::new()) {
+    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &blast_edge_pairs) {
         Ok(radius) => radius,
         Err(error) => {
             return runtime_error_json("git", "failed to compute blast radius", vec![error]);
@@ -719,6 +727,34 @@ fn build_blast_radius(
     Ok(Some(radius))
 }
 
+fn derive_blast_edge_pairs(
+    loaded: &LoadedProject,
+    since_ref: Option<&str>,
+) -> std::result::Result<BTreeSet<(String, String)>, String> {
+    if since_ref.is_none() {
+        return Ok(BTreeSet::new());
+    }
+
+    let mut resolver =
+        ModuleResolver::new(&loaded.project_root, &loaded.specs).map_err(|error| {
+            format!("failed to initialize module resolver for blast radius: {error}")
+        })?;
+
+    let graph = DependencyGraph::build(&loaded.project_root, &mut resolver, &loaded.config)
+        .map_err(|error| format!("failed to build dependency graph for blast radius: {error}"))?;
+
+    Ok(graph
+        .dependency_edges()
+        .into_iter()
+        .map(|edge| {
+            (
+                normalize_repo_relative(&loaded.project_root, &edge.from),
+                normalize_repo_relative(&loaded.project_root, &edge.to),
+            )
+        })
+        .collect())
+}
+
 fn build_blast_radius_data(
     loaded: &LoadedProject,
     edge_pairs: &BTreeSet<(String, String)>,
@@ -816,8 +852,15 @@ pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunRes
         );
     }
 
+    let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
+        Ok(edge_pairs) => edge_pairs,
+        Err(error) => {
+            return runtime_error_json("git", "failed to compute blast edge pairs", vec![error]);
+        }
+    };
+
     // Handle --since blast-radius mode - compute affected modules before analysis
-    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &BTreeSet::new()) {
+    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &blast_edge_pairs) {
         Ok(radius) => radius,
         Err(error) => {
             return runtime_error_json("git", "failed to compute blast radius", vec![error]);
@@ -3451,9 +3494,11 @@ mod tests {
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
         assert!(result.stdout.contains("\"status\": \"match\""));
-        assert!(result
-            .stdout
-            .contains("\"trace_parser\": \"legacy_trace_text\""));
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"legacy_trace_text\"")
+        );
     }
 
     #[test]
@@ -3497,12 +3542,16 @@ mod tests {
         ]);
 
         assert_eq!(result.exit_code, EXIT_CODE_PASS);
-        assert!(result
-            .stdout
-            .contains("\"trace_parser\": \"structured_snapshot\""));
-        assert!(result
-            .stdout
-            .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\""));
+        assert!(
+            result
+                .stdout
+                .contains("\"trace_parser\": \"structured_snapshot\"")
+        );
+        assert!(
+            result
+                .stdout
+                .contains("\"structured_snapshot_out\": \"snapshots/normalized.json\"")
+        );
 
         let snapshot = fs::read_to_string(temp.path().join("snapshots/normalized.json"))
             .expect("structured snapshot output");

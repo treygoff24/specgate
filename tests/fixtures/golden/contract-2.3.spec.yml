@@ -1,0 +1,14 @@
+version: "2.3"
+module: "golden/contracts"
+
+boundaries:
+  path: "src/golden/contracts/**/*.ts"
+  contracts:
+    - id: "create_user"
+      contract: "contracts/create-user.json"
+      match:
+        files:
+          - "src/golden/contracts/handlers.ts"
+      direction: inbound
+
+constraints: []

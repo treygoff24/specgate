@@ -65,11 +65,16 @@ render_summary() {
   echo "2. cargo clippy --locked --all-targets -- -D warnings"
   echo "3. cargo test --locked --lib"
   echo "4. cargo test --locked --test contract_fixtures"
-  echo "5. cargo test --locked --test golden_corpus_gate"
-  echo "6. cargo test --locked --test tier_a_golden"
-  echo "7. cargo test --locked --test integration"
-  echo "8. cargo test --locked --test wave2c_cli_integration"
-  echo "9. cargo test --locked --test mvp_gate_baseline"
+  echo "5. cargo test --locked --test contract_validation_fixtures"
+  echo "6. cargo test --locked --test contracts_rules_contract_refs"
+  echo "7. cargo test --locked --test structured_diagnostics_contracts"
+  echo "8. cargo test --locked --test contract_e2e"
+  echo "9. cargo test --locked --test contract_e2e_edge"
+  echo "10. cargo test --locked --test golden_corpus_gate"
+  echo "11. cargo test --locked --test tier_a_golden"
+  echo "12. cargo test --locked --test integration"
+  echo "13. cargo test --locked --test wave2c_cli_integration"
+  echo "14. cargo test --locked --test mvp_gate_baseline"
   echo
 
   if [[ ${overall_status} -eq 0 ]]; then
@@ -102,6 +107,11 @@ run_step runtime "Linting" cargo clippy --locked --all-targets -- -D warnings
 
 run_step contract "Library tests" cargo test --locked --lib
 run_step contract "Contract fixtures" cargo test --locked --test contract_fixtures
+run_step contract "Contract validation fixtures" cargo test --locked --test contract_validation_fixtures
+run_step contract "Contract rules regression" cargo test --locked --test contracts_rules_contract_refs
+run_step contract "Structured diagnostics regression" cargo test --locked --test structured_diagnostics_contracts
+run_step contract "Contract E2E" cargo test --locked --test contract_e2e
+run_step contract "Contract E2E edge" cargo test --locked --test contract_e2e_edge
 run_step contract "Golden corpus" cargo test --locked --test golden_corpus_gate
 run_step contract "Tier A deterministic gate" cargo test --locked --test tier_a_golden
 run_step contract "Integration semantics" cargo test --locked --test integration

@@ -13,7 +13,7 @@
 //! - `--diff`: Deprecated alias for `--baseline-diff`
 //! - `--diff-new-only`: Deprecated alias for `--baseline-new-only`
 
-use std::io::{stdout, IsTerminal};
+use std::io::{IsTerminal, stdout};
 use std::path::PathBuf;
 
 use clap::Args;

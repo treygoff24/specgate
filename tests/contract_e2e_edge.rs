@@ -12,7 +12,7 @@ use std::process::Command;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{run, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn parse_json(source: &str) -> Value {
     serde_json::from_str(source).expect("valid json")
@@ -116,7 +116,8 @@ boundaries:
     let contracts_dir = modules_dir.join("contracts");
     fs::create_dir_all(&contracts_dir).expect("create contracts");
     fs::write(contracts_dir.join("first.json"), r#"{"type": "object"}"#).expect("write first.json");
-    fs::write(contracts_dir.join("second.json"), r#"{"type": "object"}"#).expect("write second.json");
+    fs::write(contracts_dir.join("second.json"), r#"{"type": "object"}"#)
+        .expect("write second.json");
 
     let result = run([
         "specgate",
@@ -136,7 +137,9 @@ boundaries:
 
     let details = verdict["details"].as_array().expect("details array");
     let has_duplicate = details.iter().any(|d| {
-        d.as_str().unwrap_or("").contains("boundary.contract_ref_invalid")
+        d.as_str()
+            .unwrap_or("")
+            .contains("boundary.contract_ref_invalid")
             && d.as_str().unwrap_or("").contains("duplicate contract id")
     });
 
@@ -344,15 +347,27 @@ spec_dirs:
   - modules"#,
     );
 
-    write_file(temp.path(), "src/unaffected/index.ts", "export const unaffected = 1;");
-    write_file(temp.path(), "src/affected/index.ts", "export const affected = 2;");
+    write_file(
+        temp.path(),
+        "src/unaffected/index.ts",
+        "export const unaffected = 1;",
+    );
+    write_file(
+        temp.path(),
+        "src/affected/index.ts",
+        "export const affected = 2;",
+    );
 
     write_file(temp.path(), "contracts/valid.json", r#"{"type": "object"}"#);
 
     init_git_repo(temp.path());
     git_add_and_commit(temp.path(), "chore: initial commit");
 
-    write_file(temp.path(), "src/affected/index.ts", "export const affected = 3;");
+    write_file(
+        temp.path(),
+        "src/affected/index.ts",
+        "export const affected = 3;",
+    );
     git_add_and_commit(temp.path(), "chore: touch affected");
 
     let full_result = run([
@@ -459,7 +474,11 @@ spec_dirs:
   - modules"#,
     );
 
-    write_file(temp.path(), "src/core/types.ts", "export interface CoreType { id: string; }");
+    write_file(
+        temp.path(),
+        "src/core/types.ts",
+        "export interface CoreType { id: string; }",
+    );
     write_file(
         temp.path(),
         "src/api/types.ts",
@@ -478,7 +497,11 @@ spec_dirs:
     init_git_repo(temp.path());
     git_add_and_commit(temp.path(), "chore: initial commit");
 
-    write_file(temp.path(), "src/core/types.ts", "export interface CoreType { id: number; }");
+    write_file(
+        temp.path(),
+        "src/core/types.ts",
+        "export interface CoreType { id: number; }",
+    );
     git_add_and_commit(temp.path(), "chore: update core types");
 
     let result = run([
@@ -578,7 +601,9 @@ boundaries:
 
     let baseline_verdict: Value = parse_json(&check_with_baseline.stdout);
     // Baseline violations can be 1 or more (may include match_unresolved)
-    let baseline_count = baseline_verdict["summary"]["baseline_violations"].as_u64().unwrap_or(0);
+    let baseline_count = baseline_verdict["summary"]["baseline_violations"]
+        .as_u64()
+        .unwrap_or(0);
     assert!(
         baseline_count >= 1,
         "should have at least 1 baseline violation, got {baseline_count}",
@@ -642,9 +667,14 @@ boundaries:
     assert_eq!(verdict["status"], "error");
     let details = verdict["details"].as_array().expect("details");
     let has_dup_error = details.iter().any(|d| {
-        d.as_str().unwrap_or("").contains("boundary.contract_ref_invalid")
+        d.as_str()
+            .unwrap_or("")
+            .contains("boundary.contract_ref_invalid")
     });
-    assert!(has_dup_error, "baseline should report contract_ref_invalid error");
+    assert!(
+        has_dup_error,
+        "baseline should report contract_ref_invalid error"
+    );
 }
 
 // match_unresolved is a regular violation and can be baselined
@@ -708,8 +738,8 @@ boundaries:
     let match_unresolved_baseline: Vec<_> = violations
         .iter()
         .filter(|v| {
-            v["rule"].as_str() == Some("boundary.match_unresolved") &&
-            v["disposition"].as_str() == Some("baseline")
+            v["rule"].as_str() == Some("boundary.match_unresolved")
+                && v["disposition"].as_str() == Some("baseline")
         })
         .collect();
 

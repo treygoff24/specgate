@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
 use crate::verdict::{
-    sort_policy_violations, FingerprintedViolation, PolicyViolation, ViolationDisposition,
+    FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
 };
 
 pub const BASELINE_FILE_VERSION: &str = "1";
