@@ -15,11 +15,6 @@ use tempfile::TempDir;
 
 use specgate::cli::{run, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR};
 
-fn fixture_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/contract-project")
-        .join(relative)
-}
 
 fn parse_json(source: &str) -> Value {
     serde_json::from_str(source).expect("valid json")
@@ -412,7 +407,7 @@ constraints: []
         .filter(|i| {
             i["message"]
                 .as_str()
-                .map_or(false, |m| m.contains("boundary.contract_version_mismatch"))
+                .is_some_and(|m| m.contains("boundary.contract_version_mismatch"))
         })
         .collect();
 
