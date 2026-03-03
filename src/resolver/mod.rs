@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use miette::Diagnostic;
@@ -168,6 +168,7 @@ impl ModuleResolver {
         for entry in WalkDir::new(project_root)
             .follow_links(true)
             .into_iter()
+            .filter_entry(|entry| !should_skip_module_map_entry(project_root, entry.path()))
             .filter_map(std::result::Result::ok)
         {
             if entry.file_type().is_file() {
@@ -328,9 +329,34 @@ fn build_resolve_options(project_root: &Path) -> ResolveOptions {
             ".jsx".to_string(),
             ".json".to_string(),
         ],
+        extension_alias: vec![
+            (
+                ".js".to_string(),
+                vec![
+                    ".ts".to_string(),
+                    ".tsx".to_string(),
+                    ".js".to_string(),
+                    ".jsx".to_string(),
+                ],
+            ),
+            (
+                ".mjs".to_string(),
+                vec![".mts".to_string(), ".mjs".to_string()],
+            ),
+            (
+                ".cjs".to_string(),
+                vec![".cts".to_string(), ".cjs".to_string()],
+            ),
+            (
+                ".jsx".to_string(),
+                vec![".tsx".to_string(), ".jsx".to_string()],
+            ),
+        ],
         condition_names: vec![
             "import".to_string(),
             "require".to_string(),
+            "node".to_string(),
+            "types".to_string(),
             "default".to_string(),
         ],
         main_fields: vec!["module".to_string(), "main".to_string()],
@@ -339,6 +365,29 @@ fn build_resolve_options(project_root: &Path) -> ResolveOptions {
         tsconfig,
         ..ResolveOptions::default()
     }
+}
+
+fn should_skip_module_map_entry(project_root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(project_root) else {
+        return false;
+    };
+
+    relative.components().any(|component| {
+        let Component::Normal(name) = component else {
+            return false;
+        };
+        matches!(
+            name.to_string_lossy().as_ref(),
+            "node_modules"
+                | "dist"
+                | "build"
+                | ".git"
+                | "generated"
+                | "target"
+                | "coverage"
+                | "vendor"
+        )
+    })
 }
 
 fn containing_dir(from_file: &Path, project_root: &Path) -> PathBuf {
@@ -539,5 +588,95 @@ mod tests {
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
         let explanation = resolver.explain_resolution(&temp.path().join("src/a.ts"), "node:path");
         assert!(!explanation.steps.is_empty());
+    }
+
+    #[test]
+    fn module_map_prunes_heavy_directories() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::create_dir_all(temp.path().join("node_modules/pkg")).expect("mkdir node_modules");
+        fs::create_dir_all(temp.path().join("target/generated")).expect("mkdir target");
+        fs::create_dir_all(temp.path().join("vendor/lib")).expect("mkdir vendor");
+
+        fs::write(temp.path().join("src/app.ts"), "export const app = 1;\n").expect("write app");
+        fs::write(
+            temp.path().join("node_modules/pkg/index.ts"),
+            "export const pkg = 1;\n",
+        )
+        .expect("write node_modules");
+        fs::write(
+            temp.path().join("target/generated/out.ts"),
+            "export const generated = 1;\n",
+        )
+        .expect("write target");
+        fs::write(
+            temp.path().join("vendor/lib/x.ts"),
+            "export const vendor = 1;\n",
+        )
+        .expect("write vendor");
+
+        let specs = vec![base_spec("core", "**/*.ts")];
+        let resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("src/app.ts")),
+            Some("core")
+        );
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("node_modules/pkg/index.ts")),
+            None
+        );
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("target/generated/out.ts")),
+            None
+        );
+        assert_eq!(
+            resolver.module_for_file(&temp.path().join("vendor/lib/x.ts")),
+            None
+        );
+    }
+
+    #[test]
+    fn nodenext_extension_alias_resolves_js_specifier_to_ts_file() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::write(temp.path().join("src/a.ts"), "import './b.js';\n").expect("write a");
+        fs::write(temp.path().join("src/b.ts"), "export const b = 1;\n").expect("write b");
+
+        let specs = vec![base_spec("core", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let resolved = resolver.resolve(&temp.path().join("src/a.ts"), "./b.js");
+
+        assert!(matches!(
+            resolved,
+            ResolvedImport::FirstParty {
+                module_id: Some(ref module),
+                ..
+            } if module == "core"
+        ));
+    }
+
+    #[test]
+    fn resolve_options_include_node_and_types_conditions_and_aliases() {
+        let options = build_resolve_options(Path::new("/tmp/specgate-test"));
+
+        assert_eq!(
+            options.condition_names,
+            vec![
+                "import".to_string(),
+                "require".to_string(),
+                "node".to_string(),
+                "types".to_string(),
+                "default".to_string()
+            ]
+        );
+
+        assert!(
+            options
+                .extension_alias
+                .iter()
+                .any(|(ext, aliases)| ext == ".js" && aliases.contains(&".ts".to_string())),
+            "expected .js extension alias to include .ts"
+        );
     }
 }

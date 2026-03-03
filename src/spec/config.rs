@@ -111,6 +111,9 @@ fn default_excludes() -> Vec<String> {
         "**/build/**".to_string(),
         "**/.git/**".to_string(),
         "**/generated/**".to_string(),
+        "**/target/**".to_string(),
+        "**/coverage/**".to_string(),
+        "**/vendor/**".to_string(),
     ]
 }
 
@@ -153,6 +156,9 @@ mod tests {
         assert_eq!(config.release_channel, ReleaseChannel::Stable);
         assert!(!config.telemetry);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/target/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/vendor/**"));
     }
 
     #[test]
