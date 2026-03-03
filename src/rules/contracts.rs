@@ -159,7 +159,7 @@ fn check_contract_file(
                 column: None,
             },
             format!(
-                "Create the contract file at '{}' or update the contract path in the spec file",
+                "Create the contract file at '{}' (relative to project root), or update `boundaries.contracts[].contract` to the correct existing path",
                 contract.contract
             ),
             contract.id.clone(),
@@ -187,7 +187,7 @@ fn check_contract_file(
                 column: None,
             },
             format!(
-                "Add contract content to '{}' or remove the contract reference if not needed",
+                "Add schema/content to '{}' so the contract is non-empty, or remove the contract entry if it is no longer needed",
                 contract.contract
             ),
             contract.id.clone(),
@@ -253,7 +253,7 @@ fn check_match_patterns(
                 column: None,
             },
             format!(
-                "Update the match.files patterns in contract '{}' to match existing files, or create the expected files",
+                "Update `match.files` globs for contract '{}' so at least one path resolves, or add files that satisfy the declared glob patterns",
                 contract.id
             ),
             contract.id.clone(),
@@ -340,7 +340,7 @@ fn check_contract_refs(
                 line: None,
                 column: None,
             },
-            "Update imports_contract references to valid 'module:contract_id' pairs, or create the referenced contracts in the target modules".to_string(),
+            "Use valid `module:contract_id` references in `imports_contract`, or define the referenced contract ids in the target modules".to_string(),
             contract.id.clone(),
         ));
     }
@@ -490,7 +490,7 @@ mod tests {
         assert!(
             violations[0]
                 .remediation_hint
-                .contains("Add contract content")
+                .contains("Add schema/content")
         );
     }
 

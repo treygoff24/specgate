@@ -216,12 +216,15 @@ fn format_violation_human_line(violation: &VerdictViolation) -> String {
         VerdictDisposition::Baseline => "[BASELINE] ",
     };
 
-    let mut lines = vec![format!(
-        "{} {}{} ({:?})",
-        severity_icon, disposition_label, violation.rule, violation.severity
-    )];
+    let level = match violation.severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+    };
 
-    lines.push(format!("  Message: {}", violation.message));
+    let mut lines = vec![format!(
+        "{} {}[{}] {}{}",
+        severity_icon, level, violation.rule, disposition_label, violation.message
+    )];
 
     let location = if let Some(line) = violation.line {
         let col = violation.column.unwrap_or(0);
@@ -246,7 +249,9 @@ fn format_violation_human_line(violation: &VerdictViolation) -> String {
     }
 
     if let Some(hint) = &violation.remediation_hint {
-        lines.push(format!("  Hint: {hint}"));
+        lines.push(format!("  Help: {hint}"));
+    } else {
+        lines.push("  Help: No remediation hint was attached; review this rule's docs and update spec/config to satisfy the contract.".to_string());
     }
 
     if let Some(expected) = &violation.expected {
@@ -564,7 +569,7 @@ mod tests {
         assert!(output.contains("NEW"));
         assert!(output.contains("Error"));
         assert!(output.contains("Location:"));
-        assert!(output.contains("Hint:"));
+        assert!(output.contains("Help:"));
         assert!(output.contains("Expected:"));
         assert!(output.contains("Actual:"));
         assert!(output.contains("Fingerprint:"));

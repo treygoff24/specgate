@@ -658,7 +658,7 @@ fn remediation_hint_emitted_in_empty_violation() {
     assert!(
         violations[0]
             .remediation_hint
-            .contains("Add contract content"),
+            .contains("Add schema/content"),
         "remediation_hint should suggest adding content: {}",
         violations[0].remediation_hint
     );
@@ -696,7 +696,7 @@ fn remediation_hint_emitted_in_unresolved_match_violation() {
     assert!(
         violations[0]
             .remediation_hint
-            .contains("match.files patterns"),
+            .contains("`match.files` globs"),
         "remediation_hint should mention match patterns: {}",
         violations[0].remediation_hint
     );

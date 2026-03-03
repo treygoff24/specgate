@@ -120,7 +120,7 @@ pub fn validate_specs(specs: &[SpecFile]) -> ValidationReport {
             report.push_error(
                 spec,
                 format!(
-                    "duplicate module '{}' (previous declaration at {:?})",
+                    "duplicate module '{}' (previous declaration at {:?}). Remediation: keep one spec per module id and rename or remove the duplicate declaration.",
                     spec.module, previous_path
                 ),
             );
@@ -131,7 +131,7 @@ pub fn validate_specs(specs: &[SpecFile]) -> ValidationReport {
                 Some(previous_module) if previous_module != &spec.module => report.push_error(
                     spec,
                     format!(
-                        "canonical import id '{canonical_id}' already declared by module '{previous_module}'"
+                        "canonical import id '{canonical_id}' already declared by module '{previous_module}'. Remediation: assign a unique import_id/import_ids value per module."
                     ),
                 ),
                 _ => {
@@ -150,19 +150,19 @@ fn validate_imports_contract_format(imports_contract: &str) -> Result<(), String
     let parts: Vec<&str> = imports_contract.split(':').collect();
     if parts.len() != 2 {
         return Err(format!(
-            "imports_contract '{imports_contract}' must contain exactly one colon separating module and contract id"
+            "imports_contract '{imports_contract}' must contain exactly one colon separating module and contract id. Remediation: use the format `module:contract_id`."
         ));
     }
     let module = parts[0];
     let contract_id = parts[1];
     if module.is_empty() {
         return Err(format!(
-            "imports_contract '{imports_contract}' has empty module segment"
+            "imports_contract '{imports_contract}' has empty module segment. Remediation: provide a module id before `:`."
         ));
     }
     if contract_id.is_empty() {
         return Err(format!(
-            "imports_contract '{imports_contract}' has empty contract id segment"
+            "imports_contract '{imports_contract}' has empty contract id segment. Remediation: provide a contract id after `:`."
         ));
     }
     Ok(())
@@ -181,13 +181,13 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
         if contract.id.is_empty() {
             report.push_error(
                 spec,
-                "boundary.contract_empty: contract id must be non-empty",
+                "boundary.contract_empty: contract id must be non-empty. Remediation: set a unique contract `id`.",
             );
         } else if seen_ids.contains(contract.id.as_str()) {
             report.push_error(
                 spec,
                 format!(
-                    "boundary.contract_ref_invalid: duplicate contract id '{}'",
+                    "boundary.contract_ref_invalid: duplicate contract id '{}'. Remediation: assign unique contract ids within this module.",
                     contract.id
                 ),
             );
@@ -200,7 +200,7 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
             report.push_error(
                 spec,
                 format!(
-                    "boundary.contract_missing: contract '{}' has empty contract path",
+                    "boundary.contract_missing: contract '{}' has empty contract path. Remediation: set `contract` to a non-empty contract file path.",
                     contract.id
                 ),
             );
@@ -214,7 +214,7 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
                 report.push_error(
                     spec,
                     format!(
-                        "boundary.contract_ref_invalid: contract '{}' path '{}' has invalid extension, expected one of {:?}",
+                        "boundary.contract_ref_invalid: contract '{}' path '{}' has invalid extension, expected one of {:?}. Remediation: use a supported contract extension.",
                         contract.id,
                         contract_path,
                         crate::spec::types::CONTRACT_FILE_EXTENSIONS
@@ -228,7 +228,7 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
             report.push_error(
                 spec,
                 format!(
-                    "boundary.match_unresolved: contract '{}' has empty match.files",
+                    "boundary.match_unresolved: contract '{}' has empty match.files. Remediation: add at least one file glob under `match.files`.",
                     contract.id
                 ),
             );
@@ -239,7 +239,7 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
                     report.push_error(
                         spec,
                         format!(
-                            "boundary.match_unresolved: contract '{}' has empty glob pattern in match.files",
+                            "boundary.match_unresolved: contract '{}' has empty glob pattern in match.files. Remediation: remove empty entries and keep only valid glob patterns.",
                             contract.id
                         ),
                     );
@@ -251,7 +251,7 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
                         report.push_error(
                             spec,
                             format!(
-                                "boundary.match_unresolved: contract '{}' has invalid glob pattern '{}'",
+                                "boundary.match_unresolved: contract '{}' has invalid glob pattern '{}'. Remediation: fix the glob syntax to match project files.",
                                 contract.id, file_pattern
                             ),
                         );
@@ -275,7 +275,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
         report.push_error(
             spec,
             format!(
-                "unsupported spec version '{}'; expected one of {:?}",
+                "unsupported spec version '{}'; expected one of {:?}. Remediation: set `version` to a supported value (2.2 or 2.3).",
                 spec.version, SUPPORTED_SPEC_VERSIONS
             ),
         );
@@ -288,7 +288,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
                 report.push_error(
                     spec,
                     format!(
-                        "{BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID}: contracts are not supported in spec version 2.2; upgrade to 2.3 to use boundary contracts"
+                        "{BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID}: contracts are not supported in spec version 2.2; upgrade to 2.3 to use boundary contracts. Remediation: set `version: \"2.3\"` or remove `boundaries.contracts`."
                     ),
                 );
             }
@@ -299,7 +299,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
     validate_contracts(spec, report, version);
 
     if spec.module.trim().is_empty() {
-        report.push_error(spec, "module must be non-empty");
+        report.push_error(spec, "module must be non-empty. Remediation: set `module` to a stable, non-empty module id (for example: `core/api`).");
     }
 
     for constraint in &spec.constraints {
@@ -307,7 +307,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             report.push_error(
                 spec,
                 format!(
-                    "unknown constraint rule '{}'; expected one of {:?}",
+                    "unknown constraint rule '{}'; expected one of {:?}. Remediation: fix the rule id or remove the constraint.",
                     constraint.rule, KNOWN_CONSTRAINT_RULES
                 ),
             );
@@ -319,7 +319,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             if Glob::new(path_glob).is_err() {
                 report.push_error(
                     spec,
-                    format!("invalid boundaries.path glob pattern: '{path_glob}'"),
+                    format!("invalid boundaries.path glob pattern: '{path_glob}'. Remediation: provide a valid glob (for example `src/**/*`) that compiles with glob syntax."),
                 );
             }
         }
@@ -328,7 +328,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             if Glob::new(public_api_glob).is_err() {
                 report.push_error(
                     spec,
-                    format!("invalid boundaries.public_api glob pattern: '{public_api_glob}'"),
+                    format!("invalid boundaries.public_api glob pattern: '{public_api_glob}'. Remediation: provide valid glob patterns that match exported API files."),
                 );
             }
         }
@@ -349,7 +349,7 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
         for overlap in allow_set.intersection(&deny_set) {
             report.push_warning(
                 spec,
-                format!("module '{overlap}' is in both allow_imports_from and never_imports"),
+                format!("module '{overlap}' is in both allow_imports_from and never_imports. Remediation: keep each module in only one list."),
             );
         }
 
@@ -367,14 +367,14 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
         for overlap in allow_imported_by_set.intersection(&deny_imported_by_set) {
             report.push_warning(
                 spec,
-                format!("module '{overlap}' is in both allow_imported_by and deny_imported_by"),
+                format!("module '{overlap}' is in both allow_imported_by and deny_imported_by. Remediation: keep each module in only one provider-access list."),
             );
         }
 
         if boundaries.enforce_canonical_imports && spec.canonical_import_ids().is_empty() {
             report.push_warning(
                 spec,
-                "enforce_canonical_imports is true but module declares no import_id/import_ids",
+                "enforce_canonical_imports is true but module declares no import_id/import_ids. Remediation: declare import_id/import_ids or disable enforce_canonical_imports for this module.",
             );
         }
     }
