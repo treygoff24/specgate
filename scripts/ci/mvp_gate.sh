@@ -76,6 +76,8 @@ render_summary() {
   echo "13. cargo test --locked --test wave2c_cli_integration"
   echo "14. cargo test --locked --test mvp_gate_baseline"
   echo "15. cargo test --locked --test doctor_parity_fixtures"
+  echo "16. cargo test --locked --test tsjs_barrel_fixtures"
+  echo "17. cargo test --locked --test tsjs_openclaw_regression"
   echo
 
   if [[ ${overall_status} -eq 0 ]]; then
@@ -120,6 +122,8 @@ run_step contract "Wave2-C CLI integration semantics" cargo test --locked --test
 
 run_step policy "Baseline/new-violation behavior" cargo test --locked --test mvp_gate_baseline
 run_step contract "Doctor parity fixtures" cargo test --locked --test doctor_parity_fixtures
+run_step contract "TS/JS barrel regression fixtures" cargo test --locked --test tsjs_barrel_fixtures
+run_step contract "TS/JS openclaw-scale regression fixtures" cargo test --locked --test tsjs_openclaw_regression
 
 emit_summary
 

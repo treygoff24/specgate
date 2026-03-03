@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "openclaw/plugin-sdk": ["src/plugin-sdk/index.ts"],
+      "@web/*": ["packages/web/src/*"]
+    }
+  }
+}

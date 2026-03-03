@@ -1,0 +1,5 @@
+{
+  "name": "openclaw-scale-seed",
+  "private": true,
+  "workspaces": ["packages/*", "extensions/*"]
+}
