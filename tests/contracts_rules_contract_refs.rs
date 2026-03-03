@@ -34,12 +34,12 @@ fn spec_with_contracts(
         import_ids: Vec::new(),
         description: None,
         boundaries: Some(Boundaries {
-            path: Some(format!("src/{}/**/*", module)),
+            path: Some(format!("src/{module}/**/*")),
             contracts,
             ..Boundaries::default()
         }),
         constraints: Vec::new(),
-        spec_path: Some(Path::new(module).join(format!("{}.spec.yml", module))),
+        spec_path: Some(Path::new(module).join(format!("{module}.spec.yml"))),
     }
 }
 
@@ -132,8 +132,7 @@ fn cross_module_imports_contract_valid_reference_passes() {
 
     assert!(
         violations.is_empty(),
-        "valid cross-module imports_contract should pass: {:?}",
-        violations
+        "valid cross-module imports_contract should pass: {violations:?}"
     );
 }
 
@@ -340,8 +339,7 @@ fn affected_modules_filter_limits_evaluation() {
 
     assert!(
         violations.is_empty(),
-        "affected_modules filter should limit evaluation: {:?}",
-        violations
+        "affected_modules filter should limit evaluation: {violations:?}"
     );
 
     // Evaluate all modules - should report missing contract for "other"

@@ -320,7 +320,7 @@ fn check_contract_refs(
     if !invalid_refs.is_empty() {
         let ref_details: Vec<String> = invalid_refs
             .iter()
-            .map(|(r, reason)| format!("'{}' ({})", r, reason))
+            .map(|(r, reason)| format!("'{r}' ({reason})"))
             .collect();
 
         return Some(ContractRuleViolation::new(
@@ -337,9 +337,7 @@ fn check_contract_refs(
                 line: None,
                 column: None,
             },
-            format!(
-                "Update imports_contract references to valid 'module:contract_id' pairs, or create the referenced contracts in the target modules"
-            ),
+            "Update imports_contract references to valid 'module:contract_id' pairs, or create the referenced contracts in the target modules".to_string(),
             contract.id.clone(),
         ));
     }
@@ -364,12 +362,12 @@ mod tests {
             import_ids: Vec::new(),
             description: None,
             boundaries: Some(Boundaries {
-                path: Some(format!("src/{}/**/*", module)),
+                path: Some(format!("src/{module}/**/*")),
                 contracts,
                 ..Boundaries::default()
             }),
             constraints: Vec::new(),
-            spec_path: Some(PathBuf::from(format!("{}.spec.yml", module))),
+            spec_path: Some(PathBuf::from(format!("{module}.spec.yml"))),
         }
     }
 

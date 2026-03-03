@@ -186,7 +186,10 @@ fn validate_contracts(spec: &SpecFile, report: &mut ValidationReport, _version: 
         } else if seen_ids.contains(contract.id.as_str()) {
             report.push_error(
                 spec,
-format!("boundary.contract_ref_invalid: duplicate contract id '{}'", contract.id),
+                format!(
+                    "boundary.contract_ref_invalid: duplicate contract id '{}'",
+                    contract.id
+                ),
             );
         } else {
             seen_ids.insert(&contract.id);
@@ -196,7 +199,10 @@ format!("boundary.contract_ref_invalid: duplicate contract id '{}'", contract.id
         if contract.contract.trim().is_empty() {
             report.push_error(
                 spec,
-format!("boundary.contract_missing: contract '{}' has empty contract path", contract.id),
+                format!(
+                    "boundary.contract_missing: contract '{}' has empty contract path",
+                    contract.id
+                ),
             );
         } else {
             // Validate contract file extension
@@ -257,10 +263,7 @@ format!("boundary.contract_missing: contract '{}' has empty contract path", cont
         // Validate imports_contract format
         for import_ref in &contract.imports_contract {
             if let Err(msg) = validate_imports_contract_format(import_ref) {
-                report.push_error(
-                    spec,
-                    format!("boundary.contract_ref_invalid: {msg}"),
-                );
+                report.push_error(spec, format!("boundary.contract_ref_invalid: {msg}"));
             }
         }
     }
@@ -596,8 +599,11 @@ mod tests {
 
         let report = validate_specs(&[spec]);
         assert!(
-            !report.has_errors(),
-            "contracts in 2.3 spec should be valid"
+            !report
+                .errors()
+                .iter()
+                .any(|issue| issue.message.contains("invalid extension")),
+            "extension .json should be valid"
         );
     }
 
@@ -741,7 +747,10 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert!(report.has_errors(), "invalid contract extension should be error");
+        assert!(
+            report.has_errors(),
+            "invalid contract extension should be error"
+        );
         assert!(
             report.errors().iter().any(|issue| {
                 issue.message.contains("boundary.contract_ref_invalid")
@@ -754,14 +763,14 @@ mod tests {
     #[test]
     fn valid_contract_extensions_are_accepted() {
         let extensions = vec!["json", "yaml", "yml", "ts", "zod", "proto"];
-        
+
         for ext in extensions {
             let mut spec = base_spec("orders");
             spec.version = "2.3".to_string();
             spec.boundaries = Some(Boundaries {
                 contracts: vec![crate::spec::types::BoundaryContract {
                     id: "test_contract".to_string(),
-                    contract: format!("contracts/test.{}", ext),
+                    contract: format!("contracts/test.{ext}"),
                     direction: crate::spec::types::ContractDirection::Bidirectional,
                     r#match: crate::spec::types::ContractMatch {
                         files: vec!["src/**/*.ts".to_string()],
@@ -775,9 +784,11 @@ mod tests {
 
             let report = validate_specs(&[spec]);
             assert!(
-                !report.errors().iter().any(|issue| issue.message.contains("invalid extension")),
-                "extension .{} should be valid",
-                ext
+                !report
+                    .errors()
+                    .iter()
+                    .any(|issue| issue.message.contains("invalid extension")),
+                "extension .{ext} should be valid"
             );
         }
     }
@@ -863,7 +874,10 @@ mod tests {
 
         let report = validate_specs(&[spec]);
         assert!(
-            !report.errors().iter().any(|issue| issue.message.contains("match_unresolved")),
+            !report
+                .errors()
+                .iter()
+                .any(|issue| issue.message.contains("match_unresolved")),
             "valid glob patterns should not produce match_unresolved error"
         );
     }
@@ -888,7 +902,10 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert!(report.has_errors(), "imports_contract without colon should be error");
+        assert!(
+            report.has_errors(),
+            "imports_contract without colon should be error"
+        );
         assert!(
             report.errors().iter().any(|issue| {
                 issue.message.contains("boundary.contract_ref_invalid")
@@ -918,7 +935,10 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert!(report.has_errors(), "imports_contract with multiple colons should be error");
+        assert!(
+            report.has_errors(),
+            "imports_contract with multiple colons should be error"
+        );
         assert!(
             report.errors().iter().any(|issue| {
                 issue.message.contains("boundary.contract_ref_invalid")
@@ -948,7 +968,10 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert!(report.has_errors(), "imports_contract with empty module should be error");
+        assert!(
+            report.has_errors(),
+            "imports_contract with empty module should be error"
+        );
         assert!(
             report.errors().iter().any(|issue| {
                 issue.message.contains("boundary.contract_ref_invalid")
@@ -978,7 +1001,10 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert!(report.has_errors(), "imports_contract with empty contract id should be error");
+        assert!(
+            report.has_errors(),
+            "imports_contract with empty contract id should be error"
+        );
         assert!(
             report.errors().iter().any(|issue| {
                 issue.message.contains("boundary.contract_ref_invalid")
@@ -1012,7 +1038,10 @@ mod tests {
 
         let report = validate_specs(&[spec]);
         assert!(
-            !report.errors().iter().any(|issue| issue.message.contains("contract_ref_invalid")),
+            !report
+                .errors()
+                .iter()
+                .any(|issue| issue.message.contains("contract_ref_invalid")),
             "valid imports_contract format should not produce error"
         );
     }
