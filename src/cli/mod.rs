@@ -2762,6 +2762,10 @@ fn analyze_project(
                 to_module: violation.to_module,
                 line: violation.line,
                 column: violation.column,
+                expected: None,
+                actual: None,
+                remediation_hint: None,
+                contract_id: None,
             }
         })
         .collect::<Vec<_>>();
@@ -2784,6 +2788,10 @@ fn analyze_project(
                 to_module: violation.to_module,
                 line: violation.line,
                 column: violation.column,
+                expected: None,
+                actual: None,
+                remediation_hint: None,
+                contract_id: None,
             }
         })
         .collect::<Vec<_>>();
@@ -2808,6 +2816,10 @@ fn analyze_project(
                 to_module: None,
                 line: None,
                 column: None,
+                expected: None,
+                actual: None,
+                remediation_hint: None,
+                contract_id: None,
             }
         })
         .collect::<Vec<_>>();
@@ -2827,6 +2839,10 @@ fn analyze_project(
             to_module: Some(violation.to_module),
             line: None,
             column: None,
+            expected: None,
+            actual: None,
+            remediation_hint: Some(violation.fix_hint),
+            contract_id: None,
         })
         .collect::<Vec<_>>();
     policy_violations.extend(layer_violations);
@@ -2844,6 +2860,10 @@ fn analyze_project(
             to_module: contract_violation.violation.to_module,
             line: contract_violation.violation.line,
             column: contract_violation.violation.column,
+            expected: None,
+            actual: None,
+            remediation_hint: Some(contract_violation.remediation_hint),
+            contract_id: Some(contract_violation.contract_id),
         })
         .collect::<Vec<_>>();
     policy_violations.extend(contract_violations);

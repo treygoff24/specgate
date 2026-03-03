@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::deterministic::normalize_repo_relative;
-use crate::spec::Severity;
 use crate::spec::config::StaleBaselinePolicy;
+use crate::spec::Severity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyViolation {
@@ -22,6 +22,14 @@ pub struct PolicyViolation {
     pub to_module: Option<String>,
     pub line: Option<u32>,
     pub column: Option<u32>,
+    /// Expected value for structured diagnostics (e.g., allowed import patterns).
+    pub expected: Option<String>,
+    /// Actual value that violated the policy (e.g., the actual import found).
+    pub actual: Option<String>,
+    /// Human-readable hint on how to fix the violation.
+    pub remediation_hint: Option<String>,
+    /// Contract ID for contract-related violations.
+    pub contract_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +82,18 @@ pub struct VerdictViolation {
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Expected value for structured diagnostics (e.g., allowed import patterns).
+    pub expected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Actual value that violated the policy (e.g., the actual import found).
+    pub actual: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Human-readable hint on how to fix the violation.
+    pub remediation_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Contract ID for contract-related violations.
+    pub contract_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -330,6 +350,10 @@ fn render_violation(project_root: &Path, entry: &FingerprintedViolation) -> Verd
         to_module: entry.violation.to_module.clone(),
         line: entry.violation.line,
         column: entry.violation.column,
+        expected: entry.violation.expected.clone(),
+        actual: entry.violation.actual.clone(),
+        remediation_hint: entry.violation.remediation_hint.clone(),
+        contract_id: entry.violation.contract_id.clone(),
     }
 }
 
@@ -403,6 +427,10 @@ mod tests {
             to_module: Some("core".to_string()),
             line: Some(1),
             column: Some(0),
+            expected: None,
+            actual: None,
+            remediation_hint: None,
+            contract_id: None,
         }
     }
 

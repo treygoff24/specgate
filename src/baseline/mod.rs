@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
 use crate::verdict::{
-    FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
+    sort_policy_violations, FingerprintedViolation, PolicyViolation, ViolationDisposition,
 };
 
 pub const BASELINE_FILE_VERSION: &str = "1";
@@ -642,6 +642,10 @@ mod tests {
             to_module: Some("provider".to_string()),
             line: Some(1),
             column: Some(0),
+            expected: None,
+            actual: None,
+            remediation_hint: None,
+            contract_id: None,
         }
     }
 
