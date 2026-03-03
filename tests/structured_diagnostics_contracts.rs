@@ -80,15 +80,13 @@ boundaries:
         // Contract violations MUST have remediation_hint
         assert!(
             v.get("remediation_hint").is_some() && !v["remediation_hint"].is_null(),
-            "contract violation should have remediation_hint: {:#}",
-            v
+            "contract violation should have remediation_hint: {v:#}"
         );
 
         // Contract violations MUST have contract_id
         assert!(
             v.get("contract_id").is_some() && !v["contract_id"].is_null(),
-            "contract violation should have contract_id: {:#}",
-            v
+            "contract violation should have contract_id: {v:#}"
         );
     }
 }
@@ -161,14 +159,12 @@ boundaries:
     for v in &contract_violations {
         assert!(
             v.get("remediation_hint").is_some() && !v["remediation_hint"].is_null(),
-            "match_unresolved violation should have remediation_hint: {:#}",
-            v
+            "match_unresolved violation should have remediation_hint: {v:#}"
         );
 
         assert!(
             v.get("contract_id").is_some() && !v["contract_id"].is_null(),
-            "match_unresolved violation should have contract_id: {:#}",
-            v
+            "match_unresolved violation should have contract_id: {v:#}"
         );
     }
 }
@@ -258,16 +254,14 @@ layers:
         // Layer violations SHOULD have remediation_hint
         assert!(
             v.get("remediation_hint").is_some() && !v["remediation_hint"].is_null(),
-            "layer violation should have remediation_hint: {:#}",
-            v
+            "layer violation should have remediation_hint: {v:#}"
         );
 
         // Layer violations should NOT have contract_id (or it should be null)
         let contract_id = v.get("contract_id");
         assert!(
             contract_id.is_none() || contract_id.unwrap().is_null(),
-            "layer violation should NOT have contract_id: {:#}",
-            v
+            "layer violation should NOT have contract_id: {v:#}"
         );
     }
 }
@@ -332,8 +326,7 @@ export function handler() {}
         let contract_id = v.get("contract_id");
         assert!(
             contract_id.is_none() || contract_id.unwrap().is_null(),
-            "canonical_import violation should NOT have contract_id: {:#}",
-            v
+            "canonical_import violation should NOT have contract_id: {v:#}"
         );
     }
 }
@@ -413,8 +406,7 @@ module: b
             let contract_id = v.get("contract_id");
             assert!(
                 contract_id.is_none() || contract_id.unwrap().is_null(),
-                "circular-deps violation should NOT have contract_id: {:#}",
-                v
+                "circular-deps violation should NOT have contract_id: {v:#}"
             );
         }
     }
@@ -451,7 +443,7 @@ rules:
 version: "2.3"
 module: api
 boundaries:
-  path: src/api/**
+  path: src/api**
   contracts:
     - id: missing_contract
       contract: contracts/missing.json
@@ -529,37 +521,29 @@ boundaries:
             // Contract violations: MUST have both remediation_hint and contract_id
             assert!(
                 v.get("remediation_hint").is_some() && !v["remediation_hint"].is_null(),
-                "Contract violation {} should have remediation_hint: {:#}",
-                rule,
-                v
+                "Contract violation {rule} should have remediation_hint: {v:#}"
             );
             assert!(
                 v.get("contract_id").is_some() && !v["contract_id"].is_null(),
-                "Contract violation {} should have contract_id: {:#}",
-                rule,
-                v
+                "Contract violation {rule} should have contract_id: {v:#}"
             );
         } else if rule == "enforce-layer" {
             // Layer violations: MUST have remediation_hint, MUST NOT have contract_id
             assert!(
                 v.get("remediation_hint").is_some() && !v["remediation_hint"].is_null(),
-                "Layer violation should have remediation_hint: {:#}",
-                v
+                "Layer violation should have remediation_hint: {v:#}"
             );
             let contract_id = v.get("contract_id");
             assert!(
                 contract_id.is_none() || contract_id.unwrap().is_null(),
-                "Layer violation should NOT have contract_id: {:#}",
-                v
+                "Layer violation should NOT have contract_id: {v:#}"
             );
         } else {
             // Non-contract, non-layer violations: MUST NOT have contract_id
             let contract_id = v.get("contract_id");
             assert!(
                 contract_id.is_none() || contract_id.unwrap().is_null(),
-                "Non-contract violation {} should NOT have contract_id: {:#}",
-                rule,
-                v
+                "Non-contract violation {rule} should NOT have contract_id: {v:#}"
             );
         }
     }
