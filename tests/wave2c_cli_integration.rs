@@ -57,6 +57,15 @@ fn write_project_with_edge(root: &Path) {
     );
 }
 
+fn write_project_with_custom_import(root: &Path, import_specifier: &str) {
+    write_project(root);
+    write_file(
+        root,
+        "src/app/main.ts",
+        &format!("import {{ core }} from '{import_specifier}';\nexport const app = core;\n"),
+    );
+}
+
 #[test]
 fn check_with_metrics_includes_timing_metadata() {
     let temp = TempDir::new().expect("tempdir");
@@ -467,6 +476,138 @@ fn doctor_compare_focus_mismatch_includes_actionable_hint() {
     assert!(result.stdout.contains("\"parity_verdict\": \"DIFF\""));
     assert!(result.stdout.contains("\"actionable_mismatch_hint\""));
     assert!(result.stdout.contains("tsconfig"));
+}
+
+#[test]
+fn doctor_compare_focus_mismatch_categorizes_paths_aliases() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_custom_import(temp.path(), "@core/index");
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/core/*"]
+    }
+  }
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.json",
+        "[{\"from\":\"src/app/main.ts\",\"to\":\"src/core/alias-mismatch.ts\"}]\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.json").to_str().expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "@core/index",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    assert!(result.stdout.contains("\"mismatch_category\": \"paths\""));
+}
+
+#[test]
+fn doctor_compare_focus_mismatch_categorizes_exports_resolution() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_custom_import(temp.path(), "left-pad");
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "left-pad": ["src/core/index.ts"]
+    }
+  }
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.json",
+        "[{\"from\":\"src/app/main.ts\",\"to\":\"src/core/alias-mismatch.ts\"}]\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.json").to_str().expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "left-pad",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    assert!(result.stdout.contains("\"mismatch_category\": \"exports\""));
+}
+
+#[test]
+fn doctor_compare_focus_mismatch_categorizes_condition_names() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_custom_import(temp.path(), "typed-package");
+    write_file(
+        temp.path(),
+        "src/core/index.d.ts",
+        "export declare const typed: number;\n",
+    );
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "typed-package": ["src/core/index.d.ts"]
+    }
+  }
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.json",
+        "[{\"from\":\"src/app/main.ts\",\"to\":\"src/core/alt-types.d.ts\"}]\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.json").to_str().expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "typed-package",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    assert!(
+        result
+            .stdout
+            .contains("\"mismatch_category\": \"condition_names\"")
+    );
 }
 
 #[test]
