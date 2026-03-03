@@ -1,115 +1,52 @@
 # Releasing Specgate
 
-## Scope
+This document defines how to cut a Specgate release candidate and final release.
 
-This document defines the release mechanics for Specgate now that MVP is
-complete, including dogfood-first cadence toward broader adoption.
+## Versioning
 
-## Version and artifacts
+Specgate uses [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
-- Current tracked version in `Cargo.toml`: `0.1.0`.
-- Versionable artifact set:
-  - `CHANGELOG.md`
-  - `RELEASE_NOTES.md`
-  - `LICENSE`
-  - `RELEASING.md`
-  - `docs/BASELINE_POLICY.md`
-  - `docs/DOGFOOD_ROLLOUT_CHECKLIST.md`
-  - `docs/DOGFOOD_SUCCESS_METRICS.md`
-  - `docs/DOGFOOD_RELEASE_CHANNEL.md`
-  - `docs/examples/specgate-consumer-github-actions.yml`
+- **MAJOR**: breaking user-facing changes (CLI contracts, spec compatibility, output contracts).
+- **MINOR**: backward-compatible feature additions.
+- **PATCH**: backward-compatible fixes and documentation-only corrections.
 
-## Release prerequisites (post-MVP, dogfood channel default)
+Current planned release line for Boundary Contracts V2 is `0.2.0`.
 
-Before cutting a release:
+## Release checklist
 
-1. Clean workspace and run the canonical gate script:
-   - `bash scripts/release/preflight.sh`
-2. Confirm docs links resolve and the canonical docs references are current.
-3. Confirm `LICENSE` matches the SPDX declaration (`MIT` in `Cargo.toml`).
-4. Confirm no unresolved placeholders remain in touched docs.
+1. Ensure working tree is clean and on the intended release branch/tag commit.
+2. Run the full merge/release gate:
+   - `./scripts/ci/mvp_gate.sh`
+3. Confirm changelog is updated for the release:
+   - `CHANGELOG.md`
+4. Build release binaries using the reproducible command:
+   - `cargo build --release --locked`
+5. Run smoke check on built binary:
+   - `./target/release/specgate --version`
+6. Generate checksums for distributable artifacts:
+   - `shasum -a 256 ./target/release/specgate`
+7. Create annotated tag for the release (for example `v0.2.0-rc1`):
+   - `git tag -a v0.2.0-rc1 -m "Specgate v0.2.0-rc1"`
+8. Push branch + tag and publish release artifacts/notes in CI.
 
-The preflight script wraps the baseline command checks (formatted for brevity):
+## Reproducibility
+
+Always use a locked dependency graph when producing release artifacts:
 
 ```bash
-bash scripts/release/preflight.sh
+cargo build --release --locked
 ```
 
-## Release note requirements
+This ensures Cargo.lock-resolved dependencies are used exactly as tested in CI.
 
-- Update `CHANGELOG.md` under `[Unreleased]` and add/refresh the next release
-  section.
-- Update `RELEASE_NOTES.md` with scope, known limitations, and rollout
-  expectations.
-- Tag a release commit only after merge-gate pass and baseline update.
+## Checksums
 
-## Tagging and communication
+For each produced release artifact, publish a SHA-256 checksum file or value.
 
-1. Merge all merge-gate required changes.
-2. Create a signed tag (for example `v0.1.0-rc3`).
-3. Publish release artifacts in CI/release pipeline.
-4. Run `.github/workflows/release-asset-verify.yml` for the release tag and confirm a pass.
-5. Publish release notes and announce the selected release channel.
+Example for local binary verification:
 
-## Release asset verification workflow
+```bash
+shasum -a 256 ./target/release/specgate
+```
 
-- File: `.github/workflows/release-asset-verify.yml`
-- Purpose: verify release artifacts are complete and executable before rollout.
-- Triggers:
-  - release pipeline publishes the tag artifacts
-  - optional manual re-run on a release tag when a fresh re-check is needed
-- Behavior:
-  - validates every published checksum file against its artifact tarball
-  - downloads each target artifact and runs `specgate --version` smoke checks
-
-
-## Release-binaries workflow
-
-- File: `.github/workflows/release-binaries.yml`
-- Triggers
-  - `push` on tags matching `v*`
-  - `workflow_dispatch` with required input `tag` (for example `v1.2.3`)
-- Behavior
-  - Checkout at the tag and run `scripts/ci/mvp_gate.sh`.
-  - Validate tag format and that `v$(cat Cargo.toml version)` matches the tag base.
-  - Build and package artifacts for:
-    - `x86_64-unknown-linux-gnu`
-    - `x86_64-apple-darwin`
-    - `aarch64-apple-darwin`
-  - For each target publish:
-    - `specgate-$TAG-<target>.tar.gz`
-    - `specgate-$TAG-<target>.tar.gz.sha256`
-
-## Rollout policy (minimum)
-
-- Use `dogfood` channel by default until explicit stability threshold is met.
-- Promote to broader consumer use only after the dogfood checklist and
-  success metrics are met for two consecutive release windows.
-
-## Post-release verification
-
-1. Confirm all expected assets are present in the release:
-   - `specgate-vX.Y.Z-*-unknown-linux-gnu.tar.gz`
-   - `specgate-vX.Y.Z-*-apple-darwin.tar.gz`
-   - `specgate-vX.Y.Z-*.tar.gz.sha256`
-2. Confirm `release-asset-verify` passed for checksum + smoke signals:
-   - checksum validation succeeds for all `.sha256` files
-   - `specgate --version` succeeds for each downloaded target
-3. (Optional) spot-check checksums:
-
-   ```bash
-   sha256sum -c specgate-v0.1.0-rc3-aarch64-apple-darwin.tar.gz.sha256
-   ```
-
-4. (Optional) download a Linux or macOS artifact, unpack, and run:
-
-   ```bash
-   tar -xzf specgate-v0.1.0-rc3-aarch64-apple-darwin.tar.gz
-   ./specgate --version
-   ```
-
-## Contacts and ownership
-
-- Docs and process: repository maintainers.
-- Gate quality signals: implementation owners.
-- Baseline hygiene: designated operator team.
+Store checksum outputs alongside release artifacts so consumers can verify integrity before execution.
