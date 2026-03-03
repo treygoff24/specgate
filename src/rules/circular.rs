@@ -379,10 +379,8 @@ mod tests {
 
         let violations = evaluate_no_circular_deps(&specs, &graph);
         assert_eq!(violations.len(), 2);
-        assert!(
-            violations
-                .iter()
-                .all(|violation| violation.module == "gamma")
-        );
+        assert!(violations
+            .iter()
+            .all(|violation| violation.module == "gamma"));
     }
 }
