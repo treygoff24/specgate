@@ -13,11 +13,39 @@
 //! - `--diff`: Deprecated alias for `--baseline-diff`
 //! - `--diff-new-only`: Deprecated alias for `--baseline-new-only`
 
+use std::io::{stdout, IsTerminal};
 use std::path::PathBuf;
 
 use clap::Args;
 
 use crate::baseline::DEFAULT_BASELINE_PATH;
+
+/// Output format for the check command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum OutputFormat {
+    /// Human-readable format with icons and summary.
+    Human,
+    /// Single JSON object with all violations.
+    Json,
+    /// Newline-delimited JSON (one violation per line).
+    Ndjson,
+}
+
+impl OutputFormat {
+    /// Returns the effective output format.
+    /// If a format is explicitly specified, use it.
+    /// Otherwise, defaults to human if stdout is a TTY, json otherwise.
+    pub fn effective_format(explicit: Option<Self>) -> Self {
+        explicit.unwrap_or_else(|| {
+            if stdout().is_terminal() {
+                Self::Human
+            } else {
+                Self::Json
+            }
+        })
+    }
+}
 
 /// Check command arguments with diff mode support.
 #[derive(Debug, Clone, Args)]
@@ -43,6 +71,12 @@ pub struct CheckArgs {
     /// Force telemetry disabled for this run.
     #[arg(long, conflicts_with = "telemetry")]
     pub no_telemetry: bool,
+
+    // Output format
+    /// Output format (`human`, `json`, or `ndjson`).
+    /// Defaults to `human` if stdout is a TTY, `json` otherwise.
+    #[arg(long, value_enum)]
+    pub format: Option<OutputFormat>,
 
     // Baseline diff mode (preferred naming)
     /// Output diff between current and baseline violations.
@@ -140,6 +174,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -162,6 +197,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: true,
             baseline_new_only: false,
             since: None,
@@ -183,6 +219,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: true,
             baseline_new_only: true,
             since: None,
@@ -203,6 +240,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -227,6 +265,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
@@ -251,6 +290,7 @@ mod tests {
             no_baseline: false,
             telemetry: false,
             no_telemetry: false,
+            format: None,
             baseline_diff: false,
             baseline_new_only: false,
             since: Some("HEAD~1".to_string()),
@@ -259,5 +299,33 @@ mod tests {
         };
 
         assert_eq!(args.since, Some("HEAD~1".to_string()));
+    }
+
+    #[test]
+    fn output_format_effective_format_uses_explicit_when_provided() {
+        assert_eq!(
+            OutputFormat::effective_format(Some(OutputFormat::Human)),
+            OutputFormat::Human
+        );
+        assert_eq!(
+            OutputFormat::effective_format(Some(OutputFormat::Json)),
+            OutputFormat::Json
+        );
+        assert_eq!(
+            OutputFormat::effective_format(Some(OutputFormat::Ndjson)),
+            OutputFormat::Ndjson
+        );
+    }
+
+    #[test]
+    fn output_format_enum_values_match_clap() {
+        // Verify the enum values are lowercase as expected by clap
+        let human: OutputFormat = clap::ValueEnum::from_str("human", true).unwrap();
+        let json: OutputFormat = clap::ValueEnum::from_str("json", true).unwrap();
+        let ndjson: OutputFormat = clap::ValueEnum::from_str("ndjson", true).unwrap();
+
+        assert_eq!(human, OutputFormat::Human);
+        assert_eq!(json, OutputFormat::Json);
+        assert_eq!(ndjson, OutputFormat::Ndjson);
     }
 }

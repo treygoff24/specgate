@@ -5,7 +5,9 @@ use serde::Serialize;
 use crate::deterministic::normalize_repo_relative;
 use crate::spec::Severity;
 
-use super::{FingerprintedViolation, Verdict, VerdictDisposition, VerdictViolation, ViolationDisposition};
+use super::{
+    FingerprintedViolation, Verdict, VerdictDisposition, VerdictViolation, ViolationDisposition,
+};
 
 /// Render a violation for human-readable output.
 pub fn format_violation_human(project_root: &Path, entry: &FingerprintedViolation) -> String {
@@ -272,18 +274,27 @@ fn format_summary_human(verdict: &Verdict) -> String {
     }
 
     if summary.baseline_violations > 0 {
-        lines.push(format!("  Baseline violations: {}", summary.baseline_violations));
+        lines.push(format!(
+            "  Baseline violations: {}",
+            summary.baseline_violations
+        ));
     }
 
     if summary.suppressed_violations > 0 {
-        lines.push(format!("  Suppressed violations: {}", summary.suppressed_violations));
+        lines.push(format!(
+            "  Suppressed violations: {}",
+            summary.suppressed_violations
+        ));
     }
 
     lines.push(format!("  Errors: {}", summary.error_violations));
     lines.push(format!("  Warnings: {}", summary.warning_violations));
 
     if summary.stale_baseline_entries > 0 {
-        lines.push(format!("  Stale baseline entries: {}", summary.stale_baseline_entries));
+        lines.push(format!(
+            "  Stale baseline entries: {}",
+            summary.stale_baseline_entries
+        ));
     }
 
     lines.push(String::new());
@@ -373,6 +384,7 @@ mod tests {
 
     fn empty_verdict() -> Verdict {
         Verdict {
+            verdict_schema: "1".to_string(),
             schema_version: "2.2".to_string(),
             tool_version: "0.1.0".to_string(),
             git_sha: "abc123".to_string(),
@@ -413,6 +425,7 @@ mod tests {
             .count();
 
         Verdict {
+            verdict_schema: "1".to_string(),
             schema_version: "2.2".to_string(),
             tool_version: "0.1.0".to_string(),
             git_sha: "abc123".to_string(),
@@ -422,7 +435,11 @@ mod tests {
             spec_files_changed: vec![],
             rule_deltas: vec![],
             policy_change_detected: false,
-            status: if error_count > 0 { VerdictStatus::Fail } else { VerdictStatus::Pass },
+            status: if error_count > 0 {
+                VerdictStatus::Fail
+            } else {
+                VerdictStatus::Pass
+            },
             summary: VerdictSummary {
                 total_violations: total,
                 new_violations: new_count,
@@ -532,15 +549,13 @@ mod tests {
 
     #[test]
     fn format_verdict_human_shows_violations() {
-        let violations = vec![
-            test_verdict_violation(
-                "boundary.never_imports",
-                Severity::Error,
-                "src/app/main.ts",
-                VerdictDisposition::New,
-                "Import not allowed",
-            ),
-        ];
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Error,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import not allowed",
+        )];
         let verdict = verdict_with_violations(violations);
         let output = format_verdict_human(&verdict);
 
