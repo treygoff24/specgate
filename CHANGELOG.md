@@ -27,6 +27,28 @@ All notable changes to Specgate are documented in this file.
 - Added multi-format outputs (`human`, `json`, `ndjson`) and TTY-aware default format behavior.
 - Decoupled verdict schema versioning from spec schema version with `verdict_schema` in verdict output.
 
+### TS/JS Ecosystem
+
+- Added nearest-tsconfig context per file for accurate resolver configuration.
+- Added NodeNext extension alias resolution (.js → .ts/.tsx).
+- Expanded resolver condition names (node, types) for broader package compatibility.
+- Added workspace package discovery (pnpm + npm workspaces).
+- Added import attributes parser parity with OXC.
+- Added type-only import policy toggle (`enforce_type_only_imports` config).
+- Validated barrel/re-export robustness across resolver paths.
+- Added OpenClaw-scale regression test suite for real-world project coverage.
+- Added doctor compare structured snapshot round-trip with mismatch categories.
+- Hardened npm wrapper (signal handling, case-normalized cache, peer dependency checks, path traversal validation).
+- Added comprehensive npm wrapper test suite (53 tests).
+
+### Code Quality
+
+- Refactored `AnonymizedTelemetrySummary` to eliminate field duplication.
+- Extracted doctor command handlers into separate module (`src/cli/doctor.rs`).
+- Isolated telemetry tests for independence from shared state.
+- Consolidated perf budget defaults to single source of truth.
+- Added comprehensive test coverage for diff+stale, telemetry schema, and snapshot round-trips.
+
 ### Dogfood/Operations
 
 - Added `specgate doctor compare` for resolver parity/debug comparison workflows.

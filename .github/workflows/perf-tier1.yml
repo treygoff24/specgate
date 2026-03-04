@@ -15,7 +15,8 @@ jobs:
   perf-budget:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Optional repo-level overrides. If unset/empty, perf_budget.sh applies defaults.
+    # Defaults are authoritative in perf_budget.sh.
+    # Set repo-level variables (Settings > Variables) to override.
     env:
       SPECGATE_PERF_MODULES: ${{ vars.SPECGATE_PERF_MODULES }}
       SPECGATE_PERF_FILES_PER_MODULE: ${{ vars.SPECGATE_PERF_FILES_PER_MODULE }}

@@ -272,16 +272,19 @@ fn format_summary_human(verdict: &Verdict) -> String {
     let mut lines = vec!["Summary:".to_string()];
 
     let summary = &verdict.summary;
-    lines.push(format!("  Total violations: {}", summary.total_violations));
+    lines.push(format!(
+        "  Total violations: {}",
+        summary.core.total_violations
+    ));
 
-    if summary.new_violations > 0 {
-        lines.push(format!("  New violations: {}", summary.new_violations));
+    if summary.core.new_violations > 0 {
+        lines.push(format!("  New violations: {}", summary.core.new_violations));
     }
 
-    if summary.baseline_violations > 0 {
+    if summary.core.baseline_violations > 0 {
         lines.push(format!(
             "  Baseline violations: {}",
-            summary.baseline_violations
+            summary.core.baseline_violations
         ));
     }
 
@@ -295,10 +298,10 @@ fn format_summary_human(verdict: &Verdict) -> String {
     lines.push(format!("  Errors: {}", summary.error_violations));
     lines.push(format!("  Warnings: {}", summary.warning_violations));
 
-    if summary.stale_baseline_entries > 0 {
+    if summary.core.stale_baseline_entries > 0 {
         lines.push(format!(
             "  Stale baseline entries: {}",
-            summary.stale_baseline_entries
+            summary.core.stale_baseline_entries
         ));
     }
 
@@ -344,7 +347,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
-    use crate::verdict::{PolicyViolation, VERDICT_SCHEMA_VERSION, VerdictStatus, VerdictSummary};
+    use crate::verdict::{
+        AnonymizedTelemetrySummary, PolicyViolation, VERDICT_SCHEMA_VERSION, VerdictStatus,
+        VerdictSummary,
+    };
 
     fn test_violation(rule: &str, severity: Severity, from_file: &str) -> PolicyViolation {
         PolicyViolation {
@@ -417,15 +423,17 @@ mod tests {
             policy_change_detected: false,
             status: VerdictStatus::Pass,
             summary: VerdictSummary {
-                total_violations: 0,
-                new_violations: 0,
-                baseline_violations: 0,
+                core: AnonymizedTelemetrySummary {
+                    total_violations: 0,
+                    new_violations: 0,
+                    baseline_violations: 0,
+                    new_error_violations: 0,
+                    new_warning_violations: 0,
+                    stale_baseline_entries: 0,
+                },
                 suppressed_violations: 0,
                 error_violations: 0,
                 warning_violations: 0,
-                new_error_violations: 0,
-                new_warning_violations: 0,
-                stale_baseline_entries: 0,
             },
             violations: vec![],
             metrics: None,
@@ -462,15 +470,17 @@ mod tests {
                 VerdictStatus::Pass
             },
             summary: VerdictSummary {
-                total_violations: total,
-                new_violations: new_count,
-                baseline_violations: total - new_count,
+                core: AnonymizedTelemetrySummary {
+                    total_violations: total,
+                    new_violations: new_count,
+                    baseline_violations: total - new_count,
+                    new_error_violations: new_count,
+                    new_warning_violations: 0,
+                    stale_baseline_entries: 0,
+                },
                 suppressed_violations: 0,
                 error_violations: error_count,
                 warning_violations: total - error_count,
-                new_error_violations: new_count,
-                new_warning_violations: 0,
-                stale_baseline_entries: 0,
             },
             violations,
             metrics: None,

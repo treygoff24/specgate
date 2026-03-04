@@ -123,7 +123,7 @@ struct BaselineArgs {
     /// Output baseline path.
     #[arg(long, default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
-    /// Rebuild baseline from current violations (prunes stale entries, re-sorts and dedupes).
+    /// Rebuild baseline from current violations (prunes stale entries, re-sorts, dedupes, and resets generated_from metadata to current tool version and git SHA).
     #[arg(long)]
     refresh: bool,
 }

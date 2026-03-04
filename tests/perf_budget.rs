@@ -108,6 +108,34 @@ fn tier1_perf_budget_check_mode() {
     );
 }
 
+/// Verifies that an impossibly low perf budget correctly triggers the
+/// budget-exceeded assertion. Uses a 1ms budget which no real run can meet.
+#[test]
+#[should_panic(expected = "perf budget exceeded")]
+fn tier1_perf_budget_exceeded() {
+    let temp = TempDir::new().expect("tempdir");
+    build_tier1_perf_fixture(temp.path(), 10, 2);
+
+    let budget_ms: u128 = 1;
+    let start = Instant::now();
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_PASS,
+        "specgate check should pass"
+    );
+    assert!(
+        elapsed_ms <= budget_ms,
+        "perf budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms"
+    );
+}
+
 /// Exercises the policy evaluation path (violations present) to ensure perf holds
 /// even when specgate must evaluate constraints and classify violations.
 #[test]

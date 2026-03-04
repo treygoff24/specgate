@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Tier-1 synthetic performance gate for `specgate check`.
-# Defaults are intentionally conservative and can be tuned in CI.
-# NOTE: These defaults should be kept in sync with repo variables in the CI workflow.
+# Defaults are authoritative here; the CI workflow defers to these values.
+# Override via repo-level variables (Settings > Variables) or env vars.
 : "${SPECGATE_PERF_MODULES:=120}"
 : "${SPECGATE_PERF_FILES_PER_MODULE:=4}"
 : "${SPECGATE_PERF_BUDGET_MS:=7000}"

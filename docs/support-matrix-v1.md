@@ -36,7 +36,9 @@ Promote a beta line to stable only after all of the following are green for the 
 - binary artifact verification, and
 - npm wrapper publish + dist-tag verification.
 
-## Automation Alignment
+## Tag and Automation Mapping
 
-- `.github/workflows/release-binaries.yml` publishes multi-platform binaries and marks prerelease tags as beta releases.
-- `.github/workflows/release-npm-wrapper.yml` publishes the npm wrapper and verifies `latest` (stable) or `beta` dist-tag alignment.
+| Tag Shape | Channel | GitHub Release Type | Binary Workflow | npm Wrapper Workflow |
+| --- | --- | --- | --- | --- |
+| `vX.Y.Z` | stable | non-prerelease | `.github/workflows/release-binaries.yml` publishes binaries and checksum assets | `.github/workflows/release-npm-wrapper.yml` publishes wrapper to `latest` and verifies dist-tag |
+| `vX.Y.Z-beta.N` (or any semver prerelease) | beta | prerelease | `.github/workflows/release-binaries.yml` publishes binaries and marks release as prerelease | `.github/workflows/release-npm-wrapper.yml` skips npm publish for prereleases (binary-only distribution) |

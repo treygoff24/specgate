@@ -57,15 +57,11 @@ pub enum VerdictStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VerdictSummary {
-    pub total_violations: usize,
-    pub new_violations: usize,
-    pub baseline_violations: usize,
+    #[serde(flatten)]
+    pub core: AnonymizedTelemetrySummary,
     pub suppressed_violations: usize,
     pub error_violations: usize,
     pub warning_violations: usize,
-    pub new_error_violations: usize,
-    pub new_warning_violations: usize,
-    pub stale_baseline_entries: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -135,14 +131,7 @@ pub struct AnonymizedTelemetrySummary {
 
 impl From<VerdictSummary> for AnonymizedTelemetrySummary {
     fn from(summary: VerdictSummary) -> Self {
-        Self {
-            total_violations: summary.total_violations,
-            new_violations: summary.new_violations,
-            baseline_violations: summary.baseline_violations,
-            new_error_violations: summary.new_error_violations,
-            new_warning_violations: summary.new_warning_violations,
-            stale_baseline_entries: summary.stale_baseline_entries,
-        }
+        summary.core
     }
 }
 
@@ -278,8 +267,8 @@ pub fn build_verdict_with_options(
         governance.stale_baseline_entries,
     );
     let fail_on_stale = options.stale_baseline_policy == StaleBaselinePolicy::Fail
-        && summary.stale_baseline_entries > 0;
-    let status = if summary.new_error_violations > 0 || fail_on_stale {
+        && summary.core.stale_baseline_entries > 0;
+    let status = if summary.core.new_error_violations > 0 || fail_on_stale {
         VerdictStatus::Fail
     } else {
         VerdictStatus::Pass
@@ -287,7 +276,7 @@ pub fn build_verdict_with_options(
 
     // Always emit governance when stale entries exist so consumers can distinguish
     // "warn policy with stale entries" from "not evaluated / no stale entries".
-    let governance_payload = if summary.stale_baseline_entries > 0 {
+    let governance_payload = if summary.core.stale_baseline_entries > 0 {
         Some(VerdictGovernance {
             stale_baseline_policy: options.stale_baseline_policy,
         })
@@ -397,15 +386,17 @@ fn summarize(
     let new_warning_violations = new_violations.saturating_sub(new_error_violations);
 
     VerdictSummary {
-        total_violations,
-        new_violations,
-        baseline_violations,
+        core: AnonymizedTelemetrySummary {
+            total_violations,
+            new_violations,
+            baseline_violations,
+            new_error_violations,
+            new_warning_violations,
+            stale_baseline_entries,
+        },
         suppressed_violations,
         error_violations,
         warning_violations,
-        new_error_violations,
-        new_warning_violations,
-        stale_baseline_entries,
     }
 }
 
@@ -469,7 +460,7 @@ mod tests {
 
         let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
         assert_eq!(verdict.status, VerdictStatus::Pass);
-        assert_eq!(verdict.summary.new_warning_violations, 1);
+        assert_eq!(verdict.summary.core.new_warning_violations, 1);
 
         let mut entries_with_error = entries;
         entries_with_error.push(FingerprintedViolation {
@@ -486,7 +477,7 @@ mod tests {
             identity("deterministic"),
         );
         assert_eq!(failing.status, VerdictStatus::Fail);
-        assert_eq!(failing.summary.new_error_violations, 1);
+        assert_eq!(failing.summary.core.new_error_violations, 1);
     }
 
     #[test]
@@ -565,7 +556,7 @@ mod tests {
             },
         );
 
-        assert_eq!(verdict.summary.stale_baseline_entries, 5);
+        assert_eq!(verdict.summary.core.stale_baseline_entries, 5);
         let rendered = serde_json::to_string(&verdict).expect("serialize");
         assert!(rendered.contains("\"stale_baseline_entries\":5"));
     }

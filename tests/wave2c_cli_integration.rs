@@ -94,95 +94,131 @@ fn check_with_metrics_includes_timing_metadata() {
     assert_eq!(parsed["policy_change_detected"], Value::Bool(false));
 }
 
+/// Validate all expected fields in a telemetry JSON object.
+fn assert_telemetry_schema(telemetry: &Value) {
+    // event field
+    assert_eq!(
+        telemetry["event"], "check_completed",
+        "telemetry event must be 'check_completed'"
+    );
+
+    // schema_version field — must be a string "1"
+    assert_eq!(
+        telemetry["schema_version"], "1",
+        "telemetry schema_version must be '1'"
+    );
+
+    // project_fingerprint — must be a non-empty string
+    let fingerprint = telemetry["project_fingerprint"]
+        .as_str()
+        .expect("project_fingerprint must be a string");
+    assert!(
+        !fingerprint.is_empty(),
+        "project_fingerprint must be non-empty"
+    );
+
+    // summary — must be an object with all expected numeric fields
+    assert!(
+        telemetry["summary"].is_object(),
+        "telemetry summary must be an object"
+    );
+    let summary = &telemetry["summary"];
+    for field in &[
+        "total_violations",
+        "new_violations",
+        "baseline_violations",
+        "new_error_violations",
+        "new_warning_violations",
+        "stale_baseline_entries",
+    ] {
+        assert!(
+            summary[field].as_u64().is_some(),
+            "telemetry summary.{field} must be a u64"
+        );
+    }
+}
+
 #[test]
-fn telemetry_is_opt_in_via_config_or_runtime_flag() {
-    // Sub-case 1: Default is off.
-    let temp1 = TempDir::new().expect("tempdir");
-    write_project(temp1.path());
-    let default_result = run([
+fn telemetry_default_is_off() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+    let result = run([
         "specgate",
         "check",
         "--project-root",
-        temp1.path().to_str().expect("utf8"),
+        temp.path().to_str().expect("utf8"),
         "--no-baseline",
     ]);
-    assert_eq!(default_result.exit_code, EXIT_CODE_PASS);
-    assert!(!default_result.stdout.contains("\"telemetry\""));
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(
+        !result.stdout.contains("\"telemetry\""),
+        "telemetry must be absent by default"
+    );
+}
 
-    // Sub-case 2: Runtime opt-in turns telemetry on.
-    let temp2 = TempDir::new().expect("tempdir");
-    write_project(temp2.path());
-    let runtime_opt_in = run([
+#[test]
+fn telemetry_runtime_opt_in_produces_complete_event() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+    let result = run([
         "specgate",
         "check",
         "--project-root",
-        temp2.path().to_str().expect("utf8"),
+        temp.path().to_str().expect("utf8"),
         "--no-baseline",
         "--telemetry",
     ]);
-    assert_eq!(runtime_opt_in.exit_code, EXIT_CODE_PASS);
-    let runtime_opt_in_json = parse_json(&runtime_opt_in.stdout);
-    assert!(runtime_opt_in_json.get("telemetry").is_some());
-    let telemetry = &runtime_opt_in_json["telemetry"];
-    assert_eq!(telemetry["event"], "check_completed");
-    assert_eq!(telemetry["schema_version"], "1");
-    assert!(telemetry["project_fingerprint"].as_str().is_some());
-    assert!(telemetry["summary"].is_object());
-    assert!(telemetry["summary"]["total_violations"].as_u64().is_some());
-    assert!(telemetry["summary"]["new_violations"].as_u64().is_some());
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let json = parse_json(&result.stdout);
     assert!(
-        telemetry["summary"]["baseline_violations"]
-            .as_u64()
-            .is_some()
+        json.get("telemetry").is_some(),
+        "telemetry must be present with --telemetry flag"
     );
-    assert!(
-        telemetry["summary"]["new_error_violations"]
-            .as_u64()
-            .is_some()
-    );
-    assert!(
-        telemetry["summary"]["new_warning_violations"]
-            .as_u64()
-            .is_some()
-    );
-    assert!(
-        telemetry["summary"]["stale_baseline_entries"]
-            .as_u64()
-            .is_some()
-    );
+    assert_telemetry_schema(&json["telemetry"]);
+}
 
-    // Sub-case 3: Config opt-in also turns telemetry on.
-    let temp3 = TempDir::new().expect("tempdir");
-    write_project(temp3.path());
+#[test]
+fn telemetry_config_opt_in_produces_complete_event() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
     write_file(
-        temp3.path(),
+        temp.path(),
         "specgate.config.yml",
         "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\ntelemetry:\n  enabled: true\n",
     );
-    let config_opt_in = run([
+    let result = run([
         "specgate",
         "check",
         "--project-root",
-        temp3.path().to_str().expect("utf8"),
+        temp.path().to_str().expect("utf8"),
         "--no-baseline",
     ]);
-    assert_eq!(config_opt_in.exit_code, EXIT_CODE_PASS);
-    let config_opt_in_json = parse_json(&config_opt_in.stdout);
-    assert!(config_opt_in_json.get("telemetry").is_some());
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let json = parse_json(&result.stdout);
+    assert!(
+        json.get("telemetry").is_some(),
+        "telemetry must be present when config enables it"
+    );
+    assert_telemetry_schema(&json["telemetry"]);
+}
 
-    // Sub-case 4: Runtime explicit off wins.
-    let temp4 = TempDir::new().expect("tempdir");
-    write_project(temp4.path());
-    let runtime_force_off = run([
+#[test]
+fn telemetry_runtime_no_telemetry_overrides_config() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+    let result = run([
         "specgate",
         "check",
         "--project-root",
-        temp4.path().to_str().expect("utf8"),
+        temp.path().to_str().expect("utf8"),
         "--no-baseline",
         "--no-telemetry",
     ]);
-    assert_eq!(runtime_force_off.exit_code, EXIT_CODE_PASS);
-    assert!(!runtime_force_off.stdout.contains("\"telemetry\""));
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    assert!(
+        !result.stdout.contains("\"telemetry\""),
+        "telemetry must be absent with --no-telemetry flag"
+    );
 }
 
 #[test]
@@ -1019,6 +1055,110 @@ fn baseline_refresh_prunes_stale_entries_and_updates_baseline() {
 }
 
 #[test]
+fn check_diff_mode_with_stale_baseline_fail_blocks_gate() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    // Remove the violation so the baseline entry becomes stale
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstale_baseline: fail\n",
+    );
+
+    let check_with_diff = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--baseline-diff",
+    ]);
+    assert_eq!(check_with_diff.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    // Diff mode outputs text, not JSON. Verify governance info is present.
+    assert!(check_with_diff.stdout.contains("Stale baseline entries: 1"));
+    assert!(
+        check_with_diff
+            .stdout
+            .contains("Stale baseline policy is `fail`")
+    );
+    assert!(check_with_diff.stdout.contains("governance:"));
+    assert!(
+        check_with_diff
+            .stdout
+            .contains("stale_baseline_policy: fail")
+    );
+    assert!(check_with_diff.stdout.contains("stale_baseline_entries: 1"));
+}
+
+#[test]
+fn check_diff_mode_with_stale_baseline_warn_passes_gate() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  never_imports:\n    - core\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    // Remove the violation so the baseline entry becomes stale
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstale_baseline: warn\n",
+    );
+
+    let check_with_diff = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--baseline-diff",
+    ]);
+    assert_eq!(check_with_diff.exit_code, EXIT_CODE_PASS);
+
+    // Stale entries should be mentioned but not cause failure in warn mode
+    assert!(check_with_diff.stdout.contains("Stale baseline entries: 1"));
+    // governance block should NOT appear (only appears on stale_policy_failure)
+    assert!(!check_with_diff.stdout.contains("governance:"));
+}
+
+#[test]
 fn baseline_diff_flag_with_stale_baseline_fail_blocks_gate() {
     let temp = TempDir::new().expect("tempdir");
     write_project(temp.path());
@@ -1106,4 +1246,347 @@ fn baseline_diff_flag_with_stale_baseline_warn_passes_gate() {
     assert_eq!(output["status"], "pass");
     assert_eq!(output["summary"]["stale_baseline_entries"], 1);
     assert_eq!(output["governance"]["stale_baseline_policy"], "warn");
+}
+
+#[test]
+fn doctor_compare_focus_mismatch_categorizes_extension_alias() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_custom_import(temp.path(), "./helper.js");
+    write_file(
+        temp.path(),
+        "src/app/helper.ts",
+        "export const helper = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "baseUrl": "." } }"#,
+    );
+    write_file(
+        temp.path(),
+        "trace.json",
+        "[{\"from\":\"src/app/main.ts\",\"to\":\"src/app/helper-alt.ts\"}]\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--tsc-trace",
+        temp.path().join("trace.json").to_str().expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "./helper.js",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    assert!(
+        result
+            .stdout
+            .contains("\"mismatch_category\": \"extension_alias\""),
+        "expected extension_alias mismatch category, got: {}",
+        result.stdout
+    );
+}
+
+#[test]
+fn doctor_compare_structured_snapshot_golden_schema_shape() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+    write_file(
+        temp.path(),
+        "snapshot.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    { "from": "src/app/main.ts", "to": "src/core/index.ts" }
+  ],
+  "resolutions": [
+    {
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/index.ts",
+      "trace": ["step1", "step2"]
+    }
+  ]
+}
+"#,
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path().join("snapshot.json").to_str().expect("utf8"),
+        "--structured-snapshot-out",
+        "golden/out.json",
+        "--parser-mode",
+        "structured",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let golden_output = fs::read_to_string(temp.path().join("golden/out.json"))
+        .expect("golden snapshot output should exist");
+    let snapshot = parse_json(&golden_output);
+
+    // Lock the schema version
+    assert_eq!(
+        snapshot["schema_version"], "1",
+        "structured snapshot schema_version must be '1'"
+    );
+
+    // Lock the top-level shape: must have edges and resolutions arrays
+    assert!(
+        snapshot["edges"].is_array(),
+        "snapshot must have 'edges' array"
+    );
+    assert!(
+        snapshot["resolutions"].is_array(),
+        "snapshot must have 'resolutions' array"
+    );
+
+    // Lock edge record shape
+    let edge = &snapshot["edges"][0];
+    assert!(edge["from"].is_string(), "edge must have string 'from'");
+    assert!(edge["to"].is_string(), "edge must have string 'to'");
+
+    // Lock resolution record shape
+    let resolution = &snapshot["resolutions"][0];
+    assert!(
+        resolution["from"].is_string(),
+        "resolution must have string 'from'"
+    );
+    assert!(
+        resolution["import_specifier"].is_string(),
+        "resolution must have string 'import_specifier'"
+    );
+    assert!(
+        resolution["result_kind"].is_string(),
+        "resolution must have string 'result_kind'"
+    );
+    assert!(
+        resolution["resolved_to"].is_string(),
+        "resolution must have string 'resolved_to'"
+    );
+    assert!(
+        resolution["trace"].is_array(),
+        "resolution must have array 'trace'"
+    );
+
+    // Verify no extra top-level keys leak into the output schema
+    let snapshot_map = snapshot.as_object().expect("snapshot is an object");
+    let allowed_keys: std::collections::BTreeSet<&str> = ["schema_version", "edges", "resolutions"]
+        .iter()
+        .copied()
+        .collect();
+    let actual_keys: std::collections::BTreeSet<&str> =
+        snapshot_map.keys().map(|k| k.as_str()).collect();
+    assert_eq!(
+        actual_keys, allowed_keys,
+        "snapshot top-level keys must be exactly {{schema_version, edges, resolutions}}"
+    );
+}
+
+#[test]
+fn doctor_compare_npm_wrapper_snapshot_round_trip_with_categories() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_custom_import(temp.path(), "@core/utils");
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/core/*"]
+    }
+  }
+}
+"#,
+    );
+
+    // Provide a file that specgate will resolve @core/utils to
+    write_file(
+        temp.path(),
+        "src/core/utils.ts",
+        "export const utils = 1;\n",
+    );
+
+    // Create a snapshot in the exact format the npm wrapper produces.
+    // The npm wrapper includes extra fields (snapshot_kind, producer, generated_at,
+    // project_root, tsconfig_path, focus, source) that Rust must silently ignore.
+    // The resolved_to intentionally differs from what specgate resolves to trigger a mismatch.
+    write_file(
+        temp.path(),
+        "npm-snapshot.json",
+        r#"{
+  "schema_version": "1",
+  "snapshot_kind": "doctor_compare_tsc_resolution_focus",
+  "producer": "specgate-npm-wrapper",
+  "generated_at": "2026-03-04T00:00:00.000Z",
+  "project_root": "/fake/project",
+  "tsconfig_path": "tsconfig.json",
+  "focus": {
+    "from": "src/app/main.ts",
+    "import_specifier": "@core/utils"
+  },
+  "resolutions": [
+    {
+      "source": "tsc_compiler_api",
+      "from": "src/app/main.ts",
+      "import_specifier": "@core/utils",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/mismatch-target.ts",
+      "trace": [
+        "tsconfig: tsconfig.json",
+        "module_resolution: Bundler",
+        "from: src/app/main.ts",
+        "import: @core/utils",
+        "result_kind: first_party",
+        "resolved_to: src/core/mismatch-target.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/app/main.ts",
+      "to": "src/core/mismatch-target.ts"
+    }
+  ]
+}
+"#,
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path()
+            .join("npm-snapshot.json")
+            .to_str()
+            .expect("utf8"),
+        "--from",
+        "src/app/main.ts",
+        "--import",
+        "@core/utils",
+        "--parser-mode",
+        "structured",
+    ]);
+
+    // The specgate resolver and the npm snapshot disagree on the target,
+    // so we expect a mismatch with the "paths" category tag.
+    assert_eq!(result.exit_code, EXIT_CODE_DOCTOR_MISMATCH);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "mismatch");
+    assert_eq!(output["parity_verdict"], "DIFF");
+    assert_eq!(output["parser_mode"], "structured");
+    assert_eq!(output["trace_parser"], "structured_snapshot");
+    assert_eq!(output["mismatch_category"], "paths");
+
+    // Verify the structured snapshot was parsed correctly and resolution data flows through
+    assert!(
+        output["tsc_trace_resolution"].is_object(),
+        "tsc_trace_resolution must be present for focused compare"
+    );
+    assert_eq!(
+        output["tsc_trace_resolution"]["source"], "tsc_trace",
+        "resolution source should be set by doctor compare"
+    );
+    assert_eq!(output["tsc_trace_resolution"]["result_kind"], "first_party");
+
+    // Verify focus section
+    assert!(output["focus"].is_object(), "focus section must be present");
+    assert_eq!(output["focus"]["from"], "src/app/main.ts");
+    assert_eq!(output["focus"]["import_specifier"], "@core/utils");
+
+    // Verify the actionable hint is present for mismatch
+    assert!(
+        output["actionable_mismatch_hint"].is_string(),
+        "actionable_mismatch_hint must be present on mismatch"
+    );
+}
+
+#[test]
+fn doctor_compare_npm_wrapper_snapshot_match_round_trip() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+
+    // Create a snapshot in npm wrapper format that matches what specgate resolves
+    write_file(
+        temp.path(),
+        "npm-snapshot.json",
+        r#"{
+  "schema_version": "1",
+  "snapshot_kind": "doctor_compare_tsc_resolution_focus",
+  "producer": "specgate-npm-wrapper",
+  "generated_at": "2026-03-04T00:00:00.000Z",
+  "project_root": "/fake/project",
+  "tsconfig_path": "tsconfig.json",
+  "focus": {
+    "from": "src/app/main.ts",
+    "import_specifier": "../core/index"
+  },
+  "resolutions": [
+    {
+      "source": "tsc_compiler_api",
+      "from": "src/app/main.ts",
+      "import_specifier": "../core/index",
+      "result_kind": "first_party",
+      "resolved_to": "src/core/index.ts",
+      "trace": [
+        "tsconfig: tsconfig.json",
+        "from: src/app/main.ts",
+        "import: ../core/index",
+        "result_kind: first_party",
+        "resolved_to: src/core/index.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/app/main.ts",
+      "to": "src/core/index.ts"
+    }
+  ]
+}
+"#,
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--structured-snapshot-in",
+        temp.path()
+            .join("npm-snapshot.json")
+            .to_str()
+            .expect("utf8"),
+        "--parser-mode",
+        "structured",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "match");
+    assert_eq!(output["parity_verdict"], "MATCH");
+    assert_eq!(output["trace_parser"], "structured_snapshot");
+
+    // On match, mismatch_category must be absent
+    assert!(
+        output["mismatch_category"].is_null(),
+        "mismatch_category must be absent on match"
+    );
 }
