@@ -138,6 +138,8 @@ function parseArgs(argv) {
   const args = {
     projectRoot: process.cwd(),
     pretty: false,
+    workspace: false,
+    tsconfigFilename: "tsconfig.json",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -150,6 +152,11 @@ function parseArgs(argv) {
 
     if (token === "--pretty") {
       args.pretty = true;
+      continue;
+    }
+
+    if (token === "--workspace") {
+      args.workspace = true;
       continue;
     }
 
@@ -188,6 +195,12 @@ function parseArgs(argv) {
 
     if (token === "--tsconfig") {
       args.tsconfig = next;
+      i += 1;
+      continue;
+    }
+
+    if (token === "--tsconfig-filename") {
+      args.tsconfigFilename = next;
       i += 1;
       continue;
     }
@@ -386,26 +399,256 @@ function generateResolutionSnapshot(options) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Workspace discovery helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse pnpm-workspace.yaml and return workspace glob patterns.
+ * This is a minimal parser — pnpm-workspace.yaml uses a simple YAML structure
+ * with a `packages` key containing a list of strings.
+ *
+ * @param {string} content - Raw YAML content
+ * @returns {string[]}
+ */
+function parsePnpmWorkspaceYaml(content) {
+  const patterns = [];
+  let inPackages = false;
+
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine;
+    const trimmed = line.trimEnd();
+
+    if (/^packages\s*:/.test(trimmed)) {
+      inPackages = true;
+      continue;
+    }
+
+    if (inPackages) {
+      // A new top-level key ends the packages list
+      if (/^[a-zA-Z]/.test(trimmed) && !trimmed.startsWith(" ") && !trimmed.startsWith("-")) {
+        inPackages = false;
+        continue;
+      }
+
+      const listMatch = trimmed.match(/^\s*-\s*["']?(.+?)["']?\s*$/);
+      if (listMatch) {
+        const raw = listMatch[1].trim();
+        if (raw) {
+          patterns.push(raw);
+        }
+      }
+    }
+  }
+
+  return patterns;
+}
+
+/**
+ * Expand a single workspace glob pattern relative to projectRoot.
+ * Supports simple `dir/*` patterns (one-level wildcard) and literal paths.
+ *
+ * @param {string} projectRoot
+ * @param {string} pattern
+ * @returns {string[]} Array of absolute directory paths
+ */
+function expandWorkspaceGlob(projectRoot, pattern) {
+  const normalized = pattern.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+
+  if (!normalized.includes("*")) {
+    const candidate = path.join(projectRoot, normalized);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return [candidate];
+    }
+    return [];
+  }
+
+  // Support patterns like "packages/*" or "packages/**"
+  const starIndex = normalized.indexOf("*");
+  const prefix = normalized.slice(0, starIndex).replace(/\/$/, "");
+  const searchRoot = prefix ? path.join(projectRoot, prefix) : projectRoot;
+
+  if (!fs.existsSync(searchRoot) || !fs.statSync(searchRoot).isDirectory()) {
+    return [];
+  }
+
+  const isDeep = normalized.includes("**");
+  const results = [];
+
+  function walkDir(dir, depth) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const fullPath = path.join(dir, entry.name);
+      results.push(fullPath);
+      if (isDeep && depth < 8) {
+        walkDir(fullPath, depth + 1);
+      }
+    }
+  }
+
+  walkDir(searchRoot, 0);
+  return results;
+}
+
+/**
+ * Discover workspace packages in a project.
+ *
+ * Checks for pnpm-workspace.yaml first, then falls back to package.json
+ * `workspaces` field. For each discovered package directory, reads
+ * package.json for the name and checks for a tsconfig file.
+ *
+ * Returns results sorted by name (parity with Rust implementation).
+ *
+ * @param {string} projectRoot - Absolute path to the project root
+ * @param {string} [tsconfigFilename] - Name of the tsconfig file to look for (default: "tsconfig.json")
+ * @returns {Array<{name: string, dir: string, tsconfigPath: string|null}>}
+ */
+function discoverWorkspacePackages(projectRoot, tsconfigFilename = "tsconfig.json") {
+  const root = tryRealpath(resolvePath(process.cwd(), projectRoot));
+  let globPatterns = [];
+
+  // 1. Try pnpm-workspace.yaml
+  const pnpmYamlPath = path.join(root, "pnpm-workspace.yaml");
+  if (fs.existsSync(pnpmYamlPath)) {
+    try {
+      const content = fs.readFileSync(pnpmYamlPath, "utf8");
+      globPatterns = parsePnpmWorkspaceYaml(content);
+    } catch {
+      // ignore parse errors; fall through to package.json
+    }
+  }
+
+  // 2. Fall back to package.json workspaces
+  if (globPatterns.length === 0) {
+    const pkgJsonPath = path.join(root, "package.json");
+    if (fs.existsSync(pkgJsonPath)) {
+      try {
+        const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
+        const workspaces = pkgJson.workspaces;
+        if (Array.isArray(workspaces)) {
+          globPatterns = workspaces;
+        } else if (workspaces && Array.isArray(workspaces.packages)) {
+          globPatterns = workspaces.packages;
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }
+
+  if (globPatterns.length === 0) {
+    return [];
+  }
+
+  // Expand all glob patterns and deduplicate
+  const candidateDirsSet = new Set();
+  for (const pattern of globPatterns) {
+    for (const dir of expandWorkspaceGlob(root, pattern)) {
+      candidateDirsSet.add(dir);
+    }
+  }
+
+  const packages = [];
+
+  for (const dir of candidateDirsSet) {
+    // Each package directory must have a package.json
+    const pkgJsonPath = path.join(dir, "package.json");
+    if (!fs.existsSync(pkgJsonPath)) {
+      continue;
+    }
+
+    let name;
+    try {
+      const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
+      name = pkgJson.name || path.basename(dir);
+    } catch {
+      name = path.basename(dir);
+    }
+
+    const tsconfigPath = path.join(dir, tsconfigFilename);
+    packages.push({
+      name,
+      dir: slashify(dir),
+      tsconfigPath: fs.existsSync(tsconfigPath) ? slashify(tsconfigPath) : null,
+    });
+  }
+
+  // Sort by name, matching Rust parity
+  packages.sort((a, b) => a.name.localeCompare(b.name));
+
+  return packages;
+}
+
+/**
+ * Generate a batch workspace snapshot for all packages in a workspace.
+ *
+ * @param {string} projectRoot - Absolute path to the project root
+ * @param {object} [options]
+ * @param {string} [options.tsconfigFilename] - Name of tsconfig file to look for (default: "tsconfig.json")
+ * @returns {object} Workspace snapshot object
+ */
+function generateWorkspaceSnapshot(projectRoot, options = {}) {
+  const { tsconfigFilename = "tsconfig.json" } = options;
+  const root = tryRealpath(resolvePath(process.cwd(), projectRoot));
+  const discovered = discoverWorkspacePackages(root, tsconfigFilename);
+
+  // Only include packages that have a tsconfig
+  const packageResults = discovered
+    .filter((pkg) => pkg.tsconfigPath !== null)
+    .map((pkg) => ({
+      name: pkg.name,
+      dir: toProjectPath(root, pkg.dir),
+      tsconfig_path: toProjectPath(root, pkg.tsconfigPath),
+    }));
+
+  return {
+    schema_version: "1",
+    snapshot_kind: "doctor_compare_tsc_resolution_batch",
+    producer: "specgate-npm-wrapper",
+    generated_at: new Date().toISOString(),
+    project_root: slashify(root),
+    packages: packageResults,
+  };
+}
+
 function printHelp() {
   const lines = [
-    "Generate a focused TypeScript module-resolution snapshot for specgate doctor compare.",
+    "Generate a TypeScript module-resolution snapshot for specgate doctor compare.",
     "",
-    "Usage:",
+    "Usage (focused mode):",
     "  specgate-resolution-snapshot --from <file> --import <specifier> [options]",
     "",
-    "Required:",
-    "  --from <file>           Importing file path (relative to --project-root or absolute)",
-    "  --import <specifier>    Import specifier to resolve",
+    "Usage (workspace batch mode):",
+    "  specgate-resolution-snapshot --workspace [options]",
     "",
-    "Options:",
-    "  --project-root <path>   Project root (default: current working directory)",
-    "  --tsconfig <path>       Explicit tsconfig path (default: auto-find tsconfig.json)",
-    "  --out <path>            Write JSON to file instead of stdout",
-    "  --pretty                Pretty-print JSON",
-    "  --help                  Show this help",
+    "Focused mode (required):",
+    "  --from <file>                Importing file path (relative to --project-root or absolute)",
+    "  --import <specifier>         Import specifier to resolve",
     "",
-    "Example:",
-    "  specgate-resolution-snapshot --from src/app/main.ts --import @core/utils --out .tmp/trace.focus.json --pretty"
+    "Workspace batch mode:",
+    "  --workspace                  Discover all packages in workspace and produce batch snapshot",
+    "  --tsconfig-filename <name>   Tsconfig filename to look for in each package (default: tsconfig.json)",
+    "",
+    "Shared options:",
+    "  --project-root <path>        Project root (default: current working directory)",
+    "  --tsconfig <path>            Explicit tsconfig path (focused mode only; default: auto-find tsconfig.json)",
+    "  --out <path>                 Write JSON to file instead of stdout",
+    "  --pretty                     Pretty-print JSON",
+    "  --help                       Show this help",
+    "",
+    "Examples:",
+    "  specgate-resolution-snapshot --from src/app/main.ts --import @core/utils --out .tmp/trace.focus.json --pretty",
+    "  specgate-resolution-snapshot --workspace --out .tmp/workspace.batch.json --pretty",
+    "  specgate-resolution-snapshot --workspace --tsconfig-filename tsconfig.build.json"
   ];
 
   process.stdout.write(`${lines.join("\n")}\n`);
@@ -437,6 +680,29 @@ function runCli(argv) {
     return 0;
   }
 
+  if (args.workspace) {
+    try {
+      const snapshot = generateWorkspaceSnapshot(args.projectRoot, {
+        tsconfigFilename: args.tsconfigFilename,
+      });
+      const spacing = args.pretty ? 2 : 0;
+      const payload = `${JSON.stringify(snapshot, null, spacing)}\n`;
+
+      if (args.output) {
+        const outputPath = resolvePath(process.cwd(), args.output);
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, payload, "utf8");
+      } else {
+        process.stdout.write(payload);
+      }
+
+      return 0;
+    } catch (error) {
+      process.stderr.write(`Failed to generate workspace snapshot: ${error.message}\n`);
+      return 1;
+    }
+  }
+
   try {
     const snapshot = generateResolutionSnapshot(args);
     const spacing = args.pretty ? 2 : 0;
@@ -459,6 +725,8 @@ function runCli(argv) {
 
 module.exports = {
   generateResolutionSnapshot,
+  generateWorkspaceSnapshot,
+  discoverWorkspacePackages,
   runCli,
   classifyResolution,
   toProjectPath,

@@ -6,6 +6,8 @@ const {
   parseArgs,
   isBuiltinImport,
   generateResolutionSnapshot,
+  discoverWorkspacePackages,
+  generateWorkspaceSnapshot,
 } = require("./src/generate-resolution-snapshot");
 
 const path = require("node:path");
@@ -372,6 +374,229 @@ describe("generateResolutionSnapshot", () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ============================================================================
+// Workspace Discovery Tests
+// ============================================================================
+
+describe("discoverWorkspacePackages", () => {
+  it("finds npm workspaces from package.json", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "alpha"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "alpha", "package.json"),
+        JSON.stringify({ name: "alpha" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "alpha", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+      );
+
+      const packages = discoverWorkspacePackages(tmpDir);
+      assertTrue(Array.isArray(packages), "should return an array");
+      assertTrue(packages.length >= 1, "should find at least one package");
+      const alpha = packages.find((p) => p.name === "alpha");
+      assertTrue(alpha !== undefined, "should find alpha package");
+      assertTrue(alpha.dir.includes("alpha"), "dir should contain alpha");
+      assertTrue(typeof alpha.tsconfigPath === "string", "tsconfigPath should be a string");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds pnpm workspaces from pnpm-workspace.yaml", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n  - extensions/*\n"
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "web"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "web", "package.json"),
+        JSON.stringify({ name: "web" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "web", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+      fs.mkdirSync(path.join(tmpDir, "extensions", "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "extensions", "shared", "package.json"),
+        JSON.stringify({ name: "shared" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "extensions", "shared", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const packages = discoverWorkspacePackages(tmpDir);
+      assertTrue(Array.isArray(packages), "should return an array");
+      assertEqual(packages.length, 2);
+
+      const names = packages.map((p) => p.name).sort();
+      assertEqual(names[0], "shared");
+      assertEqual(names[1], "web");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array for non-workspace project", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "simple-pkg" })
+      );
+
+      const packages = discoverWorkspacePackages(tmpDir);
+      assertTrue(Array.isArray(packages), "should return an array");
+      assertEqual(packages.length, 0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("matches Rust parity: same packages for identical input", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n"
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "core"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core", "package.json"),
+        JSON.stringify({ name: "core" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "app"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "app", "package.json"),
+        JSON.stringify({ name: "app" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "app", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const packages = discoverWorkspacePackages(tmpDir);
+      // Rust parity: sorted by name
+      const names = packages.map((p) => p.name);
+      const sortedNames = [...names].sort();
+      assertEqual(JSON.stringify(names), JSON.stringify(sortedNames), "packages should be sorted by name");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("respects --tsconfig-filename override", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "beta"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "beta", "package.json"),
+        JSON.stringify({ name: "beta" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "beta", "tsconfig.build.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      // With default filename, no tsconfig found
+      const defaultPackages = discoverWorkspacePackages(tmpDir, "tsconfig.json");
+      const defaultBeta = defaultPackages.find((p) => p.name === "beta");
+      assertTrue(defaultBeta === undefined || defaultBeta.tsconfigPath === null, "should not find tsconfig.json");
+
+      // With custom filename, tsconfig found
+      const customPackages = discoverWorkspacePackages(tmpDir, "tsconfig.build.json");
+      const customBeta = customPackages.find((p) => p.name === "beta");
+      assertTrue(customBeta !== undefined, "should find beta package");
+      assertTrue(customBeta.tsconfigPath !== null, "should find tsconfig.build.json");
+      assertTrue(customBeta.tsconfigPath.includes("tsconfig.build.json"), "tsconfigPath should point to custom file");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("generateWorkspaceSnapshot", () => {
+  it("produces batch output with correct schema shape", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "gamma"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "gamma", "package.json"),
+        JSON.stringify({ name: "gamma" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "gamma", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tmpDir);
+
+      assertEqual(snapshot.schema_version, "1");
+      assertEqual(snapshot.snapshot_kind, "doctor_compare_tsc_resolution_batch");
+      assertEqual(snapshot.producer, "specgate-npm-wrapper");
+      assertTrue(typeof snapshot.generated_at === "string", "generated_at should be a string");
+      assertTrue(typeof snapshot.project_root === "string", "project_root should be a string");
+      assertTrue(Array.isArray(snapshot.packages), "packages should be an array");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty packages array for non-workspace project", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "simple" })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tmpDir);
+      assertEqual(snapshot.snapshot_kind, "doctor_compare_tsc_resolution_batch");
+      assertEqual(snapshot.packages.length, 0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseArgs workspace flags", () => {
+  it("parses --workspace flag", () => {
+    const args = parseArgs(["--workspace"]);
+    assertTrue(args.workspace === true, "--workspace should be true");
+  });
+
+  it("parses --tsconfig-filename flag", () => {
+    const args = parseArgs(["--workspace", "--tsconfig-filename", "tsconfig.build.json"]);
+    assertEqual(args.tsconfigFilename, "tsconfig.build.json");
+  });
+
+  it("does not set workspace by default", () => {
+    const args = parseArgs(["--from", "src/main.ts", "--import", "lodash"]);
+    assertTrue(!args.workspace, "--workspace should be falsy by default");
   });
 });
 
