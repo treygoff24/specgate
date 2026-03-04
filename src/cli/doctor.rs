@@ -55,6 +55,17 @@ fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         "error".to_string()
     };
 
+    let workspace_packages = build_workspace_packages_info(
+        &loaded.project_root,
+        &loaded.config,
+    );
+
+    let tsconfig_filename_override = if loaded.config.tsconfig_filename != "tsconfig.json" {
+        Some(loaded.config.tsconfig_filename.clone())
+    } else {
+        None
+    };
+
     let output = DoctorOutput {
         schema_version: "2.2".to_string(),
         status,
@@ -67,6 +78,8 @@ fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         policy_violation_count: artifacts.policy_violations.len(),
         layer_config_issues: artifacts.layer_config_issues,
         module_map_overlaps: overlaps,
+        workspace_packages,
+        tsconfig_filename_override,
     };
 
     let exit_code = if output.status == "ok" {

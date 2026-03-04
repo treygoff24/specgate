@@ -463,7 +463,7 @@ fn build_resolve_options(tsconfig_path: Option<PathBuf>) -> ResolveOptions {
     }
 }
 
-fn nearest_tsconfig_for_dir_uncached(
+pub(crate) fn nearest_tsconfig_for_dir_uncached(
     project_root: &Path,
     containing_dir: &Path,
     tsconfig_filename: &str,

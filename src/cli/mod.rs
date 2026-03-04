@@ -26,7 +26,7 @@ use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
 use crate::graph::DependencyGraph;
 use crate::resolver::classify::extract_package_name;
-use crate::resolver::{ModuleMapOverlap, ModuleResolver, ResolvedImport};
+use crate::resolver::{ModuleMapOverlap, ModuleResolver, ModuleResolverOptions, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
@@ -37,11 +37,13 @@ use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
     self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
     types::CURRENT_SPEC_VERSION,
+    workspace_discovery::discover_workspace_packages_with_config,
 };
+use crate::resolver::nearest_tsconfig_for_dir_uncached;
 use crate::verdict::{
     self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
     TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    build_verdict_with_options,
+    WorkspacePackageInfo, build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience
@@ -297,6 +299,10 @@ struct DoctorOutput {
     policy_violation_count: usize,
     layer_config_issues: Vec<String>,
     module_map_overlaps: Vec<DoctorOverlapOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_packages: Option<Vec<WorkspacePackageInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tsconfig_filename_override: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -643,7 +649,7 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
         None
     };
 
-    let verdict = build_verdict_with_options(
+    let mut verdict = build_verdict_with_options(
         &loaded.project_root,
         &classified,
         artifacts.suppressed_violations,
@@ -667,6 +673,12 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             stale_baseline_policy: loaded.config.stale_baseline,
             telemetry: telemetry_event,
         },
+    );
+
+    // Wire workspace discovery into verdict (non-fatal — empty means None)
+    verdict.workspace_packages = build_workspace_packages_info(
+        &loaded.project_root,
+        &loaded.config,
     );
 
     let exit_code = match verdict.status {
@@ -736,10 +748,13 @@ fn derive_blast_edge_pairs(
         return Ok(BTreeSet::new());
     }
 
-    let mut resolver = ModuleResolver::new_with_include_dirs(
+    let mut resolver = ModuleResolver::new_with_options(
         &loaded.project_root,
         &loaded.specs,
-        &loaded.config.include_dirs,
+        ModuleResolverOptions {
+            include_dirs: loaded.config.include_dirs.clone(),
+            tsconfig_filename: loaded.config.tsconfig_filename.clone(),
+        },
     )
     .map_err(|error| format!("failed to initialize module resolver for blast radius: {error}"))?;
 
@@ -1393,10 +1408,13 @@ fn build_doctor_compare_focus(
             let from_file = resolve_against_root(&loaded.project_root, from);
             let from_normalized = normalize_repo_relative(&loaded.project_root, &from_file);
 
-            let mut resolver = ModuleResolver::new_with_include_dirs(
+            let mut resolver = ModuleResolver::new_with_options(
                 &loaded.project_root,
                 &loaded.specs,
-                &loaded.config.include_dirs,
+                ModuleResolverOptions {
+                    include_dirs: loaded.config.include_dirs.clone(),
+                    tsconfig_filename: loaded.config.tsconfig_filename.clone(),
+                },
             )
             .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
             let explanation = resolver.explain_resolution(&from_file, import_specifier);
@@ -2568,14 +2586,50 @@ fn boundary_violation_severity(
         .unwrap_or(Severity::Error)
 }
 
+/// Build workspace package info for the verdict, returning `None` for non-monorepo projects.
+fn build_workspace_packages_info(
+    project_root: &Path,
+    config: &SpecConfig,
+) -> Option<Vec<WorkspacePackageInfo>> {
+    let packages = discover_workspace_packages_with_config(project_root, config);
+    if packages.is_empty() {
+        return None;
+    }
+
+    let mut infos: Vec<WorkspacePackageInfo> = packages
+        .iter()
+        .map(|pkg| {
+            let abs_dir = project_root.join(&pkg.relative_dir);
+            let tsconfig = nearest_tsconfig_for_dir_uncached(
+                project_root,
+                &abs_dir,
+                &config.tsconfig_filename,
+            )
+            .map(|p| normalize_repo_relative(project_root, &p));
+
+            WorkspacePackageInfo {
+                name: pkg.module.clone(),
+                path: pkg.relative_dir.clone(),
+                tsconfig,
+            }
+        })
+        .collect();
+
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    Some(infos)
+}
+
 fn analyze_project(
     loaded: &LoadedProject,
     affected_modules: Option<&BTreeSet<String>>,
 ) -> std::result::Result<AnalysisArtifacts, String> {
-    let mut resolver = ModuleResolver::new_with_include_dirs(
+    let mut resolver = ModuleResolver::new_with_options(
         &loaded.project_root,
         &loaded.specs,
-        &loaded.config.include_dirs,
+        ModuleResolverOptions {
+            include_dirs: loaded.config.include_dirs.clone(),
+            tsconfig_filename: loaded.config.tsconfig_filename.clone(),
+        },
     )
     .map_err(|error| format!("failed to initialize module resolver: {error}"))?;
     let module_map_overlaps = resolver.module_map_overlaps().to_vec();

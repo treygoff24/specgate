@@ -439,6 +439,7 @@ mod tests {
             metrics: None,
             governance: None,
             telemetry: None,
+            workspace_packages: None,
         }
     }
 
@@ -486,6 +487,7 @@ mod tests {
             metrics: None,
             governance: None,
             telemetry: None,
+            workspace_packages: None,
         }
     }
 

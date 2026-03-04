@@ -8,11 +8,19 @@ pub const VERDICT_SCHEMA_VERSION: &str = "1.0";
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::deterministic::normalize_repo_relative;
 use crate::spec::Severity;
 use crate::spec::config::StaleBaselinePolicy;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspacePackageInfo {
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tsconfig: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyViolation {
@@ -186,6 +194,8 @@ pub struct Verdict {
     pub governance: Option<VerdictGovernance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<AnonymizedTelemetryEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_packages: Option<Vec<WorkspacePackageInfo>>,
 }
 
 /// Governance context for verdict building.
@@ -306,6 +316,7 @@ pub fn build_verdict_with_options(
         metrics,
         governance: governance_payload,
         telemetry: options.telemetry,
+        workspace_packages: None,
     }
 }
 
