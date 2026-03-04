@@ -1,0 +1,5 @@
+spec_dirs:
+  - packages/shared/modules
+  - packages/web/modules
+exclude: []
+test_patterns: []

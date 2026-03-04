@@ -1,0 +1,5 @@
+{
+  "name": "monorepo-multi-tsconfig",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
