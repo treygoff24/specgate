@@ -444,14 +444,11 @@ function parsePnpmWorkspaceYaml(content) {
   return patterns;
 }
 
-/**
- * Expand a single workspace glob pattern relative to projectRoot.
- * Supports simple `dir/*` patterns (one-level wildcard) and literal paths.
- *
- * @param {string} projectRoot
- * @param {string} pattern
- * @returns {string[]} Array of absolute directory paths
- */
+// Expand a single workspace glob pattern relative to projectRoot.
+// Supports simple dir/* patterns, suffix patterns like packages/*-web,
+// nested patterns like apps/*/pkg, and dir/ double-star for deep traversal.
+// Only a single * wildcard segment is supported. Complex glob syntax
+// (character classes, brace expansion) is not handled.
 function expandWorkspaceGlob(projectRoot, pattern) {
   const normalized = pattern.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
 
@@ -463,7 +460,8 @@ function expandWorkspaceGlob(projectRoot, pattern) {
     return [];
   }
 
-  // Support patterns like "packages/*" or "packages/**"
+  // Support patterns like "packages/*", "packages/**", "packages/*-web",
+  // or "apps/*/pkg" (where text appears after the wildcard segment).
   const starIndex = normalized.indexOf("*");
   const prefix = normalized.slice(0, starIndex).replace(/\/$/, "");
   const searchRoot = prefix ? path.join(projectRoot, prefix) : projectRoot;
@@ -471,6 +469,15 @@ function expandWorkspaceGlob(projectRoot, pattern) {
   if (!fs.existsSync(searchRoot) || !fs.statSync(searchRoot).isDirectory()) {
     return [];
   }
+
+  // Extract suffix within the wildcard segment (e.g., "-web" from "packages/*-web")
+  // and any trailing subpath (e.g., "pkg" from "apps/*/pkg").
+  const afterStar = normalized.slice(starIndex + 1);
+  const nextSlash = afterStar.indexOf("/");
+  const segmentSuffix = nextSlash === -1 ? afterStar : afterStar.slice(0, nextSlash);
+  // subPath is the path component that must exist inside the matched directory
+  // (e.g., "pkg" for "apps/*/pkg").
+  const subPath = nextSlash === -1 ? "" : afterStar.slice(nextSlash + 1);
 
   const isDeep = normalized.includes("**");
   const results = [];
@@ -487,9 +494,28 @@ function expandWorkspaceGlob(projectRoot, pattern) {
       if (!entry.isDirectory()) {
         continue;
       }
+
+      // Apply suffix filter: if the glob has text after `*` in the same
+      // segment (e.g., `*-web`), only include dirs whose name ends with
+      // that suffix.
+      if (segmentSuffix && segmentSuffix !== "*" && !entry.name.endsWith(segmentSuffix)) {
+        continue;
+      }
+
       const fullPath = path.join(dir, entry.name);
-      results.push(fullPath);
-      if (isDeep && depth < 8) {
+
+      if (subPath) {
+        // For nested patterns like "apps/*/pkg", check that the required
+        // subPath directory exists inside the matched directory.
+        const nested = path.join(fullPath, subPath);
+        if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
+          results.push(nested);
+        }
+      } else {
+        results.push(fullPath);
+      }
+
+      if (isDeep && !subPath && depth < 8) {
         walkDir(fullPath, depth + 1);
       }
     }
@@ -516,7 +542,10 @@ function discoverWorkspacePackages(projectRoot, tsconfigFilename = "tsconfig.jso
   const root = tryRealpath(resolvePath(process.cwd(), projectRoot));
   let globPatterns = [];
 
-  // 1. Try pnpm-workspace.yaml
+  // 1. Try pnpm-workspace.yaml first.
+  // pnpm-workspace.yaml is authoritative when present: pnpm ignores the
+  // package.json `workspaces` field entirely when this file exists, so we
+  // mirror that precedence here.
   const pnpmYamlPath = path.join(root, "pnpm-workspace.yaml");
   if (fs.existsSync(pnpmYamlPath)) {
     try {
@@ -527,7 +556,7 @@ function discoverWorkspacePackages(projectRoot, tsconfigFilename = "tsconfig.jso
     }
   }
 
-  // 2. Fall back to package.json workspaces
+  // 2. Fall back to package.json workspaces (npm / Yarn classic)
   if (globPatterns.length === 0) {
     const pkgJsonPath = path.join(root, "package.json");
     if (fs.existsSync(pkgJsonPath)) {
@@ -740,6 +769,7 @@ module.exports = {
   isNodeModulesPath,
   resolvePath,
   tryRealpath,
+  expandWorkspaceGlob,
 };
 
 if (require.main === module) {

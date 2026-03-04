@@ -12,6 +12,7 @@ const {
   generateResolutionSnapshot,
   discoverWorkspacePackages,
   generateWorkspaceSnapshot,
+  expandWorkspaceGlob,
   slashify,
   trimNodePrefix,
   looksLikePath,
@@ -904,6 +905,84 @@ describe("Edge Cases", () => {
 
     const resultUndefined = classifyResolution("fs", undefined);
     assertStrictEqual(resultUndefined.resultKind, "third_party");
+  });
+});
+
+// ============================================================================
+// expandWorkspaceGlob Tests
+// ============================================================================
+
+describe("expandWorkspaceGlob", () => {
+  it("returns matching dirs for a simple packages/* pattern", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.mkdirSync(path.join(tempDir, "packages", "alpha"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "packages", "beta"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "packages/*");
+      const names = results.map((r) => path.basename(r)).sort();
+      assertDeepStrictEqual(names, ["alpha", "beta"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("filters to suffix-matching dirs for packages/*-web pattern", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.mkdirSync(path.join(tempDir, "packages", "admin-web"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "packages", "admin-api"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "packages", "public-web"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "packages", "cli"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "packages/*-web");
+      const names = results.map((r) => path.basename(r)).sort();
+      assertDeepStrictEqual(names, ["admin-web", "public-web"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns nested subpath dirs for apps/*/pkg pattern", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.mkdirSync(path.join(tempDir, "apps", "frontend", "pkg"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "apps", "backend", "pkg"), { recursive: true });
+      // This one is missing the pkg subdir — should be excluded
+      fs.mkdirSync(path.join(tempDir, "apps", "nopkg"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "apps/*/pkg");
+      const names = results.map((r) => path.basename(r)).sort();
+      assertDeepStrictEqual(names, ["pkg", "pkg"]);
+      // Verify the full paths reference the correct parent dirs
+      const parents = results.map((r) => path.basename(path.dirname(r))).sort();
+      assertDeepStrictEqual(parents, ["backend", "frontend"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns literal path when pattern has no wildcard", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.mkdirSync(path.join(tempDir, "shared"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "shared");
+      assertStrictEqual(results.length, 1);
+      assert(results[0].endsWith("shared"));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array when prefix directory does not exist", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      const results = expandWorkspaceGlob(tempDir, "nonexistent/*");
+      assertDeepStrictEqual(results, []);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -173,6 +173,32 @@ fn default_tsconfig_filename() -> String {
     "tsconfig.json".to_string()
 }
 
+impl SpecConfig {
+    /// Validate config fields that cannot be checked at deserialization time.
+    ///
+    /// Returns an error message if any field is invalid.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let name = &self.tsconfig_filename;
+        if name.is_empty() {
+            return Err(
+                "tsconfig_filename must be a plain filename (no path separators): got ''"
+                    .to_string(),
+            );
+        }
+        if name.contains('/') || name.contains('\\') {
+            return Err(format!(
+                "tsconfig_filename must be a plain filename (no path separators): got '{name}'"
+            ));
+        }
+        if name.starts_with("..") {
+            return Err(format!(
+                "tsconfig_filename must be a plain filename (no path separators): got '{name}'"
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Default for SpecConfig {
     fn default() -> Self {
         Self {
@@ -280,5 +306,46 @@ telemetry:
             yaml_serde::from_str("tsconfig_filename: \"tsconfig.base.json\"\n")
                 .expect("parse config");
         assert_eq!(parsed.tsconfig_filename, "tsconfig.base.json");
+    }
+
+    #[test]
+    fn config_rejects_empty_tsconfig_filename() {
+        let config = SpecConfig {
+            tsconfig_filename: String::new(),
+            ..SpecConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.contains("must be a plain filename"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn config_rejects_tsconfig_filename_with_path_separator() {
+        for bad in &["subdir/tsconfig.json", "sub\\tsconfig.json"] {
+            let config = SpecConfig {
+                tsconfig_filename: bad.to_string(),
+                ..SpecConfig::default()
+            };
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.contains("must be a plain filename"),
+                "unexpected error for '{bad}': {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_rejects_tsconfig_filename_with_path_traversal() {
+        let config = SpecConfig {
+            tsconfig_filename: "../tsconfig.json".to_string(),
+            ..SpecConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.contains("must be a plain filename"),
+            "unexpected error: {err}"
+        );
     }
 }

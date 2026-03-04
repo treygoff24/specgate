@@ -8,6 +8,7 @@ const {
   generateResolutionSnapshot,
   discoverWorkspacePackages,
   generateWorkspaceSnapshot,
+  expandWorkspaceGlob,
 } = require("./src/generate-resolution-snapshot");
 
 const path = require("node:path");
@@ -371,6 +372,81 @@ describe("generateResolutionSnapshot", () => {
       assertTrue(snapshot.edges.length > 0);
       assertEqual(snapshot.edges[0].from, "src/test.ts");
       assertEqual(snapshot.edges[0].to, "src/utils.ts");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ============================================================================
+// expandWorkspaceGlob Tests
+// ============================================================================
+
+describe("expandWorkspaceGlob", () => {
+  it("returns matching dirs for a simple packages/* pattern", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "packages", "alpha"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "packages", "beta"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "packages/*");
+      const names = results.map((r) => path.basename(r)).sort();
+      assertEqual(JSON.stringify(names), JSON.stringify(["alpha", "beta"]));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("filters to suffix-matching dirs for packages/*-web pattern", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "packages", "admin-web"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "packages", "admin-api"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "packages", "public-web"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "packages", "cli"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "packages/*-web");
+      const names = results.map((r) => path.basename(r)).sort();
+      assertEqual(JSON.stringify(names), JSON.stringify(["admin-web", "public-web"]));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns nested subpath dirs for apps/*/pkg pattern", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "apps", "frontend", "pkg"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "apps", "backend", "pkg"), { recursive: true });
+      // This one is missing the pkg subdir — should be excluded
+      fs.mkdirSync(path.join(tmpDir, "apps", "nopkg"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "apps/*/pkg");
+      const parents = results.map((r) => path.basename(path.dirname(r))).sort();
+      assertEqual(JSON.stringify(parents), JSON.stringify(["backend", "frontend"]));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns literal path when pattern has no wildcard", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "shared"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "shared");
+      assertTrue(results.length === 1, "should find exactly one directory");
+      assertTrue(results[0].endsWith("shared"), "result should end with 'shared'");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array when prefix directory does not exist", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      const results = expandWorkspaceGlob(tmpDir, "nonexistent/*");
+      assertEqual(JSON.stringify(results), JSON.stringify([]));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

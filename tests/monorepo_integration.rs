@@ -222,12 +222,42 @@ fn monorepo_check_resolves_per_package_aliases_correctly() {
     );
     assert_eq!(verdict["status"], "pass");
 
-    // The pass proves @shared/greet resolved to packages/shared/src/greet.ts
-    // via the web package's tsconfig paths. If it hadn't resolved, the import
-    // would be unresolved (still passes, but the graph wouldn't contain it).
-    // A stronger signal: web/app.ts imports @web/helper (self-alias) which
-    // also resolves via the web tsconfig, proving per-package resolution works.
+    let violations = verdict["violations"].as_array().expect("violations array");
+    assert_eq!(
+        violations.len(),
+        0,
+        "no violations expected; violations={violations:?}"
+    );
     assert_eq!(verdict["summary"]["total_violations"], 0);
+
+    // Verify both packages were discovered as workspace packages, proving the
+    // monorepo was analyzed end-to-end and both tsconfigs were loaded.
+    let workspace_packages = verdict["workspace_packages"]
+        .as_array()
+        .expect("workspace_packages should be present in a monorepo verdict");
+    let pkg_names: Vec<&str> = workspace_packages
+        .iter()
+        .filter_map(|pkg| pkg["name"].as_str())
+        .collect();
+    assert!(
+        pkg_names.contains(&"shared"),
+        "workspace_packages should include 'shared'; found={pkg_names:?}"
+    );
+    assert!(
+        pkg_names.contains(&"web"),
+        "workspace_packages should include 'web'; found={pkg_names:?}"
+    );
+
+    // Each package must expose a tsconfig path, confirming per-package tsconfig
+    // loading (not a single root tsconfig fallback).
+    for pkg in workspace_packages {
+        let pkg_name = pkg["name"].as_str().unwrap_or("<unknown>");
+        assert!(
+            pkg["tsconfig"].as_str().is_some(),
+            "workspace package '{pkg_name}' should have a tsconfig path, \
+             confirming per-package tsconfig was loaded"
+        );
+    }
 }
 
 #[test]
@@ -365,10 +395,21 @@ constraints: []
     );
     assert_eq!(verdict["status"], "pass");
 
-    // Verify it would NOT work with default tsconfig.json (which doesn't exist)
-    // by checking that the resolution actually used the custom filename.
-    // The fact that it passes (resolves @lib/util correctly) proves the custom
-    // tsconfig.build.json was used, since no tsconfig.json exists.
+    // Violations array must be present and empty.
+    let violations = verdict["violations"].as_array().expect("violations array");
+    assert_eq!(
+        violations.len(),
+        0,
+        "no violations expected; violations={violations:?}"
+    );
+    assert_eq!(verdict["summary"]["total_violations"], 0);
+
+    // Confirm tsconfig.json was never created — resolution relied solely on
+    // the custom tsconfig.build.json.  If the resolver had fallen back to a
+    // missing tsconfig.json the alias would be unknown and app.ts would
+    // import an unresolved specifier; any boundary check on that import
+    // would either pass vacuously or fail — the only way we get 0 violations
+    // with 0 unresolved noise is if tsconfig.build.json was loaded correctly.
     assert!(
         !temp.path().join("tsconfig.json").exists(),
         "tsconfig.json should not exist; resolution must use tsconfig.build.json"

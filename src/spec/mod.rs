@@ -38,6 +38,8 @@ pub enum SpecError {
         #[source]
         source: globset::Error,
     },
+    #[error("invalid config: {message}")]
+    ConfigInvalid { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, SpecError>;
@@ -54,10 +56,17 @@ pub fn load_config(project_root: &Path) -> Result<SpecConfig> {
         source,
     })?;
 
-    yaml_serde::from_str(&source).map_err(|source| SpecError::YamlParse {
-        path: config_path,
-        source,
-    })
+    let config: SpecConfig =
+        yaml_serde::from_str(&source).map_err(|source| SpecError::YamlParse {
+            path: config_path,
+            source,
+        })?;
+
+    config
+        .validate()
+        .map_err(|message| SpecError::ConfigInvalid { message })?;
+
+    Ok(config)
 }
 
 /// Load and parse a single `.spec.yml` file.
