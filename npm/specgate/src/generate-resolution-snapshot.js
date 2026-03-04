@@ -446,9 +446,11 @@ function parsePnpmWorkspaceYaml(content) {
 
 // Expand a single workspace glob pattern relative to projectRoot.
 // Supports simple dir/* patterns, suffix patterns like packages/*-web,
-// nested patterns like apps/*/pkg, and dir/ double-star for deep traversal.
+// nested patterns like apps/*/pkg, and dir/** double-star for deep traversal.
 // Only a single * wildcard segment is supported. Complex glob syntax
 // (character classes, brace expansion) is not handled.
+// Double-star with suffix (e.g., **-web) is not supported and returns empty.
+// Double-star with subPath (e.g., **/pkg) is not supported and returns empty.
 function expandWorkspaceGlob(projectRoot, pattern) {
   const normalized = pattern.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
 
@@ -479,7 +481,30 @@ function expandWorkspaceGlob(projectRoot, pattern) {
   // (e.g., "pkg" for "apps/*/pkg").
   const subPath = nextSlash === -1 ? "" : afterStar.slice(nextSlash + 1);
 
+  // Guard: double-star combined with a suffix (e.g., "**-web") is unsupported.
+  // For "packages/**-web", starIndex lands on the first "*", making afterStar
+  // equal to "*-web" and segmentSuffix equal to "*-web". A plain "**" produces
+  // segmentSuffix "*" which is the conventional "no suffix" sentinel — that is
+  // handled correctly below, so only guard when segmentSuffix contains "*" but
+  // is not exactly "*".
+  if (segmentSuffix.includes("*") && segmentSuffix !== "*") {
+    process.stderr.write(
+      `[specgate] Warning: expandWorkspaceGlob does not support double-star with suffix patterns (got "${pattern}"). Returning empty.\n`
+    );
+    return [];
+  }
+
   const isDeep = normalized.includes("**");
+
+  // Guard: double-star with subPath (e.g., "**/pkg") would require recursive
+  // scanning at every depth, which is unsupported.  Reject early.
+  if (isDeep && subPath) {
+    process.stderr.write(
+      `[specgate] Warning: expandWorkspaceGlob does not support double-star with subPath patterns (got "${pattern}"). Returning empty.\n`
+    );
+    return [];
+  }
+
   const results = [];
 
   function walkDir(dir, depth) {
@@ -508,8 +533,12 @@ function expandWorkspaceGlob(projectRoot, pattern) {
         // For nested patterns like "apps/*/pkg", check that the required
         // subPath directory exists inside the matched directory.
         const nested = path.join(fullPath, subPath);
-        if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
-          results.push(nested);
+        try {
+          if (fs.statSync(nested).isDirectory()) {
+            results.push(nested);
+          }
+        } catch {
+          // nested subPath does not exist — skip
         }
       } else {
         results.push(fullPath);

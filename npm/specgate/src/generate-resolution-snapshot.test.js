@@ -3,6 +3,7 @@
 const assert = require("node:assert");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 const {
   classifyResolution,
   toProjectPath,
@@ -914,7 +915,7 @@ describe("Edge Cases", () => {
 
 describe("expandWorkspaceGlob", () => {
   it("returns matching dirs for a simple packages/* pattern", () => {
-    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       fs.mkdirSync(path.join(tempDir, "packages", "alpha"), { recursive: true });
       fs.mkdirSync(path.join(tempDir, "packages", "beta"), { recursive: true });
@@ -928,7 +929,7 @@ describe("expandWorkspaceGlob", () => {
   });
 
   it("filters to suffix-matching dirs for packages/*-web pattern", () => {
-    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       fs.mkdirSync(path.join(tempDir, "packages", "admin-web"), { recursive: true });
       fs.mkdirSync(path.join(tempDir, "packages", "admin-api"), { recursive: true });
@@ -944,7 +945,7 @@ describe("expandWorkspaceGlob", () => {
   });
 
   it("returns nested subpath dirs for apps/*/pkg pattern", () => {
-    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       fs.mkdirSync(path.join(tempDir, "apps", "frontend", "pkg"), { recursive: true });
       fs.mkdirSync(path.join(tempDir, "apps", "backend", "pkg"), { recursive: true });
@@ -952,9 +953,7 @@ describe("expandWorkspaceGlob", () => {
       fs.mkdirSync(path.join(tempDir, "apps", "nopkg"), { recursive: true });
 
       const results = expandWorkspaceGlob(tempDir, "apps/*/pkg");
-      const names = results.map((r) => path.basename(r)).sort();
-      assertDeepStrictEqual(names, ["pkg", "pkg"]);
-      // Verify the full paths reference the correct parent dirs
+      assertStrictEqual(results.length, 2);
       const parents = results.map((r) => path.basename(path.dirname(r))).sort();
       assertDeepStrictEqual(parents, ["backend", "frontend"]);
     } finally {
@@ -963,7 +962,7 @@ describe("expandWorkspaceGlob", () => {
   });
 
   it("returns literal path when pattern has no wildcard", () => {
-    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       fs.mkdirSync(path.join(tempDir, "shared"), { recursive: true });
 
@@ -976,9 +975,34 @@ describe("expandWorkspaceGlob", () => {
   });
 
   it("returns empty array when prefix directory does not exist", () => {
-    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
     try {
       const results = expandWorkspaceGlob(tempDir, "nonexistent/*");
+      assertDeepStrictEqual(results, []);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array for double-star with suffix pattern (unsupported)", () => {
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tempDir, "packages", "admin-web"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "packages", "public-web"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "packages/**-web");
+      assertDeepStrictEqual(results, []);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array for double-star with subPath pattern (unsupported)", () => {
+    const tempDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tempDir, "apps", "frontend", "pkg"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tempDir, "apps/**/pkg");
       assertDeepStrictEqual(results, []);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });

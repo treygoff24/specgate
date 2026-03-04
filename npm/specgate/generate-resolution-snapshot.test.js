@@ -451,6 +451,31 @@ describe("expandWorkspaceGlob", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("returns empty array for double-star with suffix pattern (unsupported)", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "packages", "admin-web"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, "packages", "public-web"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "packages/**-web");
+      assertEqual(JSON.stringify(results), JSON.stringify([]));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array for double-star with subPath pattern (unsupported)", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "apps", "frontend", "pkg"), { recursive: true });
+
+      const results = expandWorkspaceGlob(tmpDir, "apps/**/pkg");
+      assertEqual(JSON.stringify(results), JSON.stringify([]));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ============================================================================
@@ -605,6 +630,56 @@ describe("discoverWorkspacePackages", () => {
       assertTrue(customBeta !== undefined, "should find beta package");
       assertTrue(customBeta.tsconfigPath !== null, "should find tsconfig.build.json");
       assertTrue(customBeta.tsconfigPath.includes("tsconfig.build.json"), "tsconfigPath should point to custom file");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers only suffix-matching packages from pnpm-workspace.yaml with suffix glob", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "pnpm-workspace.yaml"),
+        "packages:\n  - \"packages/*-lib\"\n"
+      );
+
+      // core-lib should match the *-lib pattern
+      fs.mkdirSync(path.join(tmpDir, "packages", "core-lib"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core-lib", "package.json"),
+        JSON.stringify({ name: "core-lib" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core-lib", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      // core-app should NOT match the *-lib pattern
+      fs.mkdirSync(path.join(tmpDir, "packages", "core-app"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core-app", "package.json"),
+        JSON.stringify({ name: "core-app" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "core-app", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      // utils-lib should match the *-lib pattern
+      fs.mkdirSync(path.join(tmpDir, "packages", "utils-lib"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "utils-lib", "package.json"),
+        JSON.stringify({ name: "utils-lib" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "utils-lib", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const packages = discoverWorkspacePackages(tmpDir);
+      const names = packages.map((p) => p.name).sort();
+      assertEqual(JSON.stringify(names), JSON.stringify(["core-lib", "utils-lib"]));
+      assertFalse(names.includes("core-app"), "core-app should not be discovered");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

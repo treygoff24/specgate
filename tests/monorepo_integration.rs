@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -303,6 +303,11 @@ fn monorepo_check_verdict_includes_workspace_packages() {
 
 #[test]
 fn monorepo_check_deterministic_across_runs() {
+    // This test validates deterministic output regardless of pass/fail status.
+    // It intentionally uses fixture_root() directly (not a temp copy), which
+    // means sneaky.ts is present and causes a boundary violation. The goal is
+    // to prove that determinism holds even when violations are present — not to
+    // assert what the output contains, only that it is byte-identical across runs.
     let root = fixture_root();
     let root_str = root.to_str().expect("utf8");
 
@@ -413,5 +418,46 @@ constraints: []
     assert!(
         !temp.path().join("tsconfig.json").exists(),
         "tsconfig.json should not exist; resolution must use tsconfig.build.json"
+    );
+}
+
+#[test]
+fn check_rejects_invalid_tsconfig_filename_in_config() {
+    let temp = TempDir::new().expect("tempdir");
+
+    // Use a tsconfig_filename containing a path separator, which is invalid.
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "tsconfig_filename: \"sub/tsconfig.json\"\n",
+    );
+
+    // Minimal .spec.yml so the CLI gets past spec discovery.
+    write_file(
+        temp.path(),
+        "app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/**/*\nconstraints: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code,
+        EXIT_CODE_RUNTIME_ERROR,
+        "invalid tsconfig_filename should produce exit code 2; stdout={stdout}, stderr={stderr}",
+        stdout = result.stdout,
+        stderr = result.stderr
+    );
+    // Config errors are rendered as JSON to stdout (not stderr).
+    assert!(
+        result.stdout.contains("must be a plain filename"),
+        "stdout should mention 'must be a plain filename'; stdout={}",
+        result.stdout
     );
 }

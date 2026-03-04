@@ -180,17 +180,14 @@ impl SpecConfig {
     pub fn validate(&self) -> std::result::Result<(), String> {
         let name = &self.tsconfig_filename;
         if name.is_empty() {
-            return Err(
-                "tsconfig_filename must be a plain filename (no path separators): got ''"
-                    .to_string(),
-            );
-        }
-        if name.contains('/') || name.contains('\\') {
-            return Err(format!(
-                "tsconfig_filename must be a plain filename (no path separators): got '{name}'"
-            ));
+            return Err("tsconfig_filename must not be empty".to_string());
         }
         if name.starts_with("..") {
+            return Err(format!(
+                "tsconfig_filename must not use path traversal: got '{name}'"
+            ));
+        }
+        if name.contains('/') || name.contains('\\') {
             return Err(format!(
                 "tsconfig_filename must be a plain filename (no path separators): got '{name}'"
             ));
@@ -315,10 +312,7 @@ telemetry:
             ..SpecConfig::default()
         };
         let err = config.validate().unwrap_err();
-        assert!(
-            err.contains("must be a plain filename"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("must not be empty"), "unexpected error: {err}");
     }
 
     #[test]
@@ -344,7 +338,7 @@ telemetry:
         };
         let err = config.validate().unwrap_err();
         assert!(
-            err.contains("must be a plain filename"),
+            err.contains("must not use path traversal"),
             "unexpected error: {err}"
         );
     }
