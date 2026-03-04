@@ -42,6 +42,9 @@ pub struct SpecConfig {
     /// Whether type-only imports are enforced by dependency and boundary policy rules.
     #[serde(default = "default_enforce_type_only_imports")]
     pub enforce_type_only_imports: bool,
+    /// Filename of the TypeScript config file used for path resolution.
+    #[serde(default = "default_tsconfig_filename")]
+    pub tsconfig_filename: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq, Eq)]
@@ -166,6 +169,10 @@ fn default_enforce_type_only_imports() -> bool {
     false
 }
 
+fn default_tsconfig_filename() -> String {
+    "tsconfig.json".to_string()
+}
+
 impl Default for SpecConfig {
     fn default() -> Self {
         Self {
@@ -179,6 +186,7 @@ impl Default for SpecConfig {
             release_channel: ReleaseChannel::Stable,
             telemetry: false,
             enforce_type_only_imports: default_enforce_type_only_imports(),
+            tsconfig_filename: default_tsconfig_filename(),
         }
     }
 }
@@ -257,5 +265,20 @@ telemetry:
         assert!(rendered.contains("\"telemetry\":false"));
         assert!(rendered.contains("\"enforce_type_only_imports\":false"));
         assert!(rendered.contains("\"include_dirs\":[]"));
+        assert!(rendered.contains("\"tsconfig_filename\":\"tsconfig.json\""));
+    }
+
+    #[test]
+    fn config_defaults_tsconfig_filename_to_tsconfig_json() {
+        let config = SpecConfig::default();
+        assert_eq!(config.tsconfig_filename, "tsconfig.json");
+    }
+
+    #[test]
+    fn config_parses_tsconfig_filename_override() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("tsconfig_filename: \"tsconfig.base.json\"\n")
+                .expect("parse config");
+        assert_eq!(parsed.tsconfig_filename, "tsconfig.base.json");
     }
 }
