@@ -1,5 +1,7 @@
 name: MVP Merge Gate
 
+# Runs on every PR and master push — intentionally unfiltered so the full
+# TS/JS parity suite (parser, resolver, rules) executes on every change.
 on:
   pull_request:
   push:
@@ -27,3 +29,48 @@ jobs:
 
       - name: Run Specgate MVP gate
         run: ./scripts/ci/mvp_gate.sh
+
+  # End-to-end smoke test: build binary, then run `specgate check` on a
+  # real TS fixture via the npm wrapper to verify the full binary-forwarding
+  # path works in a fresh environment.
+  e2e-smoke:
+    name: e2e-specgate-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build specgate binary
+        run: cargo build --locked --release
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install npm wrapper dependencies
+        working-directory: npm/specgate
+        run: npm install --ignore-scripts
+
+      - name: Run specgate check on openclaw-scale fixture via npm wrapper
+        working-directory: npm/specgate
+        env:
+          SPECGATE_NATIVE_BIN: ../../target/release/specgate
+        run: |
+          # Initialize specs for the fixture
+          node bin/specgate.js init \
+            --project-root "../../tests/fixtures/openclaw-scale/seed"
+
+          # Run check — should exit 0 (pass) with deterministic JSON output
+          node bin/specgate.js check \
+            --project-root "../../tests/fixtures/openclaw-scale/seed" \
+            --no-baseline \
+            --output-mode json

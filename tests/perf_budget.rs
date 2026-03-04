@@ -10,6 +10,8 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::resolver::{ModuleResolver, ModuleResolverOptions};
+use specgate::spec;
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);
@@ -326,5 +328,36 @@ fn tier1_perf_budget_policy_violation_path() {
     assert!(
         elapsed_ms <= budget_ms,
         "perf budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms"
+    );
+}
+
+/// Times module-map construction (ModuleResolver::new_with_options) separately
+/// from the full check pipeline. This isolates the glob-matching + file-to-module
+/// mapping phase that scales with module count and spec complexity.
+#[test]
+fn module_map_construction_within_budget() {
+    let temp = TempDir::new().expect("tempdir");
+    let module_count = 120;
+    let files_per_module = 4;
+    let budget_ms: u128 = std::env::var("SPECGATE_MODULE_MAP_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2_000);
+
+    build_tier1_perf_fixture(temp.path(), module_count, files_per_module);
+
+    let config = spec::load_config(temp.path()).expect("load config");
+    let specs = spec::discover_specs(temp.path(), &config).expect("discover specs");
+
+    let start = Instant::now();
+    let _resolver =
+        ModuleResolver::new_with_options(temp.path(), &specs, ModuleResolverOptions::default())
+            .expect("build module resolver");
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert!(
+        elapsed_ms <= budget_ms,
+        "module map construction budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms \
+         modules={module_count} files/module={files_per_module}"
     );
 }

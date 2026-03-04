@@ -11,12 +11,15 @@ All notable changes to Specgate are documented in this file.
 - **Signal handling hardening** — extracted `signalExitCode()` helper, platform-safe signal mapping, removed dead code paths.
 - **Support matrix validation** — contract tests verifying release target parity between Rust cross-compile and npm wrapper platform mapping.
 - **CI smoke test** — new workflow runs npm wrapper tests on Node 18/20/22 across Ubuntu and macOS for every PR.
+- **End-to-end smoke test** — merge gate builds the Rust binary and runs `specgate check` on the openclaw-scale fixture via the npm wrapper, verifying the full binary-forwarding path in a fresh environment.
 
 ### OpenClaw-Scale Regression Gate (P3.3)
 
 - **Expanded fixture** — 3-package monorepo (`web`, `alpha`, `@openclaw/shared`) with tsconfig extends chains, star re-exports, re-export chains, cross-package imports, type-only imports, dynamic imports, circular dependencies, and intentional boundary violations.
 - **Regression test suite** — expanded from 3 to 9 tests covering init discovery, cross-package resolution, boundary violations, circular dependency handling, re-export edge counts, and workspace packages in verdict.
 - **Performance budget** — openclaw-scale fixture perf test with configurable budget (default 5s, override via `SPECGATE_OPENCLAW_PERF_BUDGET_MS`).
+- **Module map construction budget** — isolated perf test for `ModuleResolver` initialization (glob matching + file-to-module mapping), separate from full check pipeline (default 2s, override via `SPECGATE_MODULE_MAP_BUDGET_MS`).
+- **CI gate coverage** — merge gate runs the full TS/JS parity suite (parser, resolver, rules) on every PR unconditionally — stricter than path-filtered triggering.
 
 ## [0.3.0] - 2026-03-04
 
