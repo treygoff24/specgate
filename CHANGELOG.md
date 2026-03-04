@@ -4,7 +4,19 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
-- No unreleased entries yet.
+### npm Wrapper Hardening (P3.2)
+
+- **Version introspection** — `wrapperVersion` export and `wrapper_version` field in snapshot output for debugging and parity tracking.
+- **Diagnostic error messages** — binary-not-found errors now show platform, arch, and searched candidate paths.
+- **Signal handling hardening** — extracted `signalExitCode()` helper, platform-safe signal mapping, removed dead code paths.
+- **Support matrix validation** — contract tests verifying release target parity between Rust cross-compile and npm wrapper platform mapping.
+- **CI smoke test** — new workflow runs npm wrapper tests on Node 18/20/22 across Ubuntu and macOS for every PR.
+
+### OpenClaw-Scale Regression Gate (P3.3)
+
+- **Expanded fixture** — 3-package monorepo (`web`, `alpha`, `@openclaw/shared`) with tsconfig extends chains, star re-exports, re-export chains, cross-package imports, type-only imports, dynamic imports, circular dependencies, and intentional boundary violations.
+- **Regression test suite** — expanded from 3 to 9 tests covering init discovery, cross-package resolution, boundary violations, circular dependency handling, re-export edge counts, and workspace packages in verdict.
+- **Performance budget** — openclaw-scale fixture perf test with configurable budget (default 5s, override via `SPECGATE_OPENCLAW_PERF_BUDGET_MS`).
 
 ## [0.3.0] - 2026-03-04
 

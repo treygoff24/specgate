@@ -1,5 +1,6 @@
 "use strict";
 
+const wrapperVersion = require("../package.json").version;
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
@@ -387,6 +388,7 @@ function generateResolutionSnapshot(options) {
     schema_version: "1",
     snapshot_kind: "doctor_compare_tsc_resolution_focus",
     producer: "specgate-npm-wrapper",
+    wrapper_version: wrapperVersion,
     generated_at: new Date().toISOString(),
     project_root: slashify(projectRoot),
     tsconfig_path: toProjectPath(projectRoot, tsconfigPath),
@@ -672,6 +674,7 @@ function generateWorkspaceSnapshot(projectRoot, options = {}) {
     schema_version: "1",
     snapshot_kind: "doctor_compare_tsc_resolution_batch",
     producer: "specgate-npm-wrapper",
+    wrapper_version: wrapperVersion,
     generated_at: new Date().toISOString(),
     project_root: slashify(root),
     packages: packageResults,
@@ -791,6 +794,7 @@ module.exports = {
   parseArgs,
   isBuiltinImport,
   extractPackageName,
+  wrapperVersion,
   // Utility functions exported for testing
   slashify,
   trimNodePrefix,

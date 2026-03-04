@@ -4,7 +4,7 @@
 //! configurations.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use tempfile::TempDir;
@@ -17,6 +17,33 @@ fn write_file(root: &Path, relative_path: &str, content: &str) {
         fs::create_dir_all(parent).expect("mkdir parent");
     }
     fs::write(path, content).expect("write file");
+}
+
+fn fixture_root(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(relative)
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) {
+    for entry in walkdir::WalkDir::new(from).into_iter() {
+        let entry = entry.expect("walkdir");
+        let source_path = entry.path();
+        let relative_path = source_path
+            .strip_prefix(from)
+            .expect("source inside fixture");
+        let target_path = to.join(relative_path);
+
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target_path).expect("create directory");
+        } else {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).expect("create parent directory");
+            }
+            fs::copy(source_path, target_path).expect("copy fixture file");
+        }
+    }
 }
 
 /// Build a clean perf fixture with `module_count` modules and `files_per_module` files each.
@@ -193,6 +220,47 @@ fn monorepo_tsconfig_resolution_within_budget() {
     assert!(
         elapsed_ms <= budget_ms,
         "perf budget exceeded for monorepo multi-tsconfig: elapsed={elapsed_ms}ms budget={budget_ms}ms"
+    );
+}
+
+#[test]
+fn openclaw_scale_fixture_within_budget() {
+    let fixture = fixture_root("openclaw-scale/seed");
+    let temp = TempDir::new().expect("tempdir");
+    copy_dir_recursive(&fixture, temp.path());
+
+    let init = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(init.exit_code, EXIT_CODE_PASS);
+
+    let budget_ms: u128 = std::env::var("SPECGATE_OPENCLAW_PERF_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000);
+
+    let start = Instant::now();
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--no-baseline",
+    ]);
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert!(
+        result.exit_code == EXIT_CODE_PASS || result.exit_code == EXIT_CODE_POLICY_VIOLATIONS,
+        "check should not error (got exit {}); stderr={}",
+        result.exit_code,
+        result.stderr
+    );
+    assert!(
+        elapsed_ms <= budget_ms,
+        "openclaw-scale budget exceeded: elapsed={elapsed_ms}ms budget={budget_ms}ms"
     );
 }
 

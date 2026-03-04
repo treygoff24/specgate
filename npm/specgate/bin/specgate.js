@@ -46,6 +46,15 @@ function isFile(pathname) {
   }
 }
 
+function signalExitCode(signalName) {
+  if (process.platform === "win32") {
+    return 1;
+  }
+
+  const signalCode = signals[signalName];
+  return typeof signalCode === "number" ? 128 + signalCode : 128;
+}
+
 function binaryName() {
   return process.platform === "win32" ? "specgate.exe" : "specgate";
 }
@@ -104,8 +113,9 @@ function runNativeSpecgate(args) {
     }
 
     if (result.signal) {
-      const signalCode = process.platform === "win32" ? 1 : 128 + signals[result.signal];
-      process.stderr.write(`Native specgate binary was killed by signal ${result.signal}\n`);
+      const signalCode = signalExitCode(result.signal);
+      const signalNumber = process.platform === "win32" ? 1 : (signals[result.signal] ?? 0);
+      process.stderr.write(`Native specgate binary was killed by signal ${result.signal} (exit 128+${signalNumber})\n`);
       return signalCode;
     }
 
@@ -114,20 +124,21 @@ function runNativeSpecgate(args) {
       return 1;
     }
 
-    // Handle edge case where status, signal, and error are all null/undefined
-    // This can happen when the process exits unexpectedly without a clear status
-    if (typeof result.status !== "number") {
-      process.stderr.write(`Native specgate binary exited unexpectedly (no status, signal, or error)\n`);
-      return 1;
-    }
-
-    process.stderr.write(`Native specgate binary exited with unknown error\n`);
+    process.stderr.write(`Native specgate binary exited unexpectedly (no status, signal, or error)\n`);
     return 1;
   }
 
-  process.stderr.write(
-    "No native specgate binary found. Provide SPECGATE_NATIVE_BIN or bundle one under npm/specgate/native/.\n"
-  );
+  const candidates = nativeCandidates();
+  const candidateList = candidates.map((candidate) => `  - ${candidate}`).join("\n");
+  process.stderr.write([
+    "No native specgate binary found.",
+    `platform: ${process.platform}`,
+    `arch: ${process.arch}`,
+    "searched:",
+    candidateList,
+    "Provide SPECGATE_NATIVE_BIN to the environment to specify where the binary lives.",
+    "",
+  ].join("\n"));
   return 1;
 }
 

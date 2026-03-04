@@ -9,6 +9,7 @@ const {
   discoverWorkspacePackages,
   generateWorkspaceSnapshot,
   expandWorkspaceGlob,
+  wrapperVersion,
 } = require("./src/generate-resolution-snapshot");
 
 const path = require("node:path");
@@ -271,6 +272,12 @@ describe("parseArgs", () => {
   });
 });
 
+describe("module exports", () => {
+  it("exports wrapperVersion matching package.json", () => {
+    assertEqual(wrapperVersion, require("./package.json").version);
+  });
+});
+
 describe("generateResolutionSnapshot", () => {
   it("throws on missing --from", () => {
     let error;
@@ -372,6 +379,36 @@ describe("generateResolutionSnapshot", () => {
       assertTrue(snapshot.edges.length > 0);
       assertEqual(snapshot.edges[0].from, "src/test.ts");
       assertEqual(snapshot.edges[0].to, "src/utils.ts");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("includes wrapper_version in focused snapshot", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    const testFile = path.join(tmpDir, "test.ts");
+    const tsconfigPath = path.join(tmpDir, "tsconfig.json");
+
+    try {
+      fs.writeFileSync(testFile, 'import "fs";');
+      fs.writeFileSync(
+        tsconfigPath,
+        JSON.stringify({
+          compilerOptions: {
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+          },
+        })
+      );
+
+      const snapshot = generateResolutionSnapshot({
+        from: testFile,
+        importSpecifier: "fs",
+        projectRoot: tmpDir,
+        tsconfig: tsconfigPath,
+      });
+
+      assertTrue(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(snapshot.wrapper_version));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -728,6 +765,31 @@ describe("generateWorkspaceSnapshot", () => {
       const snapshot = generateWorkspaceSnapshot(tmpDir);
       assertEqual(snapshot.snapshot_kind, "doctor_compare_tsc_resolution_batch");
       assertEqual(snapshot.packages.length, 0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("includes wrapper_version in workspace snapshot", () => {
+    const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "specgate-test-")));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tmpDir, "packages", "gamma"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "gamma", "package.json"),
+        JSON.stringify({ name: "gamma" })
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "packages", "gamma", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tmpDir);
+      assertTrue(!!snapshot.wrapper_version);
+      assertEqual(snapshot.wrapper_version, wrapperVersion);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

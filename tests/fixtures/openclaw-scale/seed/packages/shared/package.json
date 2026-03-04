@@ -1,0 +1,7 @@
+{
+  "name": "@openclaw/shared",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts"
+  }
+}

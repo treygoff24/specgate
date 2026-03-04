@@ -78,6 +78,7 @@ render_summary() {
   echo "15. cargo test --locked --test doctor_parity_fixtures"
   echo "16. cargo test --locked --test tsjs_barrel_fixtures"
   echo "17. cargo test --locked --test tsjs_openclaw_regression"
+  echo "18. cargo test --locked --test monorepo_integration"
   echo
 
   if [[ ${overall_status} -eq 0 ]]; then
@@ -124,6 +125,7 @@ run_step policy "Baseline/new-violation behavior" cargo test --locked --test mvp
 run_step contract "Doctor parity fixtures" cargo test --locked --test doctor_parity_fixtures
 run_step contract "TS/JS barrel regression fixtures" cargo test --locked --test tsjs_barrel_fixtures
 run_step contract "TS/JS openclaw-scale regression fixtures" cargo test --locked --test tsjs_openclaw_regression
+run_step contract "Monorepo integration" cargo test --locked --test monorepo_integration
 
 emit_summary
 

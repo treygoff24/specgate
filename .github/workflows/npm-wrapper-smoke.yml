@@ -1,0 +1,40 @@
+name: npm-wrapper-smoke
+
+on:
+  pull_request:
+    paths:
+      - 'npm/specgate/**'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'npm/specgate/**'
+
+permissions:
+  contents: read
+
+jobs:
+  npm-smoke:
+    name: npm-wrapper-tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Syntax check
+        working-directory: npm/specgate
+        run: npm run check
+
+      - name: Run tests
+        working-directory: npm/specgate
+        run: npm test
