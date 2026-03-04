@@ -26,6 +26,7 @@ use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
 use crate::graph::DependencyGraph;
 use crate::resolver::classify::extract_package_name;
+use crate::resolver::nearest_tsconfig_for_dir_uncached;
 use crate::resolver::{ModuleMapOverlap, ModuleResolver, ModuleResolverOptions, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
@@ -36,10 +37,8 @@ use crate::rules::{
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
     self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
-    types::CURRENT_SPEC_VERSION,
-    workspace_discovery::discover_workspace_packages_with_config,
+    types::CURRENT_SPEC_VERSION, workspace_discovery::discover_workspace_packages_with_config,
 };
-use crate::resolver::nearest_tsconfig_for_dir_uncached;
 use crate::verdict::{
     self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
     TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
@@ -676,10 +675,8 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
     );
 
     // Wire workspace discovery into verdict (non-fatal — empty means None)
-    verdict.workspace_packages = build_workspace_packages_info(
-        &loaded.project_root,
-        &loaded.config,
-    );
+    verdict.workspace_packages =
+        build_workspace_packages_info(&loaded.project_root, &loaded.config);
 
     let exit_code = match verdict.status {
         VerdictStatus::Pass => EXIT_CODE_PASS,

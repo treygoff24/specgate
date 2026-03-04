@@ -55,10 +55,7 @@ fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         "error".to_string()
     };
 
-    let workspace_packages = build_workspace_packages_info(
-        &loaded.project_root,
-        &loaded.config,
-    );
+    let workspace_packages = build_workspace_packages_info(&loaded.project_root, &loaded.config);
 
     let tsconfig_filename_override = if loaded.config.tsconfig_filename != "tsconfig.json" {
         Some(loaded.config.tsconfig_filename.clone())

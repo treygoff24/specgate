@@ -6,6 +6,18 @@ All notable changes to Specgate are documented in this file.
 
 - No unreleased entries yet.
 
+## [0.3.0] - 2026-03-04
+
+### Full Monorepo Support (P3.1)
+
+- **Nearest-tsconfig multi-context resolver** — files in monorepo packages with their own `tsconfig.json` now automatically resolve path aliases using their owning tsconfig, not the root.
+- **`tsconfig_filename` config** — new `specgate.config.yml` field to override the tsconfig filename (default: `"tsconfig.json"`), for repos using `tsconfig.base.json` or `tsconfig.build.json`.
+- **Workspace package discovery in check** — `specgate check` detects workspace packages (pnpm/npm) and includes them in verdict JSON (`workspace_packages` field).
+- **Doctor workspace summary** — `specgate doctor` prints discovered workspace packages with their tsconfig paths, and surfaces `tsconfig_filename` overrides.
+- **npm snapshot batch mode** — `specgate-resolution-snapshot --workspace` generates resolution snapshots for all workspace packages in one invocation. Supports `--tsconfig-filename` for custom tsconfig names.
+- **Monorepo integration test suite** — new fixture and 6 tests validating cross-package alias resolution, boundary enforcement, workspace package discovery in verdicts, and deterministic output.
+- **Perf benchmarks** — tsconfig cache efficiency tests and single-root regression benchmark to guard against performance regressions.
+
 ## [0.2.0] - 2026-03-03
 
 ### MVP Foundation

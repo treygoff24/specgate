@@ -82,7 +82,8 @@ fn monorepo_check_passes_with_valid_cross_package_imports() {
     let (result, verdict) = run_check(temp.path());
 
     assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
+        result.exit_code,
+        EXIT_CODE_PASS,
         "valid cross-package imports should pass; stdout={stdout}, stderr={stderr}",
         stdout = result.stdout,
         stderr = result.stderr
@@ -182,7 +183,8 @@ constraints: []
     let (result, verdict) = run_check(temp.path());
 
     assert_eq!(
-        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        result.exit_code,
+        EXIT_CODE_POLICY_VIOLATIONS,
         "shared->web import should be a violation; stdout={stdout}, stderr={stderr}",
         stdout = result.stdout,
         stderr = result.stderr
@@ -212,7 +214,8 @@ fn monorepo_check_resolves_per_package_aliases_correctly() {
     let (result, verdict) = run_check(temp.path());
 
     assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
+        result.exit_code,
+        EXIT_CODE_PASS,
         "per-package aliases should resolve correctly; stdout={stdout}, stderr={stderr}",
         stdout = result.stdout,
         stderr = result.stderr
@@ -247,8 +250,14 @@ fn monorepo_check_verdict_includes_workspace_packages() {
         .iter()
         .filter_map(|pkg| pkg["name"].as_str())
         .collect();
-    assert!(names.contains(&"shared"), "workspace_packages should include shared");
-    assert!(names.contains(&"web"), "workspace_packages should include web");
+    assert!(
+        names.contains(&"shared"),
+        "workspace_packages should include shared"
+    );
+    assert!(
+        names.contains(&"web"),
+        "workspace_packages should include web"
+    );
 
     for pkg in workspace_packages {
         assert!(
@@ -343,16 +352,13 @@ constraints: []
         "src/app/main.ts",
         "import { util } from '@lib/util';\nexport const app = util;\n",
     );
-    write_file(
-        temp.path(),
-        "src/lib/util.ts",
-        "export const util = 1;\n",
-    );
+    write_file(temp.path(), "src/lib/util.ts", "export const util = 1;\n");
 
     let (result, verdict) = run_check(temp.path());
 
     assert_eq!(
-        result.exit_code, EXIT_CODE_PASS,
+        result.exit_code,
+        EXIT_CODE_PASS,
         "aliases via tsconfig.build.json should resolve correctly; stdout={stdout}, stderr={stderr}",
         stdout = result.stdout,
         stderr = result.stderr

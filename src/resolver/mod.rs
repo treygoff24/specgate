@@ -1023,7 +1023,10 @@ mod tests {
             "tsconfig.base.json",
         );
 
-        assert!(result.is_none(), "should not find tsconfig.json when searching for tsconfig.base.json");
+        assert!(
+            result.is_none(),
+            "should not find tsconfig.json when searching for tsconfig.base.json"
+        );
     }
 
     #[test]
@@ -1051,16 +1054,9 @@ mod tests {
             "export const utils = 1;\n",
         )
         .expect("write lib target");
-        fs::write(
-            temp.path().join("src/app.ts"),
-            "import '@lib/utils';\n",
-        )
-        .expect("write app");
+        fs::write(temp.path().join("src/app.ts"), "import '@lib/utils';\n").expect("write app");
 
-        let specs = vec![
-            base_spec("lib", "lib/**/*"),
-            base_spec("app", "src/**/*"),
-        ];
+        let specs = vec![base_spec("lib", "lib/**/*"), base_spec("app", "src/**/*")];
         let mut resolver = ModuleResolver::new_with_options(
             temp.path(),
             &specs,
@@ -1121,7 +1117,10 @@ mod tests {
         let _ = resolver.resolve(&temp.path().join("packages/alpha/src/b.ts"), "./a");
         let _ = resolver.resolve(&temp.path().join("packages/alpha/lib/util.ts"), "./missing");
         let _ = resolver.resolve(&temp.path().join("packages/beta/src/x.ts"), "./missing");
-        let _ = resolver.resolve(&temp.path().join("packages/beta/lib/helper.ts"), "./missing");
+        let _ = resolver.resolve(
+            &temp.path().join("packages/beta/lib/helper.ts"),
+            "./missing",
+        );
 
         // Each unique containing dir gets one cache entry — 4 unique dirs total
         // (alpha/src, alpha/lib, beta/src, beta/lib)

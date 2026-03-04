@@ -1,6 +1,6 @@
 {
   "name": "specgate",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "NPM wrapper for Specgate CLI with a TypeScript resolution snapshot generator. Before publishing, bump version manually or use 'npm run release' which runs 'npm version patch' automatically.",
   "license": "MIT",
   "repository": {
