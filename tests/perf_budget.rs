@@ -136,6 +136,98 @@ fn tier1_perf_budget_exceeded() {
     );
 }
 
+/// Build a monorepo fixture with two packages, each having their own tsconfig.
+/// This exercises the multi-tsconfig resolution path and the per-tsconfig resolver pool.
+fn build_monorepo_multi_tsconfig_fixture(root: &Path, files_per_package: usize) {
+    write_file(
+        root,
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    for pkg in &["alpha", "beta"] {
+        // Minimal tsconfig per package
+        write_file(root, &format!("packages/{pkg}/tsconfig.json"), "{}\n");
+
+        write_file(
+            root,
+            &format!("modules/{pkg}.spec.yml"),
+            &format!(
+                "version: \"2.2\"\nmodule: {pkg}\nboundaries:\n  path: packages/{pkg}/src/**/*\n"
+            ),
+        );
+
+        for i in 0..files_per_package {
+            write_file(
+                root,
+                &format!("packages/{pkg}/src/f{i}.ts"),
+                &format!("export const v{i} = {i};\n"),
+            );
+        }
+    }
+}
+
+/// Verifies that a project with multiple tsconfigs (monorepo) completes within a generous
+/// time budget. This is a regression guard for the multi-tsconfig resolver pool path.
+#[test]
+fn monorepo_tsconfig_resolution_within_budget() {
+    let temp = TempDir::new().expect("tempdir");
+    let budget_ms: u128 = 5_000;
+
+    build_monorepo_multi_tsconfig_fixture(temp.path(), 20);
+
+    let start = Instant::now();
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    let elapsed_ms = start.elapsed().as_millis();
+
+    assert!(
+        result.exit_code == EXIT_CODE_PASS || result.exit_code == EXIT_CODE_POLICY_VIOLATIONS,
+        "specgate check should not error out (got exit code {})",
+        result.exit_code
+    );
+    assert!(
+        elapsed_ms <= budget_ms,
+        "perf budget exceeded for monorepo multi-tsconfig: elapsed={elapsed_ms}ms budget={budget_ms}ms"
+    );
+}
+
+/// Verifies single-root-tsconfig performance has not regressed by running check 3 times
+/// and asserting the mean is within a generous budget. This is a regression guard, not a
+/// precise benchmark.
+#[test]
+fn single_root_tsconfig_perf_not_regressed() {
+    let temp = TempDir::new().expect("tempdir");
+    let budget_ms: u128 = 2_000;
+    let runs = 3usize;
+
+    // Use the tier1 fixture with a small project to keep CI fast
+    build_tier1_perf_fixture(temp.path(), 20, 3);
+
+    let total_ms: u128 = (0..runs)
+        .map(|_| {
+            let start = Instant::now();
+            let _ = run([
+                "specgate",
+                "check",
+                "--project-root",
+                temp.path().to_str().expect("utf8"),
+            ]);
+            start.elapsed().as_millis()
+        })
+        .sum();
+    let mean_ms = total_ms / runs as u128;
+
+    assert!(
+        mean_ms <= budget_ms,
+        "single-root tsconfig perf regressed: mean={mean_ms}ms budget={budget_ms}ms over {runs} runs"
+    );
+}
+
 /// Exercises the policy evaluation path (violations present) to ensure perf holds
 /// even when specgate must evaluate constraints and classify violations.
 #[test]

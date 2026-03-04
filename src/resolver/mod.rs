@@ -329,6 +329,11 @@ impl ModuleResolver {
         self.tsconfig_cache.len()
     }
 
+    /// Number of distinct tsconfig-backed resolvers instantiated (for tests/diagnostics).
+    pub fn tsconfig_resolver_count(&self) -> usize {
+        self.resolvers_by_tsconfig.len()
+    }
+
     fn resolve_uncached(&mut self, containing_dir: &Path, specifier: &str) -> ResolvedImport {
         if is_explicit_node_builtin(specifier) {
             return ResolvedImport::ThirdParty {
@@ -1076,6 +1081,61 @@ mod tests {
                 } if module == "lib"
             ),
             "expected alias resolution via tsconfig.build.json, got: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn tsconfig_cache_avoids_redundant_walks_across_packages() {
+        // 2-package monorepo: packages/alpha and packages/beta, each with their own tsconfig
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("packages/alpha/src")).expect("mkdir alpha/src");
+        fs::create_dir_all(temp.path().join("packages/alpha/lib")).expect("mkdir alpha/lib");
+        fs::create_dir_all(temp.path().join("packages/beta/src")).expect("mkdir beta/src");
+        fs::create_dir_all(temp.path().join("packages/beta/lib")).expect("mkdir beta/lib");
+
+        fs::write(temp.path().join("packages/alpha/tsconfig.json"), "{}\n")
+            .expect("write alpha tsconfig");
+        fs::write(temp.path().join("packages/beta/tsconfig.json"), "{}\n")
+            .expect("write beta tsconfig");
+
+        // Source files — 3 unique dirs for alpha, 2 for beta (5 total unique dirs)
+        for (path, content) in &[
+            ("packages/alpha/src/a.ts", "export const a = 1;\n"),
+            ("packages/alpha/src/b.ts", "export const b = 1;\n"),
+            ("packages/alpha/lib/util.ts", "export const util = 1;\n"),
+            ("packages/beta/src/x.ts", "export const x = 1;\n"),
+            ("packages/beta/lib/helper.ts", "export const helper = 1;\n"),
+        ] {
+            fs::write(temp.path().join(path), content).expect("write source file");
+        }
+
+        let specs = vec![
+            base_spec("alpha", "packages/alpha/**/*"),
+            base_spec("beta", "packages/beta/**/*"),
+        ];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+
+        // Resolve from 4 different directories across both packages
+        // alpha/src (a.ts and b.ts share dir), alpha/lib, beta/src, beta/lib = 4 unique dirs
+        let _ = resolver.resolve(&temp.path().join("packages/alpha/src/a.ts"), "./b");
+        let _ = resolver.resolve(&temp.path().join("packages/alpha/src/b.ts"), "./a");
+        let _ = resolver.resolve(&temp.path().join("packages/alpha/lib/util.ts"), "./missing");
+        let _ = resolver.resolve(&temp.path().join("packages/beta/src/x.ts"), "./missing");
+        let _ = resolver.resolve(&temp.path().join("packages/beta/lib/helper.ts"), "./missing");
+
+        // Each unique containing dir gets one cache entry — 4 unique dirs total
+        // (alpha/src, alpha/lib, beta/src, beta/lib)
+        assert_eq!(
+            resolver.tsconfig_cache_len(),
+            4,
+            "tsconfig cache should have one entry per unique queried directory"
+        );
+
+        // Only 2 distinct tsconfig files → only 2 resolver instances
+        assert_eq!(
+            resolver.tsconfig_resolver_count(),
+            2,
+            "should instantiate one resolver per unique tsconfig (one per package)"
         );
     }
 }
