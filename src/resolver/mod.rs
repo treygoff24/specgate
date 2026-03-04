@@ -75,6 +75,20 @@ struct ModuleMapBuild {
     overlaps: Vec<ModuleMapOverlap>,
 }
 
+pub struct ModuleResolverOptions {
+    pub include_dirs: Vec<String>,
+    pub tsconfig_filename: String,
+}
+
+impl Default for ModuleResolverOptions {
+    fn default() -> Self {
+        Self {
+            include_dirs: Vec::new(),
+            tsconfig_filename: "tsconfig.json".to_string(),
+        }
+    }
+}
+
 pub struct ModuleResolver {
     project_root: PathBuf,
     resolver_without_tsconfig: oxc_resolver::Resolver,
@@ -83,12 +97,13 @@ pub struct ModuleResolver {
     cache: BTreeMap<(PathBuf, String), ResolvedImport>,
     module_map: BTreeMap<PathBuf, String>,
     module_map_overlaps: Vec<ModuleMapOverlap>,
+    tsconfig_filename: String,
 }
 
 impl ModuleResolver {
     /// Create resolver from project root + loaded specs.
     pub fn new(project_root: &Path, specs: &[SpecFile]) -> Result<Self> {
-        Self::new_with_include_dirs(project_root, specs, &[])
+        Self::new_with_options(project_root, specs, ModuleResolverOptions::default())
     }
 
     /// Create resolver with explicit directory re-includes for default excluded directories.
@@ -97,9 +112,25 @@ impl ModuleResolver {
         specs: &[SpecFile],
         include_dirs: &[String],
     ) -> Result<Self> {
+        Self::new_with_options(
+            project_root,
+            specs,
+            ModuleResolverOptions {
+                include_dirs: include_dirs.to_vec(),
+                tsconfig_filename: "tsconfig.json".to_string(),
+            },
+        )
+    }
+
+    /// Create resolver with full options.
+    pub fn new_with_options(
+        project_root: &Path,
+        specs: &[SpecFile],
+        options: ModuleResolverOptions,
+    ) -> Result<Self> {
         let project_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-        let include_dirs = include_dir_set(include_dirs);
+        let include_dirs = include_dir_set(&options.include_dirs);
         let module_map_build =
             Self::build_module_map_with_diagnostics(&project_root, specs, &include_dirs)?;
         let resolver_without_tsconfig = oxc_resolver::Resolver::new(build_resolve_options(None));
@@ -112,6 +143,7 @@ impl ModuleResolver {
             cache: BTreeMap::new(),
             module_map: module_map_build.module_map,
             module_map_overlaps: module_map_build.overlaps,
+            tsconfig_filename: options.tsconfig_filename,
         })
     }
 
@@ -363,7 +395,11 @@ impl ModuleResolver {
             return cached.clone();
         }
 
-        let resolved = nearest_tsconfig_for_dir_uncached(&self.project_root, &cache_key);
+        let resolved = nearest_tsconfig_for_dir_uncached(
+            &self.project_root,
+            &cache_key,
+            &self.tsconfig_filename,
+        );
         self.tsconfig_cache.insert(cache_key, resolved.clone());
         resolved
     }
@@ -430,6 +466,7 @@ fn build_resolve_options(tsconfig_path: Option<PathBuf>) -> ResolveOptions {
 fn nearest_tsconfig_for_dir_uncached(
     project_root: &Path,
     containing_dir: &Path,
+    tsconfig_filename: &str,
 ) -> Option<PathBuf> {
     let mut current = if containing_dir.starts_with(project_root) {
         containing_dir.to_path_buf()
@@ -438,7 +475,7 @@ fn nearest_tsconfig_for_dir_uncached(
     };
 
     loop {
-        let candidate = current.join("tsconfig.json");
+        let candidate = current.join(tsconfig_filename);
         if candidate.exists() {
             return Some(candidate);
         }
@@ -814,9 +851,12 @@ mod tests {
         fs::write(temp.path().join("packages/web/tsconfig.json"), "{}\n")
             .expect("write nested tsconfig");
 
-        let selected =
-            nearest_tsconfig_for_dir_uncached(temp.path(), &temp.path().join("packages/web/src"))
-                .expect("nearest tsconfig");
+        let selected = nearest_tsconfig_for_dir_uncached(
+            temp.path(),
+            &temp.path().join("packages/web/src"),
+            "tsconfig.json",
+        )
+        .expect("nearest tsconfig");
         assert_eq!(
             selected,
             temp.path().join("packages/web/tsconfig.json"),
@@ -947,6 +987,95 @@ mod tests {
                 } if module == "root" && path.ends_with(Path::new("src/root/value.ts"))
             ),
             "unexpected root resolution: {root:?}"
+        );
+    }
+
+    #[test]
+    fn nearest_tsconfig_finds_custom_filename() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::write(temp.path().join("tsconfig.base.json"), "{}\n").expect("write custom tsconfig");
+
+        let selected = nearest_tsconfig_for_dir_uncached(
+            temp.path(),
+            &temp.path().join("src"),
+            "tsconfig.base.json",
+        )
+        .expect("nearest tsconfig");
+
+        assert_eq!(selected, temp.path().join("tsconfig.base.json"));
+    }
+
+    #[test]
+    fn nearest_tsconfig_finds_custom_filename_ignores_default() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::write(temp.path().join("tsconfig.json"), "{}\n").expect("write default tsconfig");
+
+        let result = nearest_tsconfig_for_dir_uncached(
+            temp.path(),
+            &temp.path().join("src"),
+            "tsconfig.base.json",
+        );
+
+        assert!(result.is_none(), "should not find tsconfig.json when searching for tsconfig.base.json");
+    }
+
+    #[test]
+    fn resolver_uses_custom_tsconfig_filename() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+        fs::create_dir_all(temp.path().join("lib")).expect("mkdir lib");
+
+        fs::write(
+            temp.path().join("tsconfig.build.json"),
+            r#"{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@lib/*": ["lib/*"]
+    }
+  }
+}
+"#,
+        )
+        .expect("write custom tsconfig");
+
+        fs::write(
+            temp.path().join("lib/utils.ts"),
+            "export const utils = 1;\n",
+        )
+        .expect("write lib target");
+        fs::write(
+            temp.path().join("src/app.ts"),
+            "import '@lib/utils';\n",
+        )
+        .expect("write app");
+
+        let specs = vec![
+            base_spec("lib", "lib/**/*"),
+            base_spec("app", "src/**/*"),
+        ];
+        let mut resolver = ModuleResolver::new_with_options(
+            temp.path(),
+            &specs,
+            ModuleResolverOptions {
+                include_dirs: Vec::new(),
+                tsconfig_filename: "tsconfig.build.json".to_string(),
+            },
+        )
+        .expect("resolver");
+
+        let resolved = resolver.resolve(&temp.path().join("src/app.ts"), "@lib/utils");
+        assert!(
+            matches!(
+                resolved,
+                ResolvedImport::FirstParty {
+                    module_id: Some(ref module),
+                    ..
+                } if module == "lib"
+            ),
+            "expected alias resolution via tsconfig.build.json, got: {resolved:?}"
         );
     }
 }
