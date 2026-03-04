@@ -10,6 +10,8 @@ const {
   isBuiltinImport,
   extractPackageName,
   generateResolutionSnapshot,
+  discoverWorkspacePackages,
+  generateWorkspaceSnapshot,
   slashify,
   trimNodePrefix,
   looksLikePath,
@@ -902,6 +904,339 @@ describe("Edge Cases", () => {
 
     const resultUndefined = classifyResolution("fs", undefined);
     assertStrictEqual(resultUndefined.resultKind, "third_party");
+  });
+});
+
+// ============================================================================
+// Workspace Discovery Tests
+// ============================================================================
+
+describe("discoverWorkspacePackages", () => {
+  it("finds npm workspaces from package.json array workspaces field", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "alpha"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "alpha", "package.json"),
+        JSON.stringify({ name: "alpha" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "alpha", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const packages = discoverWorkspacePackages(tempDir);
+      assert(Array.isArray(packages));
+      assertStrictEqual(packages.length, 1);
+      assertStrictEqual(packages[0].name, "alpha");
+      assert(packages[0].dir.includes("alpha"));
+      assertStrictEqual(typeof packages[0].tsconfigPath, "string");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds pnpm workspaces from pnpm-workspace.yaml", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n  - extensions/*\n"
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "web"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "web", "package.json"),
+        JSON.stringify({ name: "web" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "web", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+      fs.mkdirSync(path.join(tempDir, "extensions", "shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "extensions", "shared", "package.json"),
+        JSON.stringify({ name: "shared" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "extensions", "shared", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const packages = discoverWorkspacePackages(tempDir);
+      assertStrictEqual(packages.length, 2);
+      const names = packages.map((p) => p.name);
+      assert(names.includes("web"));
+      assert(names.includes("shared"));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array for non-workspace project", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "simple-pkg", version: "1.0.0" })
+      );
+
+      const packages = discoverWorkspacePackages(tempDir);
+      assert(Array.isArray(packages));
+      assertStrictEqual(packages.length, 0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns sorted packages by name (parity with Rust)", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n"
+      );
+      for (const name of ["zebra", "alpha", "mango"]) {
+        fs.mkdirSync(path.join(tempDir, "packages", name), { recursive: true });
+        fs.writeFileSync(
+          path.join(tempDir, "packages", name, "package.json"),
+          JSON.stringify({ name })
+        );
+        fs.writeFileSync(
+          path.join(tempDir, "packages", name, "tsconfig.json"),
+          JSON.stringify({ compilerOptions: {} })
+        );
+      }
+
+      const packages = discoverWorkspacePackages(tempDir);
+      const names = packages.map((p) => p.name);
+      const sortedNames = [...names].sort();
+      assertDeepStrictEqual(names, sortedNames);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses custom tsconfig filename when specified", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "beta"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "beta", "package.json"),
+        JSON.stringify({ name: "beta" })
+      );
+      // Only provide tsconfig.build.json, not tsconfig.json
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "beta", "tsconfig.build.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const defaultPackages = discoverWorkspacePackages(tempDir, "tsconfig.json");
+      const defaultBeta = defaultPackages.find((p) => p.name === "beta");
+      assert(defaultBeta === undefined || defaultBeta.tsconfigPath === null,
+        "should not find tsconfig.json when only tsconfig.build.json exists");
+
+      const customPackages = discoverWorkspacePackages(tempDir, "tsconfig.build.json");
+      const customBeta = customPackages.find((p) => p.name === "beta");
+      assert(customBeta !== undefined, "should find beta package with custom filename");
+      assert(customBeta.tsconfigPath !== null, "tsconfigPath should not be null");
+      assert(customBeta.tsconfigPath.includes("tsconfig.build.json"));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips package directories without package.json", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      // dir with package.json
+      fs.mkdirSync(path.join(tempDir, "packages", "valid"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "valid", "package.json"),
+        JSON.stringify({ name: "valid" })
+      );
+      // dir without package.json
+      fs.mkdirSync(path.join(tempDir, "packages", "nopkg"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "packages", "nopkg", "index.js"), "");
+
+      const packages = discoverWorkspacePackages(tempDir);
+      assertStrictEqual(packages.length, 1);
+      assertStrictEqual(packages[0].name, "valid");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles package.json workspaces.packages object form", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: { packages: ["packages/*"] } })
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "omega"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "omega", "package.json"),
+        JSON.stringify({ name: "omega" })
+      );
+
+      const packages = discoverWorkspacePackages(tempDir);
+      assertStrictEqual(packages.length, 1);
+      assertStrictEqual(packages[0].name, "omega");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ============================================================================
+// Workspace Snapshot Generation Tests
+// ============================================================================
+
+describe("generateWorkspaceSnapshot", () => {
+  it("produces batch output with correct schema shape", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "gamma"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "gamma", "package.json"),
+        JSON.stringify({ name: "gamma" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "gamma", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { moduleResolution: "node" } })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tempDir);
+
+      assertStrictEqual(snapshot.schema_version, "1");
+      assertStrictEqual(snapshot.snapshot_kind, "doctor_compare_tsc_resolution_batch");
+      assertStrictEqual(snapshot.producer, "specgate-npm-wrapper");
+      assertStrictEqual(typeof snapshot.generated_at, "string");
+      assertStrictEqual(typeof snapshot.project_root, "string");
+      assert(Array.isArray(snapshot.packages));
+      assertStrictEqual(snapshot.packages.length, 1);
+      assertStrictEqual(snapshot.packages[0].name, "gamma");
+      assertStrictEqual(typeof snapshot.packages[0].dir, "string");
+      assertStrictEqual(typeof snapshot.packages[0].tsconfig_path, "string");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty packages array for non-workspace project", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "simple" })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tempDir);
+      assertStrictEqual(snapshot.snapshot_kind, "doctor_compare_tsc_resolution_batch");
+      assertStrictEqual(snapshot.packages.length, 0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes packages without tsconfig from batch packages list", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      // Package with tsconfig
+      fs.mkdirSync(path.join(tempDir, "packages", "has-ts"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "has-ts", "package.json"),
+        JSON.stringify({ name: "has-ts" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "has-ts", "tsconfig.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+      // Package without tsconfig
+      fs.mkdirSync(path.join(tempDir, "packages", "no-ts"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "no-ts", "package.json"),
+        JSON.stringify({ name: "no-ts" })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tempDir);
+      assertStrictEqual(snapshot.packages.length, 1);
+      assertStrictEqual(snapshot.packages[0].name, "has-ts");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses custom tsconfig-filename option", () => {
+    const tempDir = fs.mkdtempSync("/tmp/specgate-test-");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, "package.json"),
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] })
+      );
+      fs.mkdirSync(path.join(tempDir, "packages", "delta"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "delta", "package.json"),
+        JSON.stringify({ name: "delta" })
+      );
+      fs.writeFileSync(
+        path.join(tempDir, "packages", "delta", "tsconfig.build.json"),
+        JSON.stringify({ compilerOptions: {} })
+      );
+
+      const snapshot = generateWorkspaceSnapshot(tempDir, { tsconfigFilename: "tsconfig.build.json" });
+      assertStrictEqual(snapshot.packages.length, 1);
+      assertStrictEqual(snapshot.packages[0].name, "delta");
+      assert(snapshot.packages[0].tsconfig_path.includes("tsconfig.build.json"));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ============================================================================
+// parseArgs Workspace Flag Tests
+// ============================================================================
+
+describe("parseArgs --workspace flags", () => {
+  it("parses --workspace boolean flag", () => {
+    const args = parseArgs(["--workspace"]);
+    assertStrictEqual(args.workspace, true);
+  });
+
+  it("parses --tsconfig-filename flag", () => {
+    const args = parseArgs(["--workspace", "--tsconfig-filename", "tsconfig.build.json"]);
+    assertStrictEqual(args.tsconfigFilename, "tsconfig.build.json");
+  });
+
+  it("defaults workspace to false when not provided", () => {
+    const args = parseArgs(["--from", "src/app.ts", "--import", "./utils"]);
+    assertStrictEqual(args.workspace, false);
+  });
+
+  it("defaults tsconfigFilename to tsconfig.json", () => {
+    const args = parseArgs(["--workspace"]);
+    assertStrictEqual(args.tsconfigFilename, "tsconfig.json");
   });
 });
 
