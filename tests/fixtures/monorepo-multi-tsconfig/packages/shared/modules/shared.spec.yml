@@ -1,0 +1,7 @@
+version: "2.2"
+module: shared
+boundaries:
+  path: packages/shared/src/**/*
+constraints:
+  - rule: boundary.allow_imports_from
+    severity: error

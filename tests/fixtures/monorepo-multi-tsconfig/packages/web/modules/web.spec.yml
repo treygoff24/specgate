@@ -1,0 +1,9 @@
+version: "2.2"
+module: web
+boundaries:
+  path: packages/web/src/**/*
+  allow_imports_from:
+    - shared
+constraints:
+  - rule: boundary.allow_imports_from
+    severity: error
