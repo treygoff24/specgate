@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: Install dependencies
+        working-directory: npm/specgate
+        run: npm install --ignore-scripts
+
       - name: Syntax check
         working-directory: npm/specgate
         run: npm run check

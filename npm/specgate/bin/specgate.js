@@ -114,8 +114,12 @@ function runNativeSpecgate(args) {
 
     if (result.signal) {
       const signalCode = signalExitCode(result.signal);
-      const signalNumber = process.platform === "win32" ? 1 : (signals[result.signal] ?? 0);
-      process.stderr.write(`Native specgate binary was killed by signal ${result.signal} (exit 128+${signalNumber})\n`);
+      if (process.platform === "win32") {
+        process.stderr.write(`Native specgate binary was killed by signal ${result.signal} (exit ${signalCode})\n`);
+      } else {
+        const signalNumber = signals[result.signal] ?? 0;
+        process.stderr.write(`Native specgate binary was killed by signal ${result.signal} (exit 128+${signalNumber})\n`);
+      }
       return signalCode;
     }
 

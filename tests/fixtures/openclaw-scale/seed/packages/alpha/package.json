@@ -1,0 +1,6 @@
+{
+  "name": "@openclaw/alpha",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

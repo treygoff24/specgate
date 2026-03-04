@@ -208,6 +208,7 @@ fn openclaw_scale_doctor_compare_matches_structured_snapshot() {
         r#"{
   "schema_version": "1",
   "edges": [
+    { "from": "packages/alpha/src/index.ts", "to": "packages/shared/src/types.ts" },
     { "from": "packages/web/src/app.ts", "to": "packages/web/src/barrel.ts" },
     { "from": "packages/web/src/app.ts", "to": "packages/web/src/lazy.ts" },
     { "from": "packages/web/src/app.ts", "to": "extensions/alpha/src/types.ts" },
@@ -374,6 +375,7 @@ fn openclaw_scale_reexport_chain_resolves_correctly() {
         r#"{
   "schema_version": "1",
   "edges": [
+    { "from": "packages/alpha/src/index.ts", "to": "packages/shared/src/types.ts" },
     { "from": "packages/web/src/app.ts", "to": "extensions/alpha/src/types.ts" },
     { "from": "packages/web/src/app.ts", "to": "packages/web/src/barrel.ts" },
     { "from": "packages/web/src/app.ts", "to": "packages/web/src/lazy.ts" },
@@ -413,9 +415,12 @@ fn openclaw_scale_reexport_chain_resolves_correctly() {
         .as_u64()
         .expect("specgate_edge_count");
 
+    // Each source file has a small number of imports; edge_count should be roughly
+    // proportional to file_count, not quadratic. A 3x multiplier is generous.
     assert!(
-        edge_count < (file_count * 10) as u64,
-        "edge explosion detected: {edge_count} edges over {file_count} files"
+        edge_count < (file_count * 3) as u64,
+        "edge explosion detected: {edge_count} edges over {file_count} files (limit: {})",
+        file_count * 3
     );
 }
 
@@ -492,4 +497,8 @@ fn openclaw_scale_verdict_includes_workspace_packages() {
 
     assert!(values.contains(&"web"), "missing web workspace package");
     assert!(values.contains(&"alpha"), "missing alpha workspace package");
+    assert!(
+        values.contains(&"shared"),
+        "missing shared workspace package; found: {values:?}"
+    );
 }

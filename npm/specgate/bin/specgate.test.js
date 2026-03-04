@@ -203,29 +203,44 @@ describe("support matrix contract", () => {
   ];
 
   for (const { platform, arch, rustTarget } of SUPPORT_MATRIX) {
-    it(`maps ${platform}/${arch} to correct binary path`, () => {
-      // Verify the nativeCandidates logic produces a path containing native/{platform}/{arch}/
-      // by checking the existing nativeCandidates path resolution tests
-      // The existing tests already verify this for specific platforms, so this is a contract test
-      // that documents the expected mapping
+    it(`maps ${platform}/${arch} to candidate path containing native/${platform}/${arch}/`, () => {
+      const result = runWithPlatform(platform, arch, `
+        const path = require("node:path");
+        const binDir = path.dirname(wrapperPath);
+        const binaryName = process.platform === "win32" ? "specgate.exe" : "specgate";
+        const firstCandidate = path.resolve(binDir, "..", "native", process.platform, process.arch, binaryName);
+        process.stdout.write(firstCandidate);
+      `);
+      assert.strictEqual(result.status, 0, result.stderr);
       const expected = `native/${platform}/${arch}/`;
-      assert.ok(true, `${rustTarget} should map to ${expected} (verified by existing path tests)`);
+      assert.ok(
+        result.stdout.includes(expected),
+        `${rustTarget}: expected candidate to contain '${expected}', got '${result.stdout}'`
+      );
     });
   }
 
   it("release matrix targets match wrapper platform map", () => {
-    const releaseTargets = [
-      "x86_64-unknown-linux-gnu",
-      "x86_64-apple-darwin",
-      "aarch64-apple-darwin",
-    ];
-    const wrapperPlatformMap = {
+    // Read the actual release workflow to extract cross-compile targets
+    const workflowPath = path.join(__dirname, "..", "..", "..", ".github", "workflows", "release-binaries.yml");
+    const workflowContent = fs.readFileSync(workflowPath, "utf8");
+
+    // Extract Rust targets from the workflow's matrix include entries
+    const releaseTargets = [];
+    for (const match of workflowContent.matchAll(/target:\s+([\w-]+)/g)) {
+      if (match[1] !== "target") releaseTargets.push(match[1]);
+    }
+    assert.ok(releaseTargets.length >= 3, `expected at least 3 release targets, found: ${releaseTargets}`);
+
+    // The wrapper must have a candidate path for every release target's platform/arch
+    const rustToNode = {
       "x86_64-unknown-linux-gnu": { platform: "linux", arch: "x64" },
       "x86_64-apple-darwin": { platform: "darwin", arch: "x64" },
       "aarch64-apple-darwin": { platform: "darwin", arch: "arm64" },
     };
+
     for (const target of releaseTargets) {
-      assert.ok(wrapperPlatformMap[target], `release target ${target} must have wrapper mapping`);
+      assert.ok(rustToNode[target], `release target '${target}' has no wrapper platform mapping`);
     }
   });
 });
@@ -234,21 +249,15 @@ describe("support matrix contract", () => {
 // Diagnostic errors for missing native binary
 // ---------------------------------------------------------------------------
 describe("diagnostic error messages", () => {
-  it("includes platform and arch in binary-not-found error", () => {
+  it("includes platform, arch, and searched paths in binary-not-found error", () => {
     const result = runWrapperWithBlockedTypescript(["--version"], {
       SPECGATE_NATIVE_BIN: "/nonexistent/path/specgate",
     });
     assert.strictEqual(result.status, 1, `expected exit code 1, got ${result.status}\nstderr: ${result.stderr}`);
     assert.match(result.stderr, /platform:/);
     assert.match(result.stderr, /arch:/);
-  });
-
-  it("lists searched candidate paths in binary-not-found error", () => {
-    const result = runWrapperWithBlockedTypescript(["--version"], {
-      SPECGATE_NATIVE_BIN: "/nonexistent/path/specgate",
-    });
-    assert.strictEqual(result.status, 1, `expected exit code 1, got ${result.status}\nstderr: ${result.stderr}`);
     assert.match(result.stderr, /searched:/i);
+    assert.match(result.stderr, /\/nonexistent\/path\/specgate/, "should list the searched candidate path");
   });
 });
 
@@ -326,23 +335,26 @@ process.exit(2);
 });
 
 describe("signal handling edge cases", () => {
-  it("handles SIGTERM kill with correct exit code", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-signal-"));
-    const fakeBin = path.join(tmpDir, "fake-specgate");
-    fs.writeFileSync(fakeBin, `#!/usr/bin/env node
+  // SIGTERM signal forwarding only works on Unix platforms
+  if (process.platform !== "win32") {
+    it("handles SIGTERM kill with correct exit code (128+15=143)", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "specgate-signal-"));
+      const fakeBin = path.join(tmpDir, "fake-specgate");
+      fs.writeFileSync(fakeBin, `#!/usr/bin/env node
 process.kill(process.pid, "SIGTERM");
 `);
-    fs.chmodSync(fakeBin, 0o755);
+      fs.chmodSync(fakeBin, 0o755);
 
-    try {
-      const result = runWrapperWithBlockedTypescript(["check"], {
-        SPECGATE_NATIVE_BIN: fakeBin,
-      });
-      assert.strictEqual(result.status, 143, `expected exit 143, got ${result.status}\nstderr: ${result.stderr}`);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
+      try {
+        const result = runWrapperWithBlockedTypescript(["check"], {
+          SPECGATE_NATIVE_BIN: fakeBin,
+        });
+        assert.strictEqual(result.status, 143, `expected exit 143, got ${result.status}\nstderr: ${result.stderr}`);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
