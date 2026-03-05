@@ -11,7 +11,7 @@ const {
   expandWorkspaceGlob,
   wrapperVersion,
 } = require("./src/generate-resolution-snapshot");
-const { wrapperVersion: packageRootWrapperVersion } = require("./src/index.js");
+const { wrapperVersion: packageRootWrapperVersion } = require("./");
 
 const path = require("node:path");
 const fs = require("node:fs");
