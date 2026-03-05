@@ -11,6 +11,7 @@ const {
   expandWorkspaceGlob,
   wrapperVersion,
 } = require("./src/generate-resolution-snapshot");
+const { wrapperVersion: packageRootWrapperVersion } = require("./src/index.js");
 
 const path = require("node:path");
 const fs = require("node:fs");
@@ -275,6 +276,10 @@ describe("parseArgs", () => {
 describe("module exports", () => {
   it("exports wrapperVersion matching package.json", () => {
     assertEqual(wrapperVersion, require("./package.json").version);
+  });
+
+  it("exports wrapperVersion from package root", () => {
+    assertEqual(packageRootWrapperVersion, require("./package.json").version);
   });
 });
 
