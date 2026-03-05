@@ -41,8 +41,9 @@ See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the f
 | [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) | How Specgate works in CI |
 | [MVP Merge Gate](docs/mvp-merge-gate.md) | Single merge-ready gate definition |
 | [Tier A Fixture Design](docs/tier-a-fixture-design-v1.md) | Deterministic CI gate contract |
-| [Implementation Plan](docs/specgate-implementation-plan-v1.1.md) | Full MVP roadmap and status |
-| [Wave 0 Contract](WAVE0_CONTRACT.md) | Locked CLI semantics and version policy |
+| [Implementation Plan (Archived)](docs/archive/specgate-implementation-plan-v1.1.md) | Historical MVP roadmap and status |
+| [Wave 0 Contract (Archived)](docs/archive/WAVE0_CONTRACT.md) | Historical Wave 0 CLI/version lock snapshot |
+| [Archive Index](docs/archive/ARCHIVE_INDEX.md) | Index of superseded planning/status docs |
 | [Consumer Workflow Example](docs/examples/specgate-consumer-github-actions.yml) | Copy-paste GitHub Actions wiring |
 | [Baseline Policy](docs/BASELINE_POLICY.md) | Baseline lifecycle and stale-entry policy |
 | [Dogfood Rollout Checklist](docs/DOGFOOD_ROLLOUT_CHECKLIST.md) | Pre-launch onboarding checklist |
