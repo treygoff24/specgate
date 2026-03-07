@@ -29,36 +29,50 @@ specgate check
 specgate check --baseline-diff
 ```
 
-See [First 15 Minutes Guide](docs/getting-started.md#first-15-minutes) for the full walkthrough.
+See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes) for the full walkthrough.
 
 ## Documentation
 
+### Reference (start here)
+
 | Document | Purpose |
 |----------|---------|
-| [**Operator Guide**](docs/OPERATOR_GUIDE.md) | **Start here** — Complete onboarding path |
-| [First 15 Minutes](docs/getting-started.md) | Quick hands-on tutorial |
-| [Spec Language Reference](docs/spec-language.md) | YAML spec file format |
-| [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) | How Specgate works in CI |
-| [MVP Merge Gate](docs/mvp-merge-gate.md) | Single merge-ready gate definition |
-| [Tier A Fixture Design](docs/tier-a-fixture-design-v1.md) | Deterministic CI gate contract |
-| [Implementation Plan (Archived)](docs/archive/specgate-implementation-plan-v1.1.md) | Historical MVP roadmap and status |
-| [Wave 0 Contract (Archived)](docs/archive/WAVE0_CONTRACT.md) | Historical Wave 0 CLI/version lock snapshot |
-| [Archive Index](docs/archive/ARCHIVE_INDEX.md) | Index of superseded planning/status docs |
-| [Consumer Workflow Example](docs/examples/specgate-consumer-github-actions.yml) | Copy-paste GitHub Actions wiring |
-| [Baseline Policy](docs/BASELINE_POLICY.md) | Baseline lifecycle and stale-entry policy |
-| [Dogfood Rollout Checklist](docs/DOGFOOD_ROLLOUT_CHECKLIST.md) | Pre-launch onboarding checklist |
-| [Dogfood Success Metrics](docs/DOGFOOD_SUCCESS_METRICS.md) | Success criteria for dogfood adoption |
-| [TS/JS v1 Support Matrix](docs/support-matrix-v1.md) | Tier 1/2/3 commitments, downgrade rules, stable/beta semantics |
-| [Dogfood Release Channel](docs/DOGFOOD_RELEASE_CHANNEL.md) | Stable/beta channel strategy |
+| [**Operator Guide**](docs/reference/operator-guide.md) | **Start here** — Complete onboarding path |
+| [First 15 Minutes](docs/reference/getting-started.md) | Quick hands-on tutorial |
+| [Spec Language Reference](docs/reference/spec-language.md) | YAML spec file format |
+| [MVP Merge Gate](docs/reference/mvp-merge-gate.md) | Single merge-ready gate definition |
+| [TS/JS v1 Support Matrix](docs/reference/support-matrix-v1.md) | Tier 1/2/3 commitments, downgrade rules, stable/beta semantics |
+
+### Design
+
+| Document | Purpose |
+|----------|---------|
+| [Boundary Contracts V2](docs/design/boundary-contracts-v2.md) | Contract model, envelope protocol, implementation phases |
+| [CI Gate Understanding](docs/design/ci-gate-understanding.md) | How Specgate works in CI |
+| [Baseline Policy](docs/design/baseline-policy.md) | Baseline lifecycle and stale-entry policy |
+| [Tier A Fixture Design](docs/design/tier-a-fixture-design.md) | Deterministic CI gate contract |
+
+### Dogfood
+
+| Document | Purpose |
+|----------|---------|
+| [Rollout Checklist](docs/dogfood/rollout-checklist.md) | Pre-launch onboarding checklist |
+| [Success Metrics](docs/dogfood/success-metrics.md) | Success criteria for dogfood adoption |
+| [Release Channel](docs/dogfood/release-channel.md) | Stable/beta channel strategy |
+
+### Project
+
+| Document | Purpose |
+|----------|---------|
 | [Releasing Guide](RELEASING.md) | Release process and ownership |
-| [Release Notes](RELEASE_NOTES.md) | Current MVP closeout highlights |
 | [Changelog](CHANGELOG.md) | Versioned change log |
+| [Archive Index](docs/archive/ARCHIVE_INDEX.md) | Superseded plans, reviews, and release artifacts |
 
 ## Install options
 
 - Preferred path: download the release tarball + `.sha256` for your tag (example `v0.1.0-rc3`) and run the checksum check before using `specgate`.
 - Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3`.
-- See the full copy-paste command flow in [Getting Started](docs/getting-started.md#minute-0-2-build-and-install).
+- See the full copy-paste command flow in [Getting Started](docs/reference/getting-started.md#minute-0-2-build-and-install).
 
 ## Key Concepts
 
@@ -84,7 +98,7 @@ Deterministic JSON output with pass/fail status, violations, and policy metadata
     # Exit 0 = pass, 1 = policy violation, 2 = runtime error
 ```
 
-See [CI Gate Understanding](docs/CI-GATE-UNDERSTANDING.md) for complete CI patterns.
+See [CI Gate Understanding](docs/design/ci-gate-understanding.md) for complete CI patterns.
 
 ## Project Status
 

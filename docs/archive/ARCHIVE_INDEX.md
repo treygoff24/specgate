@@ -1,23 +1,43 @@
 # Archive Index
 
-This directory stores superseded planning and status documents that are kept for historical context.
+Superseded planning, review, release, and status documents kept for historical context.
 
-## Archived Planning Docs
+## Plans (completed or superseded)
 
-- `docs/archive/specgate-implementation-plan-v1.1.md` - MVP-era implementation plan (superseded).
-- `docs/archive/tsjs-ecosystem-plan.md` - initial TS/JS plan draft (superseded by final plan).
-- `docs/archive/tsjs-ecosystem-plan-opus-review.md` - review artifact for the initial TS/JS plan.
-- `docs/archive/tsjs-ecosystem-plan-resolver-review.md` - resolver-focused review artifact.
-- `docs/archive/plans/FINISH_PLAN.md` - v0.2.0 closeout checklist (completed).
-- `docs/archive/plans/2026-03-04-v0.3.0-p3.1-monorepo-resolver.md` - P3.1 execution plan (completed historical plan).
+| File | Description |
+|------|-------------|
+| `plans/implementation-plan-v1.1.md` | MVP-era implementation plan (Phase 1) |
+| `plans/tsjs-ecosystem-plan-draft.md` | Initial TS/JS ecosystem plan draft |
+| `plans/tsjs-ecosystem-plan-final.md` | Final TS/JS ecosystem plan (Phase 3, completed) |
+| `plans/v0.2.0-finish-plan.md` | v0.2.0 closeout checklist (completed) |
+| `plans/p3.1-monorepo-resolver.md` | P3.1 monorepo resolver plan (completed) |
+| `plans/p3.2-p3.3-npm-hardening-regression.md` | P3.2/P3.3 npm hardening plan (completed) |
+| `plans/phase5-envelope-ast-v1.md` | Phase 5 envelope plan v1 (superseded by v2) |
 
-## Archived Status/Contract Snapshots
+## Reviews (consumed into final plans)
 
-- `docs/archive/PHASE3_SUMMARY.md` - phase 3 implementation status snapshot.
-- `docs/archive/WAVE0_CONTRACT.md` - original Wave 0 contract lock snapshot.
+| File | Description |
+|------|-------------|
+| `reviews/phase5-review-athena.md` | Athena's review of Phase 5 v1 plan |
+| `reviews/phase5-review-nous.md` | Nous's review of Phase 5 v1 plan |
+| `reviews/tsjs-opus-review.md` | Opus review of TS/JS ecosystem plan |
+| `reviews/tsjs-resolver-review.md` | Resolver-focused review of TS/JS plan |
+| `reviews/tsjs-build-code-review.md` | Code review of TS/JS implementation |
+| `reviews/code-review-report.md` | All-phases code review report |
 
-## Active Planning Docs
+## Releases
 
-- `docs/tsjs-ecosystem-plan-final.md` - canonical TS/JS ecosystem plan.
-- `docs/plans/2026-03-04-v0.3.0-p3.2-p3.3-npm-hardening-regression.md` - active release-adjacent plan.
-- `docs/specgate-boundary-contracts-v2.md` - boundary contracts roadmap (phases 4-6 remain future work).
+| File | Description |
+|------|-------------|
+| `releases/v0.1.0-rc1-gate-evidence.md` | v0.1.0 RC1 gate evidence |
+| `releases/v0.1.0-rc2-gate-evidence.md` | v0.1.0 RC2 gate evidence |
+| `releases/v0.1.0-rc3-gate-evidence.md` | v0.1.0 RC3 gate evidence |
+| `releases/v0.2.0-release-notes.md` | v0.2.0 release notes |
+| `releases/boundary-contracts-v2-build-report.md` | Boundary Contracts V2 build report |
+
+## Status Snapshots
+
+| File | Description |
+|------|-------------|
+| `status/PHASE3_SUMMARY.md` | Phase 3 implementation status snapshot |
+| `status/WAVE0_CONTRACT.md` | Original Wave 0 contract lock snapshot |

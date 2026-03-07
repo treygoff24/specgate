@@ -123,7 +123,7 @@ Note: warning-only violations do not fail the pipeline because exit `1` is reser
 
 ## Wave 0 Contract
 
-The [Wave 0 Contract](../WAVE0_CONTRACT.md) defines locked semantics that won't change without explicit migration.
+The [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) defines locked semantics that won't change without explicit migration.
 
 ### Version Contract
 
@@ -193,7 +193,7 @@ For cross-module edge A → B:
 ## CI Gate Understanding
 
 - Start with [MVP Merge Gate](mvp-merge-gate.md) for the canonical merge-ready checklist.
-- Use [CI-GATE-UNDERSTANDING.md](CI-GATE-UNDERSTANDING.md) for detailed pipeline patterns.
+- Use [CI-GATE-UNDERSTANDING.md](../design/ci-gate-understanding.md) for detailed pipeline patterns.
 
 ### Quick CI Pattern
 
@@ -319,12 +319,12 @@ Mapping:
 
 ### Dogfood Docs
 
-- [BASELINE_POLICY](BASELINE_POLICY.md) — Baseline update and stale-entry policy.
-- [DOGFOOD_ROLLOUT_CHECKLIST](DOGFOOD_ROLLOUT_CHECKLIST.md) — Rollout readiness.
-- [DOGFOOD_SUCCESS_METRICS](DOGFOOD_SUCCESS_METRICS.md) — Adoption and reliability targets.
-- [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md) — Stable/beta channel rules.
+- [BASELINE_POLICY](../design/baseline-policy.md) — Baseline update and stale-entry policy.
+- [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md) — Rollout readiness.
+- [DOGFOOD_SUCCESS_METRICS](../dogfood/success-metrics.md) — Adoption and reliability targets.
+- [DOGFOOD_RELEASE_CHANNEL](../dogfood/release-channel.md) — Stable/beta channel rules.
 - [Consumer GitHub Actions workflow](examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
-- [Releasing Guide](../RELEASING.md) — How to ship and promote releases.
+- [Releasing Guide](../../RELEASING.md) — How to ship and promote releases.
 
 See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
 
@@ -345,6 +345,6 @@ From the implementation plan's "Learned During Build":
 ## Next Steps
 
 1. **Hands-on:** Complete the [First 15 Minutes](getting-started.md)
-2. **CI Setup:** Follow [CI Gate Understanding](CI-GATE-UNDERSTANDING.md)
+2. **CI Setup:** Follow [CI Gate Understanding](../design/ci-gate-understanding.md)
 3. **Deep Dive:** Read the [Implementation Plan](specgate-implementation-plan-v1.1.md)
-4. **Contract Reference:** Keep [WAVE0_CONTRACT.md](../WAVE0_CONTRACT.md) handy
+4. **Contract Reference:** Keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) handy

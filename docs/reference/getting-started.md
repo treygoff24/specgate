@@ -166,7 +166,7 @@ cargo test golden_corpus
 
 ### Set Up CI
 
-Start with [MVP Merge Gate](mvp-merge-gate.md), then use [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) for full pipeline options.
+Start with [MVP Merge Gate](mvp-merge-gate.md), then use [CI Gate Understanding](../design/ci-gate-understanding.md) for full pipeline options.
 
 For a ready-to-use consumer workflow, copy `docs/examples/specgate-consumer-github-actions.yml`
 into your repository's `.github/workflows/specgate.yml`.
@@ -317,10 +317,10 @@ Runtime error — check:
 
 ## See Also
 
-- [Operator Guide](OPERATOR_GUIDE.md) — Complete onboarding
+- [Operator Guide](operator-guide.md) — Complete onboarding
 - [Spec Language Reference](spec-language.md) — YAML format
-- [CI Gate Understanding](CI-GATE-UNDERSTANDING.md) — CI patterns
+- [CI Gate Understanding](../design/ci-gate-understanding.md) — CI patterns
 - [Implementation Plan](specgate-implementation-plan-v1.1.md) — MVP status
-- [Dogfood Rollout Checklist](DOGFOOD_ROLLOUT_CHECKLIST.md) — Dogfood rollout steps
+- [Dogfood Rollout Checklist](../dogfood/rollout-checklist.md) — Dogfood rollout steps
 - [Baseline Policy](BASELINE_POLICY.md) — Baseline and stale-entry policy
 - [Releasing Guide](../RELEASING.md) — Dogfood and release workflow

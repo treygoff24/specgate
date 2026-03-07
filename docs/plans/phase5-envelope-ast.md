@@ -482,12 +482,12 @@ Each fixture has:
 
 ### Task 6: Documentation Updates
 
-- **`docs/spec-language.md`:** Document `envelope` field behavior, `match.pattern` scoping semantics, and the warning severity
-- **`docs/getting-started.md`:** Add envelope example to the tutorial
+- **`docs/reference/spec-language.md`:** Document `envelope` field behavior, `match.pattern` scoping semantics, and the warning severity
+- **`docs/reference/getting-started.md`:** Add envelope example to the tutorial
 - **`specgate.config.yml` reference:** Document `envelope` config section with all fields
 - **`CHANGELOG.md`:** Add Phase 5 entry under `[Unreleased]`
-- **`docs/specgate-boundary-contracts-v2.md`:** Update "What This Proves" table
-- **NEW `docs/envelope-guide.md`:** Dedicated guide explaining:
+- **`docs/design/boundary-contracts-v2.md`:** Update "What This Proves" table
+- **NEW `docs/reference/envelope-guide.md`:** Dedicated guide explaining:
   - Why the wrapper is required (string literal anchors static analysis)
   - How to configure for custom validators
   - Known limitations (presence-based, no cross-file, no control-flow)
