@@ -23,7 +23,7 @@ pub struct InitArgs {
     force: bool,
 }
 
-pub(crate) fn handle_init(args: InitArgs) -> CliRunResult {
+pub(super) fn handle_init(args: InitArgs) -> CliRunResult {
     let project_root = fs::canonicalize(&args.common.project_root)
         .unwrap_or_else(|_| args.common.project_root.clone());
     let module_override = args.module.as_ref().map(|module| module.trim().to_string());

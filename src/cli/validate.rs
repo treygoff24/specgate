@@ -15,7 +15,7 @@ pub struct ValidateArgs {
     pub project_root: PathBuf,
 }
 
-pub(crate) fn handle_validate(args: CommonProjectArgs) -> CliRunResult {
+pub(super) fn handle_validate(args: CommonProjectArgs) -> CliRunResult {
     let loaded = match load_project(&args.project_root) {
         Ok(loaded) => loaded,
         Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),

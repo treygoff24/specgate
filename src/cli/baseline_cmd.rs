@@ -14,7 +14,7 @@ pub(crate) struct BaselineArgs {
     refresh: bool,
 }
 
-pub(crate) fn handle_baseline(args: BaselineArgs) -> CliRunResult {
+pub(super) fn handle_baseline(args: BaselineArgs) -> CliRunResult {
     let loaded = match load_project(&args.common.project_root) {
         Ok(loaded) => loaded,
         Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),

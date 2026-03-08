@@ -20,7 +20,7 @@ pub struct CliRunResult {
 }
 
 impl CliRunResult {
-    pub fn json<T: Serialize>(exit_code: i32, payload: &T) -> Self {
+    pub(crate) fn json<T: Serialize>(exit_code: i32, payload: &T) -> Self {
         match serde_json::to_string_pretty(payload) {
             Ok(json) => Self {
                 exit_code,
@@ -35,7 +35,7 @@ impl CliRunResult {
         }
     }
 
-    pub fn clap_error(error: clap::Error) -> Self {
+    pub(crate) fn clap_error(error: clap::Error) -> Self {
         Self {
             exit_code: error.exit_code(),
             stdout: String::new(),

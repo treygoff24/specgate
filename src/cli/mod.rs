@@ -7,7 +7,7 @@ mod analysis;
 mod baseline_cmd;
 mod blast;
 pub mod check;
-pub(crate) mod doctor;
+mod doctor;
 pub mod init;
 mod project;
 mod severity;

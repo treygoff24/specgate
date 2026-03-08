@@ -161,7 +161,7 @@ impl From<&CheckArgs> for DiffMode {
     }
 }
 
-pub(crate) fn handle_check(args: CheckArgs) -> CliRunResult {
+pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     // Emit deprecation warning if using deprecated flags
     let deprecation_warning = args.deprecation_warning();
 
@@ -425,7 +425,7 @@ pub(crate) fn handle_check(args: CheckArgs) -> CliRunResult {
 /// In diff mode, violations are formatted in a git-style diff format where:
 /// - New violations are prefixed with `+`
 /// - Baseline violations are prefixed with ` ` (space)
-pub fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunResult {
+pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunResult {
     let loaded = match load_project(&args.project_root) {
         Ok(loaded) => loaded,
         Err(error) => {
