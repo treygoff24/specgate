@@ -1,4 +1,8 @@
-assertion: clean_pass
-gap_reason: "Dynamic imports are expression-level, not statically analyzable as module edges by design"
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "app"
+    to_module: "secrets"
+gap_reason: null
 future_priority: null
-notes: "Dynamic import() currently bypasses boundary.never_imports edge detection."
+notes: "Dynamic import() is now detected as a module edge and correctly violates boundary.never_imports."

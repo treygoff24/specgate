@@ -1,6 +1,6 @@
 assertion: catch
 violations:
-  - rule: "no_circular_dependencies"
+  - rule: "no-circular-deps"
     from_module: "alpha"
     to_module: null
 gap_reason: null

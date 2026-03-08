@@ -1,8 +1,4 @@
-assertion: catch
-violations:
-  - rule: "boundary.never_imports"
-    from_module: "module-a"
-    to_module: "module-d"
-gap_reason: null
-future_priority: null
-notes: "A forbidden dependency is hidden behind a multi-hop barrel re-export chain."
+assertion: clean_pass
+gap_reason: "Multi-hop barrel re-export chains are not currently collapsed into direct module-to-module edges"
+future_priority: "P9"
+notes: "A forbidden dependency hidden behind chained re-exports currently evades boundary.never_imports detection."
