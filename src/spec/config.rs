@@ -45,6 +45,30 @@ pub struct SpecConfig {
     /// Filename of the TypeScript config file used for path resolution.
     #[serde(default = "default_tsconfig_filename")]
     pub tsconfig_filename: String,
+    /// Envelope validation configuration for boundary contracts.
+    #[serde(default)]
+    pub envelope: EnvelopeConfig,
+}
+
+/// Envelope validation settings for contract enforcement.
+/// When a boundary contract declares `envelope: required`, specgate performs
+/// a targeted AST check on matched files to verify they import the envelope
+/// package and call the validation function with the correct contract ID.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct EnvelopeConfig {
+    /// Master switch to enable/disable envelope checking project-wide.
+    /// When false, all `envelope: required` contracts are treated as optional.
+    #[serde(default = "default_envelope_enabled")]
+    pub enabled: bool,
+    /// Package name(s) to look for in imports.
+    /// Default: ["specgate-envelope"]
+    #[serde(default = "default_envelope_import_patterns")]
+    pub import_patterns: Vec<String>,
+    /// Call expression pattern to match.
+    /// Supports dot notation: "boundary.validate" matches `boundary.validate(...)`.
+    /// Default: "boundary.validate"
+    #[serde(default = "default_envelope_function_pattern")]
+    pub function_pattern: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq, Eq)]
@@ -113,6 +137,18 @@ where
 
 fn default_spec_dirs() -> Vec<String> {
     vec![".".to_string()]
+}
+
+fn default_envelope_enabled() -> bool {
+    true
+}
+
+fn default_envelope_import_patterns() -> Vec<String> {
+    vec!["specgate-envelope".to_string()]
+}
+
+fn default_envelope_function_pattern() -> String {
+    "boundary.validate".to_string()
 }
 
 pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
@@ -196,6 +232,16 @@ impl SpecConfig {
     }
 }
 
+impl Default for EnvelopeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_envelope_enabled(),
+            import_patterns: default_envelope_import_patterns(),
+            function_pattern: default_envelope_function_pattern(),
+        }
+    }
+}
+
 impl Default for SpecConfig {
     fn default() -> Self {
         Self {
@@ -210,6 +256,7 @@ impl Default for SpecConfig {
             telemetry: false,
             enforce_type_only_imports: default_enforce_type_only_imports(),
             tsconfig_filename: default_tsconfig_filename(),
+            envelope: EnvelopeConfig::default(),
         }
     }
 }
@@ -232,6 +279,87 @@ mod tests {
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
         assert!(config.exclude.iter().any(|g| g == "**/vendor/**"));
+    }
+
+    #[test]
+    fn envelope_config_defaults_are_stable() {
+        let config = EnvelopeConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.import_patterns, vec!["specgate-envelope"]);
+        assert_eq!(config.function_pattern, "boundary.validate");
+    }
+
+    #[test]
+    fn config_parses_custom_envelope_config() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+        envelope:
+          enabled: false
+          import_patterns:
+            - "@acme/specgate-envelope"
+            - "specgate-envelope/validate"
+          function_pattern: "boundary.validate"
+        "#,
+        )
+        .expect("parse config");
+
+        assert!(!parsed.envelope.enabled);
+        assert_eq!(
+            parsed.envelope.import_patterns,
+            vec!["@acme/specgate-envelope", "specgate-envelope/validate"]
+        );
+        assert_eq!(parsed.envelope.function_pattern, "boundary.validate");
+    }
+
+    #[test]
+    fn config_uses_envelope_defaults_when_missing() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("spec_dirs:\n  - specs\n").expect("parse config");
+        assert_eq!(parsed.envelope, EnvelopeConfig::default());
+        assert_eq!(parsed.spec_dirs, vec!["specs"]);
+    }
+
+    #[test]
+    fn config_parses_envelope_enabled_false() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("envelope:\n  enabled: false\n").expect("parse config");
+        assert!(!parsed.envelope.enabled);
+        assert_eq!(
+            parsed.envelope.import_patterns,
+            default_envelope_import_patterns()
+        );
+        assert_eq!(
+            parsed.envelope.function_pattern,
+            default_envelope_function_pattern()
+        );
+    }
+
+    #[test]
+    fn config_parses_multiple_envelope_import_patterns() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+        envelope:
+          import_patterns:
+            - one
+            - two
+            - three
+        "#,
+        )
+        .expect("parse config");
+
+        assert_eq!(parsed.envelope.import_patterns, vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn envelope_config_round_trip() {
+        let config = EnvelopeConfig {
+            enabled: false,
+            import_patterns: vec!["a".to_string(), "b".to_string()],
+            function_pattern: "validator.call".to_string(),
+        };
+        let rendered = serde_json::to_string(&config).expect("serialize config");
+        let restored: EnvelopeConfig = serde_json::from_str(&rendered).expect("round trip parse");
+        assert_eq!(restored, config);
     }
 
     #[test]

@@ -345,7 +345,7 @@ const result = boundary.validate('create_user', 'v1', rawInput);
 - `--scaffold` flag: Generate contract stubs + update spec files (dry-run default, `--write` to persist)
 - Output: structured list of candidates with file, line, confidence, suggested contract
 
-### Phase 5: Envelope Static Check (2-3 days)
+### Phase 5: Envelope Static Check (2-3 days) — Completed
 
 **Rust changes:**
 - `src/rules/contracts.rs`: Add envelope validation check
@@ -357,6 +357,8 @@ const result = boundary.validate('create_user', 'v1', rawInput);
 - `src/spec/config.rs`: Add `envelope` config section for customizable import/function patterns
 - `boundary.envelope_missing` violation when checks fail
 - Tests: fixtures with/without envelope calls, custom patterns, edge cases (renamed imports, destructured imports)
+
+This phase is now implemented with AST-level static checking for targeted contract-scope verification.
 
 ### Phase 6: CI Gate Integration (1 day)
 
@@ -376,7 +378,7 @@ After full implementation, Specgate can mechanically prove:
 | Every module boundary is declared | Spec files + module map |
 | Every import respects boundaries | Import-graph analysis + `allow_imports_from` / `never_imports` |
 | Every boundary crossing has a contract | Contract declarations + `match` binding |
-| Every contract is validated at runtime | Envelope static check |
+| Every contract is validated at runtime | Envelope static check (implemented in Phase 5, AST-level) |
 | No drift between schema and enforcement | Single contract file is source of truth |
 | Every error is classified | Structured diagnostics with exhaustive violation taxonomy |
 

@@ -2776,7 +2776,7 @@ fn analyze_project(
         .into_iter()
         .map(|contract_violation| PolicyViolation {
             rule: contract_violation.violation.rule,
-            severity: Severity::Error,
+            severity: contract_violation.severity,
             message: contract_violation.violation.message,
             from_file: contract_violation.violation.from_file,
             to_file: contract_violation.violation.to_file,

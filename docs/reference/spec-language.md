@@ -214,4 +214,25 @@ boundaries:
 
 `boundaries.contracts` is available only in spec version `2.3`.
 For the full schema and enforcement semantics, see
-[specgate-boundary-contracts-v2.md](specgate-boundary-contracts-v2.md).
+[boundary-contracts-v2](../design/boundary-contracts-v2.md).
+
+Each contract can also set `envelope` to declare validation-site requirements:
+
+```yaml
+boundaries:
+  contracts:
+    - id: create_user
+      contract: contracts/create-user.json
+      envelope: required | optional  # default: optional
+      match:
+        files: ["src/api/handlers/user.ts"]
+```
+
+- `envelope: optional` (default): Specgate records matches but does **not** enforce envelope validation.
+- `envelope: required`: Specgate performs a targeted AST check on all files that match `match.files`.
+  - The check passes only if the file imports the envelope package at runtime (type-only imports do **not** count).
+  - The check passes only if the file calls `boundary.validate('contract_id', data)` with the exact `id` for that contract.
+  - If `match.pattern` is set, the AST check is scoped to that one exported function's subtree.
+
+When `envelope: required`, missing checks are reported as **warnings**, not errors.
+The `envelope` configuration (package/function matching) is set in `specgate.config.yml` under the `envelope` section.

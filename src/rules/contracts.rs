@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 
 use globset::GlobBuilder;
 
-use crate::rules::{RuleContext, RuleViolation};
-use crate::spec::types::{BoundaryContract, SpecFile};
+use crate::rules::{RuleContext, RuleViolation, envelope};
+use crate::spec::Severity;
+use crate::spec::types::{BoundaryContract, EnvelopeRequirement, SpecFile};
 
 // Module placeholder for testing exports
 // This module is re-exported in mod.rs
@@ -25,6 +26,8 @@ pub const BOUNDARY_CONTRACT_EMPTY_RULE_ID: &str = "boundary.contract_empty";
 pub const BOUNDARY_MATCH_UNRESOLVED_RULE_ID: &str = "boundary.match_unresolved";
 /// Rule ID for invalid cross-module contract reference.
 pub const BOUNDARY_CONTRACT_REF_INVALID_RULE_ID: &str = "boundary.contract_ref_invalid";
+/// Rule ID for missing required envelope usage.
+pub const BOUNDARY_ENVELOPE_MISSING_RULE_ID: &str = "boundary.envelope_missing";
 
 /// A contract rule violation with remediation hint and contract context.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +38,8 @@ pub struct ContractRuleViolation {
     pub remediation_hint: String,
     /// The contract ID that triggered this violation.
     pub contract_id: String,
+    /// Severity level for this violation.
+    pub severity: Severity,
 }
 
 impl ContractRuleViolation {
@@ -43,11 +48,13 @@ impl ContractRuleViolation {
         violation: RuleViolation,
         remediation_hint: impl Into<String>,
         contract_id: impl Into<String>,
+        severity: Severity,
     ) -> Self {
         Self {
             violation,
             remediation_hint: remediation_hint.into(),
             contract_id: contract_id.into(),
+            severity,
         }
     }
 }
@@ -90,13 +97,21 @@ pub fn evaluate_contract_rules(
             }
 
             // Check match.files patterns resolve to actual files
-            if let Some(v) = check_match_patterns(ctx, spec, contract) {
+            let (match_violation, resolved_files) = check_match_patterns(ctx, spec, contract);
+            if let Some(v) = match_violation {
                 violations.push(v);
             }
 
             // Check cross-module imports_contract references
             if let Some(v) = check_contract_refs(ctx, spec, contract, &contract_registry) {
                 violations.push(v);
+            }
+
+            if contract.envelope == EnvelopeRequirement::Required
+                && ctx.config.envelope.enabled
+                && !resolved_files.is_empty()
+            {
+                violations.extend(check_envelope(ctx, spec, contract, &resolved_files));
             }
         }
     }
@@ -163,6 +178,7 @@ fn check_contract_file(
                 contract.contract
             ),
             contract.id.clone(),
+            Severity::Error,
         ));
     }
 
@@ -191,6 +207,7 @@ fn check_contract_file(
                 contract.contract
             ),
             contract.id.clone(),
+            Severity::Error,
         ));
     }
 
@@ -198,20 +215,21 @@ fn check_contract_file(
 }
 
 /// Check that match.files patterns resolve to at least one file.
-/// Returns Some(violation) if no patterns resolve, None if at least one resolves.
+/// Returns (violation, resolved_files), where resolved_files contains all matched files.
 fn check_match_patterns(
     ctx: &RuleContext<'_>,
     spec: &SpecFile,
     contract: &BoundaryContract,
-) -> Option<ContractRuleViolation> {
+) -> (Option<ContractRuleViolation>, Vec<PathBuf>) {
     if contract.r#match.files.is_empty() {
         // No patterns to check - this is valid
-        return None;
+        return (None, Vec::new());
     }
 
     // Check each pattern to see if it resolves to any files
     let mut any_resolved = false;
     let mut failed_patterns = Vec::new();
+    let mut resolved_files = Vec::new();
 
     for pattern in &contract.r#match.files {
         // Use GlobBuilder with literal_separator(true) for accurate matching
@@ -227,40 +245,149 @@ fn check_match_patterns(
 
         // Check if any file matches this pattern
         let matches = find_matching_files(ctx.project_root, &matcher);
-        if !matches.is_empty() {
-            any_resolved = true;
-        } else {
+        if matches.is_empty() {
             failed_patterns.push(pattern.clone());
+            continue;
+        }
+
+        any_resolved = true;
+        resolved_files.extend(matches);
+    }
+
+    resolved_files.sort();
+    resolved_files.dedup();
+
+    if !any_resolved {
+        return (
+            Some(ContractRuleViolation::new(
+                RuleViolation {
+                    rule: BOUNDARY_MATCH_UNRESOLVED_RULE_ID.to_string(),
+                    message: format!(
+                        "Match patterns for contract '{}' in module '{}' did not resolve to any files: {:?}",
+                        contract.id, spec.module, failed_patterns
+                    ),
+                    from_file: spec
+                        .spec_path
+                        .clone()
+                        .unwrap_or_else(|| ctx.project_root.to_path_buf()),
+                    to_file: None,
+                    from_module: Some(spec.module.clone()),
+                    to_module: None,
+                    line: None,
+                    column: None,
+                },
+                format!(
+                    "Update `match.files` globs for contract '{}' so at least one path resolves, or add files that satisfy the declared glob patterns",
+                    contract.id
+                ),
+                contract.id.clone(),
+                Severity::Error,
+            )),
+            resolved_files,
+        );
+    }
+
+    (None, resolved_files)
+}
+
+fn check_envelope(
+    ctx: &RuleContext<'_>,
+    spec: &SpecFile,
+    contract: &BoundaryContract,
+    resolved_files: &[PathBuf],
+) -> Vec<ContractRuleViolation> {
+    let mut violations = Vec::new();
+
+    for file_path in resolved_files {
+        let analysis = match envelope::analyze_file_for_envelope(
+            file_path,
+            &ctx.config.envelope.import_patterns,
+            &ctx.config.envelope.function_pattern,
+        ) {
+            Ok(analysis) => analysis,
+            Err(_) => continue,
+        };
+
+        if !analysis.has_envelope_import || analysis.is_type_only_import {
+            violations.push(ContractRuleViolation::new(
+                RuleViolation {
+                    rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
+                    message: format!(
+                        "Required envelope import is missing for contract '{}' in file '{}'",
+                        contract.id,
+                        file_path.display()
+                    ),
+                    from_file: file_path.to_path_buf(),
+                    to_file: None,
+                    from_module: Some(spec.module.clone()),
+                    to_module: None,
+                    line: None,
+                    column: None,
+                },
+                format!(
+                    "Add a runtime envelope import (for example `import {{ boundary }} from '{}';`) in '{}' so contract '{}' can be validated",
+                    ctx.config.envelope.import_patterns.join("' or '"),
+                    file_path.display(),
+                    contract.id
+                ),
+                contract.id.clone(),
+                Severity::Warning,
+            ));
+            continue;
+        }
+
+        let mut matching_calls = analysis
+            .calls
+            .into_iter()
+            .filter(|call| call.contract_id == contract.id)
+            .collect::<Vec<_>>();
+
+        if let Some(function_name) = contract.r#match.pattern.as_deref() {
+            let source = match fs::read_to_string(file_path) {
+                Ok(source) => source,
+                Err(_) => continue,
+            };
+
+            matching_calls = match envelope::find_exported_function_span(&source, function_name) {
+                Some((span_start, span_end)) => {
+                    envelope::filter_calls_by_span(&matching_calls, span_start, span_end)
+                        .into_iter()
+                        .cloned()
+                        .collect()
+                }
+                None => Vec::new(),
+            };
+        }
+
+        if matching_calls.is_empty() {
+            violations.push(ContractRuleViolation::new(
+                RuleViolation {
+                    rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
+                    message: format!(
+                        "Required envelope call for contract '{}' not found in file '{}'",
+                        contract.id,
+                        file_path.display()
+                    ),
+                    from_file: file_path.to_path_buf(),
+                    to_file: None,
+                    from_module: Some(spec.module.clone()),
+                    to_module: None,
+                    line: None,
+                    column: None,
+                },
+                format!(
+                    "Add `{}` call for contract '{}' in '{}'",
+                    ctx.config.envelope.function_pattern,
+                    contract.id,
+                    file_path.display()
+                ),
+                contract.id.clone(),
+                Severity::Warning,
+            ));
         }
     }
 
-    if !any_resolved && !contract.r#match.files.is_empty() {
-        return Some(ContractRuleViolation::new(
-            RuleViolation {
-                rule: BOUNDARY_MATCH_UNRESOLVED_RULE_ID.to_string(),
-                message: format!(
-                    "Match patterns for contract '{}' in module '{}' did not resolve to any files: {:?}",
-                    contract.id, spec.module, failed_patterns
-                ),
-                from_file: spec
-                    .spec_path
-                    .clone()
-                    .unwrap_or_else(|| ctx.project_root.to_path_buf()),
-                to_file: None,
-                from_module: Some(spec.module.clone()),
-                to_module: None,
-                line: None,
-                column: None,
-            },
-            format!(
-                "Update `match.files` globs for contract '{}' so at least one path resolves, or add files that satisfy the declared glob patterns",
-                contract.id
-            ),
-            contract.id.clone(),
-        ));
-    }
-
-    None
+    violations
 }
 
 /// Find all files matching a glob pattern under the project root.
@@ -342,6 +469,7 @@ fn check_contract_refs(
             },
             "Use valid `module:contract_id` references in `imports_contract`, or define the referenced contract ids in the target modules".to_string(),
             contract.id.clone(),
+            Severity::Error,
         ));
     }
 
@@ -352,8 +480,8 @@ fn check_contract_refs(
 mod tests {
     use super::*;
     use crate::resolver::ModuleResolver;
-    use crate::spec::SpecConfig;
     use crate::spec::types::{Boundaries, ContractDirection, ContractMatch, EnvelopeRequirement};
+    use crate::spec::{Severity, SpecConfig};
     use tempfile::TempDir;
 
     fn spec_with_contracts(module: &str, contracts: Vec<BoundaryContract>) -> SpecFile {
@@ -380,15 +508,33 @@ mod tests {
         files: Vec<&str>,
         imports_contract: Vec<&str>,
     ) -> BoundaryContract {
+        create_test_contract_with_options(
+            id,
+            contract_path,
+            files,
+            None,
+            EnvelopeRequirement::Optional,
+            imports_contract,
+        )
+    }
+
+    fn create_test_contract_with_options(
+        id: &str,
+        contract_path: &str,
+        files: Vec<&str>,
+        pattern: Option<&str>,
+        envelope: EnvelopeRequirement,
+        imports_contract: Vec<&str>,
+    ) -> BoundaryContract {
         BoundaryContract {
             id: id.to_string(),
             contract: contract_path.to_string(),
             r#match: ContractMatch {
                 files: files.into_iter().map(String::from).collect(),
-                pattern: None,
+                pattern: pattern.map(String::from),
             },
             direction: ContractDirection::Bidirectional,
-            envelope: EnvelopeRequirement::Optional,
+            envelope,
             imports_contract: imports_contract.into_iter().map(String::from).collect(),
         }
     }
@@ -444,6 +590,7 @@ mod tests {
             BOUNDARY_CONTRACT_MISSING_RULE_ID
         );
         assert_eq!(violations[0].contract_id, "contract1");
+        assert_eq!(violations[0].severity, Severity::Error);
         assert!(
             violations[0]
                 .remediation_hint
@@ -561,6 +708,7 @@ mod tests {
             BOUNDARY_MATCH_UNRESOLVED_RULE_ID
         );
         assert_eq!(violations[0].contract_id, "contract1");
+        assert_eq!(violations[0].severity, Severity::Error);
     }
 
     #[test]
@@ -588,6 +736,242 @@ mod tests {
 
         let graph = build_graph(&temp, &specs);
         let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn required_envelope_with_valid_call_has_no_violation() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import { boundary } from 'specgate-envelope';\nexport function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn required_envelope_missing_import_reports_warning() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "export function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_ENVELOPE_MISSING_RULE_ID
+        );
+        assert_eq!(violations[0].severity, Severity::Warning);
+        assert!(
+            violations[0]
+                .remediation_hint
+                .contains("runtime envelope import")
+        );
+    }
+
+    #[test]
+    fn required_envelope_without_matching_call_reports_warning() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import { boundary } from 'specgate-envelope';\nexport function createUser() {\n  boundary.validate('different_contract', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_ENVELOPE_MISSING_RULE_ID
+        );
+        assert_eq!(violations[0].severity, Severity::Warning);
+        assert!(violations[0].remediation_hint.contains("boundary.validate"));
+    }
+
+    #[test]
+    fn required_envelope_with_match_pattern_scopes_calls() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import { boundary } from 'specgate-envelope';\nexport function createUser() {\n  return payload;\n}\n\nexport function other() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                Some("createUser"),
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_ENVELOPE_MISSING_RULE_ID
+        );
+        assert_eq!(violations[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn optional_envelope_skips_envelope_checks() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "export function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn disabled_envelope_config_skips_required_envelope_checks() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "export function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let mut config = SpecConfig::default();
+        config.envelope.enabled = false;
         let ctx = create_test_context(temp.path(), &config, &specs, &graph);
 
         let violations = evaluate_contract_rules(&ctx, None);
@@ -625,6 +1009,7 @@ mod tests {
             violations[0].violation.rule,
             BOUNDARY_CONTRACT_REF_INVALID_RULE_ID
         );
+        assert_eq!(violations[0].severity, Severity::Error);
         assert!(violations[0].violation.message.contains("invalid format"));
     }
 

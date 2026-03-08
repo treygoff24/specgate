@@ -4,6 +4,16 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Envelope AST static check (Phase 5):** When a contract declares `envelope: required`, specgate performs a targeted AST analysis on matched source files to verify they import the envelope package and call the validation function with the correct contract ID. Violations are warnings. Configurable via `envelope` section in `specgate.config.yml`.
+- `match.pattern` function scoping: envelope checks can be scoped to a specific exported function
+- `EnvelopeConfig` in `specgate.config.yml`: `enabled`, `import_patterns`, `function_pattern`
+- New module `src/rules/envelope.rs` for targeted AST analysis
+
+### Changed
+- `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error
+- `check_match_patterns()` returns resolved file paths for reuse by envelope checker
+
 ### npm Wrapper Hardening (P3.2)
 
 - **Version introspection** — `wrapperVersion` export and `wrapper_version` field in snapshot output for debugging and parity tracking.

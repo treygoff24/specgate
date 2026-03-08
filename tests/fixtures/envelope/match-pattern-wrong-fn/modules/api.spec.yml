@@ -1,0 +1,13 @@
+version: "2.3"
+module: api
+boundaries:
+  path: src/api/**/*
+  contracts:
+    - id: create_user
+      contract: contracts/create-user.json
+      envelope: required
+      match:
+        files:
+          - "src/api/handler.ts"
+        pattern: "deleteUser"
+constraints: []
