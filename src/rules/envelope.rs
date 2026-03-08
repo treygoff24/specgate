@@ -109,6 +109,19 @@ pub fn find_exported_function_span(source: &str, function_name: &str) -> Option<
         }
     }
 
+    for statement in &parser_return.program.body {
+        if let Statement::ExportNamedDeclaration(decl) = statement
+            && decl.declaration.is_none()
+            && decl.source.is_none()
+            && decl
+                .specifiers
+                .iter()
+                .any(|specifier| specifier.local.name() == function_name)
+        {
+            return find_local_function_span(&parser_return.program.body, function_name);
+        }
+    }
+
     None
 }
 
@@ -117,59 +130,132 @@ fn exported_function_span_from_statement<'a>(
     function_name: &str,
 ) -> Option<(u32, u32)> {
     match statement {
-        Statement::ExportNamedDeclaration(decl) => {
-            let inner_declaration = decl.declaration.as_ref()?;
-
-            match inner_declaration {
-                Declaration::FunctionDeclaration(function) => {
-                    if function
-                        .id
-                        .as_ref()
-                        .is_some_and(|id| id.name == function_name)
-                    {
-                        if let Some(body) = function.body.as_ref() {
-                            return Some((body.span.start, body.span.end));
-                        }
-                    }
-                }
-                Declaration::VariableDeclaration(declaration) => {
-                    for declarator in &declaration.declarations {
-                        if declaration_name_matches(&declarator.id, function_name) {
-                            if let Some(init) = &declarator.init {
-                                let span = match init {
-                                    Expression::ArrowFunctionExpression(function) => {
-                                        Some((function.body.span.start, function.body.span.end))
-                                    }
-                                    Expression::FunctionExpression(function) => {
-                                        function_expression_body_span(function.body.as_ref())
-                                    }
-                                    _ => None,
-                                };
-
-                                if span.is_some() {
-                                    return span;
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        Statement::ExportNamedDeclaration(decl) => decl
+            .declaration
+            .as_ref()
+            .and_then(|declaration| declaration_span(declaration, function_name)),
         Statement::ExportDefaultDeclaration(decl) => {
             if let ExportDefaultDeclarationKind::FunctionDeclaration(function) = &decl.declaration {
-                if function
-                    .id
-                    .as_ref()
-                    .is_some_and(|id| id.name == function_name)
-                {
-                    if let Some(body) = function.body.as_ref() {
-                        return Some((body.span.start, body.span.end));
-                    }
+                return named_function_body_span(function, function_name);
+            }
+
+            None
+        }
+        _ => None,
+    }
+}
+
+fn declaration_span(declaration: &Declaration<'_>, function_name: &str) -> Option<(u32, u32)> {
+    match declaration {
+        Declaration::FunctionDeclaration(function) => {
+            named_function_body_span(function, function_name)
+        }
+        Declaration::VariableDeclaration(declaration) => {
+            variable_declaration_span(declaration, function_name)
+        }
+        Declaration::ClassDeclaration(class_declaration) => {
+            class_declaration_method_span(class_declaration, function_name)
+        }
+        _ => None,
+    }
+}
+
+fn named_function_body_span(function: &Function<'_>, function_name: &str) -> Option<(u32, u32)> {
+    if function
+        .id
+        .as_ref()
+        .is_some_and(|identifier| identifier.name == function_name)
+    {
+        return function_expression_body_span(function.body.as_ref());
+    }
+
+    None
+}
+
+fn variable_declaration_span(
+    declaration: &oxc_ast::ast::VariableDeclaration<'_>,
+    function_name: &str,
+) -> Option<(u32, u32)> {
+    for declarator in &declaration.declarations {
+        if declaration_name_matches(&declarator.id, function_name)
+            && let Some(init) = &declarator.init
+            && let Some(span) = function_like_initializer_span(init)
+        {
+            return Some(span);
+        }
+    }
+
+    None
+}
+
+fn function_like_initializer_span(expression: &Expression<'_>) -> Option<(u32, u32)> {
+    match expression {
+        Expression::ArrowFunctionExpression(function) => {
+            Some((function.body.span.start, function.body.span.end))
+        }
+        Expression::FunctionExpression(function) => {
+            function_expression_body_span(function.body.as_ref())
+        }
+        Expression::CallExpression(call_expression)
+            if call_expression
+                .arguments
+                .iter()
+                .filter_map(Argument::as_expression)
+                .any(|argument| {
+                    matches!(
+                        argument,
+                        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+                    )
+                }) =>
+        {
+            Some((call_expression.span.start, call_expression.span.end))
+        }
+        _ => None,
+    }
+}
+
+fn class_declaration_method_span(
+    class_declaration: &oxc_ast::ast::Class<'_>,
+    function_name: &str,
+) -> Option<(u32, u32)> {
+    for element in &class_declaration.body.body {
+        if let oxc_ast::ast::ClassElement::MethodDefinition(method) = element
+            && method
+                .key
+                .static_name()
+                .is_some_and(|method_name| method_name == function_name)
+        {
+            return function_expression_body_span(method.value.body.as_ref());
+        }
+    }
+
+    None
+}
+
+fn find_local_function_span(
+    statements: &[Statement<'_>],
+    function_name: &str,
+) -> Option<(u32, u32)> {
+    for statement in statements {
+        match statement {
+            Statement::FunctionDeclaration(function) => {
+                if let Some(span) = named_function_body_span(function, function_name) {
+                    return Some(span);
                 }
             }
+            Statement::VariableDeclaration(declaration) => {
+                if let Some(span) = variable_declaration_span(declaration, function_name) {
+                    return Some(span);
+                }
+            }
+            Statement::ClassDeclaration(class_declaration) => {
+                if let Some(span) = class_declaration_method_span(class_declaration, function_name)
+                {
+                    return Some(span);
+                }
+            }
+            _ => {}
         }
-        _ => {}
     }
 
     None
@@ -207,6 +293,7 @@ struct AnalyzerState<'a> {
     import_patterns: &'a [String],
     pattern_parts: Vec<String>,
     import_bindings: BTreeSet<String>,
+    namespace_import_bindings: BTreeSet<String>,
     has_envelope_import: bool,
     is_type_only_import: bool,
     calls: Vec<EnvelopeCall>,
@@ -225,6 +312,7 @@ impl<'a> AnalyzerState<'a> {
             import_patterns,
             pattern_parts,
             import_bindings: BTreeSet::new(),
+            namespace_import_bindings: BTreeSet::new(),
             has_envelope_import: false,
             is_type_only_import: false,
             calls: Vec::new(),
@@ -238,9 +326,16 @@ impl<'a> AnalyzerState<'a> {
     fn is_import_binding(&self, value: &str) -> bool {
         self.import_bindings.contains(value)
     }
+
+    fn is_namespace_import_binding(&self, value: &str) -> bool {
+        self.namespace_import_bindings.contains(value)
+    }
 }
 
 fn collect_import_info(statements: &[Statement<'_>], state: &mut AnalyzerState<'_>) {
+    let mut saw_type_only_envelope_import = false;
+    let mut saw_runtime_envelope_import = false;
+
     for statement in statements {
         if let Statement::ImportDeclaration(decl) = statement {
             let specifier = decl.source.value.as_str();
@@ -248,11 +343,12 @@ fn collect_import_info(statements: &[Statement<'_>], state: &mut AnalyzerState<'
                 continue;
             }
 
-            let is_type_only = is_import_type_only(decl);
-            if is_type_only {
-                state.is_type_only_import = true;
+            if is_import_type_only(decl) {
+                saw_type_only_envelope_import = true;
                 continue;
             }
+
+            saw_runtime_envelope_import = true;
 
             let mut has_runtime_binding = false;
             if let Some(specifiers) = &decl.specifiers {
@@ -272,8 +368,13 @@ fn collect_import_info(statements: &[Statement<'_>], state: &mut AnalyzerState<'
                                 .insert(specifier.local.name.to_string());
                             has_runtime_binding = true;
                         }
-                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
-                            // Out of scope for envelope binding matching.
+                        oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                            specifier,
+                        ) => {
+                            state
+                                .namespace_import_bindings
+                                .insert(specifier.local.name.to_string());
+                            has_runtime_binding = true;
                         }
                     }
                 }
@@ -284,6 +385,8 @@ fn collect_import_info(statements: &[Statement<'_>], state: &mut AnalyzerState<'
             }
         }
     }
+
+    state.is_type_only_import = saw_type_only_envelope_import && !saw_runtime_envelope_import;
 }
 
 fn visit_statement_for_calls(
@@ -765,12 +868,32 @@ fn matches_call_pattern(call: &CallExpression<'_>, state: &AnalyzerState<'_>) ->
         return false;
     }
 
-    let Some(object_identifier) = expression_identifier_name(member_expr.object()) else {
-        return false;
-    };
+    if let Some(object_identifier) = expression_identifier_name(member_expr.object()) {
+        return state.is_import_binding(object_identifier)
+            || (state.has_envelope_import && object_identifier == object_name);
+    }
 
-    state.is_import_binding(object_identifier)
-        || (state.has_envelope_import && object_identifier == object_name)
+    namespace_object_identifier(member_expr.object(), object_name)
+        .is_some_and(|namespace_binding| state.is_namespace_import_binding(namespace_binding))
+}
+
+fn namespace_object_identifier<'a>(
+    expression: &'a Expression<'a>,
+    expected_object_name: &str,
+) -> Option<&'a str> {
+    let expression = expression.get_inner_expression();
+
+    match expression {
+        oxc_ast::match_member_expression!(Expression) => {
+            let member = expression.to_member_expression();
+            if member.static_property_name() != Some(expected_object_name) {
+                return None;
+            }
+
+            expression_identifier_name(member.object())
+        }
+        _ => None,
+    }
 }
 
 fn matches_identifier_name(expression: &Expression<'_>, expected: &str) -> bool {
@@ -980,6 +1103,55 @@ mod tests {
     }
 
     #[test]
+    fn finds_exported_function_span_for_hoc_wrapper_export() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nexport const createUser = withAuth(() => {\n  boundary.validate('create_user', data);\n});\n";
+
+        let analysis = run_analysis(source);
+        let span = find_exported_function_span(source, "createUser").expect("createUser span");
+        let calls = filter_calls_by_span(&analysis.calls, span.0, span.1);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].contract_id, "create_user");
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_indirect_export() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nconst handler = () => {\n  boundary.validate('id', data);\n};\n\nexport { handler };\n";
+
+        let analysis = run_analysis(source);
+        let span = find_exported_function_span(source, "handler").expect("handler span");
+        let calls = filter_calls_by_span(&analysis.calls, span.0, span.1);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].contract_id, "id");
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_exported_class_method() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nexport class UserService {\n  createUser() {\n    boundary.validate('id', data);\n  }\n}\n";
+
+        let analysis = run_analysis(source);
+        let span = find_exported_function_span(source, "createUser").expect("createUser span");
+        let calls = filter_calls_by_span(&analysis.calls, span.0, span.1);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].contract_id, "id");
+    }
+
+    #[test]
+    fn hoc_wrapper_span_filters_out_calls_outside_wrapper() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nexport const deleteUser = withAuth(() => {\n  console.log('noop');\n});\n\nboundary.validate('outside', data);\n";
+
+        let analysis = run_analysis(source);
+        let span = find_exported_function_span(source, "deleteUser").expect("deleteUser span");
+        let calls = filter_calls_by_span(&analysis.calls, span.0, span.1);
+
+        assert!(calls.is_empty());
+        assert_eq!(analysis.calls.len(), 1);
+        assert_eq!(analysis.calls[0].contract_id, "outside");
+    }
+
+    #[test]
     fn filter_calls_by_span_includes_inside_calls() {
         let calls = vec![build_call(10, 20), build_call(30, 40)];
 
@@ -1069,6 +1241,18 @@ mod tests {
     }
 
     #[test]
+    fn mixed_type_only_and_runtime_import_is_treated_as_runtime_import() {
+        let analysis = run_analysis(
+            "import type { BoundaryType } from 'specgate-envelope';\nimport { boundary } from 'specgate-envelope';\nboundary.validate('create_user', data);\n",
+        );
+
+        assert!(analysis.has_envelope_import);
+        assert!(!analysis.is_type_only_import);
+        assert_eq!(analysis.calls.len(), 1);
+        assert_eq!(analysis.calls[0].contract_id, "create_user");
+    }
+
+    #[test]
     fn marks_type_only_import_and_ignores_for_runtime() {
         let analysis = run_analysis(
             "import type { boundary } from 'specgate-envelope';\nboundary.validate('create_user', data);\n",
@@ -1077,6 +1261,26 @@ mod tests {
         assert!(!analysis.has_envelope_import);
         assert!(analysis.is_type_only_import);
         assert!(analysis.calls.is_empty());
+    }
+
+    #[test]
+    fn marks_namespace_import_as_runtime_envelope_import() {
+        let analysis = run_analysis(
+            "import * as env from 'specgate-envelope';\nenv.boundary.validate('create_user', data);\n",
+        );
+
+        assert!(analysis.has_envelope_import);
+        assert!(!analysis.is_type_only_import);
+    }
+
+    #[test]
+    fn detects_namespace_member_call_for_default_boundary_pattern() {
+        let analysis = run_analysis(
+            "import * as env from 'specgate-envelope';\nenv.boundary.validate('create_user', data);\n",
+        );
+
+        assert_eq!(analysis.calls.len(), 1);
+        assert_eq!(analysis.calls[0].contract_id, "create_user");
     }
 
     #[test]

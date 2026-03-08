@@ -308,7 +308,7 @@ fn check_envelope(
             Err(_) => continue,
         };
 
-        if !analysis.has_envelope_import || analysis.is_type_only_import {
+        if !analysis.has_envelope_import {
             violations.push(ContractRuleViolation::new(
                 RuleViolation {
                     rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
@@ -777,6 +777,119 @@ mod tests {
         let violations = evaluate_contract_rules(&ctx, None);
 
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn required_envelope_with_type_only_and_runtime_import_has_no_violation() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import type { BoundaryType } from 'specgate-envelope';\nimport { boundary } from 'specgate-envelope';\nexport function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn required_envelope_with_namespace_import_and_call_has_no_violation() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import * as env from 'specgate-envelope';\nexport function createUser() {\n  env.boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn required_envelope_with_only_type_import_reports_warning() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import type { boundary } from 'specgate-envelope';\nexport function createUser() {\n  boundary.validate('contract1', payload);\n}\n",
+        )
+        .expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_ENVELOPE_MISSING_RULE_ID
+        );
+        assert_eq!(violations[0].severity, Severity::Warning);
     }
 
     #[test]
