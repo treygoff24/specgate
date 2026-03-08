@@ -9,6 +9,7 @@ All notable changes to Specgate are documented in this file.
 - `match.pattern` function scoping: envelope checks can be scoped to a specific exported function
 - `EnvelopeConfig` in `specgate.config.yml`: `enabled`, `import_patterns`, `function_pattern`
 - New module `src/rules/envelope.rs` for targeted AST analysis
+- `--format sarif` flag for SARIF 2.1.0 output (GitHub Code Scanning integration)
 
 ### Changed
 - `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error

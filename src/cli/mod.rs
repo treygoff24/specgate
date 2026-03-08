@@ -697,6 +697,11 @@ fn handle_check(args: CheckArgs) -> CliRunResult {
             stdout: verdict::format::format_verdict_ndjson(&verdict),
             stderr: String::new(),
         },
+        OutputFormat::Sarif => CliRunResult {
+            exit_code,
+            stdout: format!("{}\n", verdict::format::format_verdict_sarif(&verdict)),
+            stderr: String::new(),
+        },
     };
 
     if let Some(warning) = deprecation_warning {

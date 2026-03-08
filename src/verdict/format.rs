@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Serialize;
@@ -340,6 +341,201 @@ pub fn format_verdict_ndjson(verdict: &Verdict) -> String {
         .collect();
 
     lines.join("\n")
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifLog {
+    #[serde(rename = "$schema")]
+    schema: &'static str,
+    version: &'static str,
+    runs: Vec<SarifRun>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifRun {
+    tool: SarifTool,
+    results: Vec<SarifResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifTool {
+    driver: SarifDriver,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifDriver {
+    name: &'static str,
+    version: String,
+    #[serde(rename = "informationUri")]
+    information_uri: &'static str,
+    rules: Vec<SarifReportingDescriptor>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifReportingDescriptor {
+    id: String,
+    #[serde(rename = "shortDescription")]
+    short_description: SarifMessage,
+    #[serde(rename = "defaultConfiguration")]
+    default_configuration: SarifConfiguration,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifConfiguration {
+    level: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifResult {
+    #[serde(rename = "ruleId")]
+    rule_id: String,
+    level: &'static str,
+    message: SarifMessage,
+    locations: Vec<SarifLocation>,
+    fingerprints: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifMessage {
+    text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifLocation {
+    #[serde(rename = "physicalLocation")]
+    physical_location: SarifPhysicalLocation,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifPhysicalLocation {
+    #[serde(rename = "artifactLocation")]
+    artifact_location: SarifArtifactLocation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<SarifRegion>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifArtifactLocation {
+    uri: String,
+    #[serde(rename = "uriBaseId")]
+    uri_base_id: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifRegion {
+    #[serde(rename = "startLine", skip_serializing_if = "Option::is_none")]
+    start_line: Option<u32>,
+    #[serde(rename = "startColumn", skip_serializing_if = "Option::is_none")]
+    start_column: Option<u32>,
+}
+
+fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+    }
+}
+
+fn sarif_rule_short_description(rule_id: &str) -> String {
+    match rule_id.split_once('.') {
+        Some((namespace, name)) if !namespace.is_empty() && !name.is_empty() => {
+            let mut chars = namespace.chars();
+            let namespace_title = match chars.next() {
+                Some(first) => {
+                    let mut title = first.to_uppercase().to_string();
+                    title.push_str(chars.as_str());
+                    title
+                }
+                None => namespace.to_string(),
+            };
+
+            format!("{namespace_title} {name} violation")
+        }
+        _ => format!("{rule_id} violation"),
+    }
+}
+
+/// Format a verdict as SARIF 2.1.0.
+pub fn format_verdict_sarif(verdict: &Verdict) -> String {
+    let mut rule_levels: BTreeMap<String, Severity> = BTreeMap::new();
+
+    for violation in &verdict.violations {
+        rule_levels
+            .entry(violation.rule.clone())
+            .and_modify(|level| {
+                if violation.severity == Severity::Error {
+                    *level = Severity::Error;
+                }
+            })
+            .or_insert(violation.severity);
+    }
+
+    let rules = rule_levels
+        .into_iter()
+        .map(|(rule_id, severity)| SarifReportingDescriptor {
+            id: rule_id.clone(),
+            short_description: SarifMessage {
+                text: sarif_rule_short_description(&rule_id),
+            },
+            default_configuration: SarifConfiguration {
+                level: sarif_level(severity),
+            },
+        })
+        .collect();
+
+    let results = verdict
+        .violations
+        .iter()
+        .map(|violation| {
+            let mut fingerprints = BTreeMap::new();
+            fingerprints.insert("specgate/v1".to_string(), violation.fingerprint.clone());
+
+            let region = if violation.line.is_some() || violation.column.is_some() {
+                Some(SarifRegion {
+                    start_line: violation.line,
+                    start_column: violation.column,
+                })
+            } else {
+                None
+            };
+
+            SarifResult {
+                rule_id: violation.rule.clone(),
+                level: sarif_level(violation.severity),
+                message: SarifMessage {
+                    text: violation.message.clone(),
+                },
+                locations: vec![SarifLocation {
+                    physical_location: SarifPhysicalLocation {
+                        artifact_location: SarifArtifactLocation {
+                            uri: violation.from_file.clone(),
+                            uri_base_id: "%SRCROOT%",
+                        },
+                        region,
+                    },
+                }],
+                fingerprints,
+            }
+        })
+        .collect();
+
+    let sarif = SarifLog {
+        schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+        version: "2.1.0",
+        runs: vec![SarifRun {
+            tool: SarifTool {
+                driver: SarifDriver {
+                    name: "specgate",
+                    version: verdict.tool_version.clone(),
+                    information_uri: "https://github.com/treygoff24/specgate",
+                    rules,
+                },
+            },
+            results,
+        }],
+    };
+
+    serde_json::to_string_pretty(&sarif).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -756,5 +952,155 @@ mod tests {
         assert_eq!(parsed["expected"], "expected_value");
         assert_eq!(parsed["actual"], "actual_value");
         assert_eq!(parsed["remediation_hint"], "Fix this issue");
+    }
+
+    // Tests for format_verdict_sarif
+
+    #[test]
+    fn format_verdict_sarif_empty_violations_has_zero_results() {
+        let verdict = empty_verdict();
+        let output = format_verdict_sarif(&verdict);
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        assert_eq!(parsed["version"], "2.1.0");
+        assert_eq!(
+            parsed["runs"][0]["results"]
+                .as_array()
+                .expect("results")
+                .len(),
+            0
+        );
+        assert_eq!(
+            parsed["runs"][0]["tool"]["driver"]["rules"]
+                .as_array()
+                .expect("rules")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn format_verdict_sarif_single_violation_includes_location_line_column() {
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Error,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import not allowed",
+        )];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_sarif(&verdict);
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+                ["uri"],
+            "src/app/main.ts"
+        );
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+                ["uriBaseId"],
+            "%SRCROOT%"
+        );
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"]["startLine"],
+            10
+        );
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"]["startColumn"],
+            5
+        );
+    }
+
+    #[test]
+    fn format_verdict_sarif_multiple_rules_have_descriptors() {
+        let violations = vec![
+            test_verdict_violation(
+                "boundary.never_imports",
+                Severity::Error,
+                "src/a.ts",
+                VerdictDisposition::New,
+                "Error",
+            ),
+            test_verdict_violation(
+                "boundary.public_api",
+                Severity::Error,
+                "src/b.ts",
+                VerdictDisposition::New,
+                "Error",
+            ),
+        ];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_sarif(&verdict);
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        let rules = parsed["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .expect("rules array");
+        assert_eq!(rules.len(), 2);
+
+        let ids = rules
+            .iter()
+            .map(|rule| rule["id"].as_str().expect("rule id"))
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&"boundary.never_imports"));
+        assert!(ids.contains(&"boundary.public_api"));
+    }
+
+    #[test]
+    fn format_verdict_sarif_warning_uses_warning_level() {
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Warning,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import warning",
+        )];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_sarif(&verdict);
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        assert_eq!(parsed["runs"][0]["results"][0]["level"], "warning");
+    }
+
+    #[test]
+    fn format_verdict_sarif_includes_fingerprints() {
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Error,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import not allowed",
+        )];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_sarif(&verdict);
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["fingerprints"]["specgate/v1"],
+            "sha256:test123"
+        );
+    }
+
+    #[test]
+    fn format_verdict_sarif_output_is_valid_json_structure() {
+        let violations = vec![test_verdict_violation(
+            "boundary.never_imports",
+            Severity::Error,
+            "src/app/main.ts",
+            VerdictDisposition::New,
+            "Import not allowed",
+        )];
+        let verdict = verdict_with_violations(violations);
+        let output = format_verdict_sarif(&verdict);
+
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("Valid JSON");
+        assert_eq!(
+            parsed["$schema"],
+            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
+        );
+        assert_eq!(parsed["version"], "2.1.0");
+        assert_eq!(parsed["runs"][0]["tool"]["driver"]["name"], "specgate");
+        assert_eq!(parsed["runs"][0]["tool"]["driver"]["version"], "0.1.0");
     }
 }
