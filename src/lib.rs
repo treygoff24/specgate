@@ -5,6 +5,7 @@ pub mod deterministic;
 pub mod git_blast;
 pub mod graph;
 pub mod parser;
+pub mod policy;
 pub mod resolver;
 pub mod rules;
 pub mod spec;
