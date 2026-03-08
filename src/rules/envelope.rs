@@ -4,8 +4,9 @@ use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, CallExpression, ChainElement, Declaration, Expression,
-    ForStatementInit, ForStatementLeft, Function, ObjectPropertyKind, Statement,
+    Argument, ArrayExpressionElement, BindingPatternKind, CallExpression, ChainElement,
+    Declaration, ExportDefaultDeclarationKind, Expression, ForStatementInit, ForStatementLeft,
+    Function, ObjectPropertyKind, Statement,
 };
 use oxc_parser::Parser;
 use oxc_span::SourceType;
@@ -81,6 +82,125 @@ pub fn analyze_file_for_envelope(
         is_type_only_import: state.is_type_only_import,
         calls: state.calls,
     })
+}
+
+/// Find the byte span (start, end) of an exported function/const matching the given name.
+/// Returns None if no matching export is found.
+///
+/// Handles:
+/// - `export function createUser(...) { ... }`
+/// - `export async function createUser(...) { ... }`
+/// - `export const createUser = (...) => { ... }`
+/// - `export const createUser = async (...) => { ... }`
+/// - `export const createUser = function(...) { ... }`
+/// - `export default function createUser(...) { ... }`
+pub fn find_exported_function_span(source: &str, function_name: &str) -> Option<(u32, u32)> {
+    let allocator = Allocator::default();
+    let source_type = SourceType::default().with_module(true);
+    let parser_return = Parser::new(&allocator, source, source_type).parse();
+
+    if !parser_return.errors.is_empty() {
+        return None;
+    }
+
+    for statement in &parser_return.program.body {
+        if let Some(span) = exported_function_span_from_statement(statement, function_name) {
+            return Some(span);
+        }
+    }
+
+    None
+}
+
+fn exported_function_span_from_statement<'a>(
+    statement: &Statement<'a>,
+    function_name: &str,
+) -> Option<(u32, u32)> {
+    match statement {
+        Statement::ExportNamedDeclaration(decl) => {
+            let inner_declaration = decl.declaration.as_ref()?;
+
+            match inner_declaration {
+                Declaration::FunctionDeclaration(function) => {
+                    if function
+                        .id
+                        .as_ref()
+                        .is_some_and(|id| id.name == function_name)
+                    {
+                        if let Some(body) = function.body.as_ref() {
+                            return Some((body.span.start, body.span.end));
+                        }
+                    }
+                }
+                Declaration::VariableDeclaration(declaration) => {
+                    for declarator in &declaration.declarations {
+                        if declaration_name_matches(&declarator.id, function_name) {
+                            if let Some(init) = &declarator.init {
+                                let span = match init {
+                                    Expression::ArrowFunctionExpression(function) => {
+                                        Some((function.body.span.start, function.body.span.end))
+                                    }
+                                    Expression::FunctionExpression(function) => {
+                                        function_expression_body_span(function.body.as_ref())
+                                    }
+                                    _ => None,
+                                };
+
+                                if span.is_some() {
+                                    return span;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Statement::ExportDefaultDeclaration(decl) => {
+            if let ExportDefaultDeclarationKind::FunctionDeclaration(function) = &decl.declaration {
+                if function
+                    .id
+                    .as_ref()
+                    .is_some_and(|id| id.name == function_name)
+                {
+                    if let Some(body) = function.body.as_ref() {
+                        return Some((body.span.start, body.span.end));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    None
+}
+
+fn function_expression_body_span(
+    body: Option<&oxc_allocator::Box<'_, oxc_ast::ast::FunctionBody<'_>>>,
+) -> Option<(u32, u32)> {
+    body.map(|body| (body.span.start, body.span.end))
+}
+
+fn declaration_name_matches(declarator: &oxc_ast::ast::BindingPattern<'_>, name: &str) -> bool {
+    match &declarator.kind {
+        BindingPatternKind::BindingIdentifier(identifier) => identifier.name == name,
+        BindingPatternKind::AssignmentPattern(assignment) => {
+            declaration_name_matches(&assignment.left, name)
+        }
+        _ => false,
+    }
+}
+
+/// Filter envelope calls to only those within a given byte span range.
+pub fn filter_calls_by_span(
+    calls: &[EnvelopeCall],
+    span_start: u32,
+    span_end: u32,
+) -> Vec<&EnvelopeCall> {
+    calls
+        .iter()
+        .filter(|call| call.span_start >= span_start && call.span_end <= span_end)
+        .collect()
 }
 
 struct AnalyzerState<'a> {
@@ -771,6 +891,131 @@ mod tests {
 
         analyze_file_for_envelope(&file_path, import_patterns, function_pattern)
             .expect("envelope analysis")
+    }
+
+    fn block_span_from_source(source: &str) -> (u32, u32) {
+        let start = source.find('{').expect("missing '{'");
+        let end = source.rfind('}').expect("missing '}'");
+
+        (start as u32, end as u32 + 1)
+    }
+
+    fn build_call(span_start: u32, span_end: u32) -> EnvelopeCall {
+        EnvelopeCall {
+            contract_id: "create_user".to_string(),
+            line: 0,
+            column: 0,
+            span_start,
+            span_end,
+        }
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_exported_function() {
+        let source = "export function createUser() {\n  return 1;\n}\n";
+
+        let expected = block_span_from_source(source);
+        assert_eq!(
+            find_exported_function_span(source, "createUser"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_async_exported_function() {
+        let source = "export async function createUser() {\n  return 1;\n}\n";
+
+        let expected = block_span_from_source(source);
+        assert_eq!(
+            find_exported_function_span(source, "createUser"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_arrow_exported_const() {
+        let source = "export const createUser = () => {\n  return 1;\n};\n";
+
+        let expected = block_span_from_source(source);
+        assert_eq!(
+            find_exported_function_span(source, "createUser"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_async_arrow_exported_const() {
+        let source = "export const createUser = async () => {\n  return 1;\n};\n";
+
+        let expected = block_span_from_source(source);
+        assert_eq!(
+            find_exported_function_span(source, "createUser"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn finds_exported_function_span_for_export_default_function() {
+        let source = "export default function createUser() {\n  return 1;\n}\n";
+
+        let expected = block_span_from_source(source);
+        assert_eq!(
+            find_exported_function_span(source, "createUser"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn finds_exported_function_span_returns_none_when_not_found() {
+        let source = "export function createUser() {\n  return 1;\n}\n";
+
+        assert_eq!(find_exported_function_span(source, "deleteUser"), None);
+    }
+
+    #[test]
+    fn finds_exported_function_span_only_matches_exported_functions() {
+        let source = "function createUser() {\n  return 1;\n}\n";
+
+        assert_eq!(find_exported_function_span(source, "createUser"), None);
+    }
+
+    #[test]
+    fn filter_calls_by_span_includes_inside_calls() {
+        let calls = vec![build_call(10, 20), build_call(30, 40)];
+
+        let filtered = filter_calls_by_span(&calls, 5, 25);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].span_start, 10);
+    }
+
+    #[test]
+    fn filter_calls_by_span_excludes_outside_calls() {
+        let calls = vec![build_call(10, 20)];
+
+        let filtered = filter_calls_by_span(&calls, 25, 100);
+
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn finds_scoped_envelope_call_for_matching_exported_function() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nexport function createUser() {\n  boundary.validate('create_user', data);\n}\n\nexport function deleteUser() {\n  console.log('noop');\n}\n";
+
+        let analysis = run_analysis(source);
+
+        let create_span =
+            find_exported_function_span(source, "createUser").expect("createUser span");
+        let create_calls = filter_calls_by_span(&analysis.calls, create_span.0, create_span.1);
+
+        assert_eq!(create_calls.len(), 1);
+        assert_eq!(create_calls[0].contract_id, "create_user");
+
+        let delete_span =
+            find_exported_function_span(source, "deleteUser").expect("deleteUser span");
+        let delete_calls = filter_calls_by_span(&analysis.calls, delete_span.0, delete_span.1);
+
+        assert!(delete_calls.is_empty());
     }
 
     #[test]
