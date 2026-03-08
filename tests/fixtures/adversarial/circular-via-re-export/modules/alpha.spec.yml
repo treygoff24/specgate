@@ -1,0 +1,7 @@
+version: "2.2"
+module: alpha
+boundaries:
+  path: src/alpha/**/*
+constraints:
+  - rule: no-circular-deps
+    severity: error

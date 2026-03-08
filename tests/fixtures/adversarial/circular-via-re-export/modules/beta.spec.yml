@@ -1,0 +1,7 @@
+version: "2.2"
+module: beta
+boundaries:
+  path: src/beta/**/*
+constraints:
+  - rule: no-circular-deps
+    severity: error

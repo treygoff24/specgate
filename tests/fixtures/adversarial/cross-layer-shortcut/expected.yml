@@ -1,0 +1,8 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "handlers"
+    to_module: "database"
+gap_reason: null
+future_priority: null
+notes: "Handler imports database directly, bypassing service layer."

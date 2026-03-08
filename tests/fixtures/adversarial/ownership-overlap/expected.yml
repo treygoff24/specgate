@@ -1,0 +1,5 @@
+assertion: diagnostic
+violations: []
+gap_reason: null
+future_priority: null
+notes: "Doctor should report overlapping module ownership for the same file glob."

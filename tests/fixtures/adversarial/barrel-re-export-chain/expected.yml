@@ -1,0 +1,8 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "module-a"
+    to_module: "module-d"
+gap_reason: null
+future_priority: null
+notes: "A forbidden dependency is hidden behind a multi-hop barrel re-export chain."

@@ -1,0 +1,5 @@
+version: "2.2"
+module: consumer
+boundaries:
+  path: src/consumer/**/*
+constraints: []

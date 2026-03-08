@@ -1,0 +1,9 @@
+version: "2.2"
+module: module-a
+boundaries:
+  path: src/module-a/**/*
+  never_imports:
+    - module-d
+constraints:
+  - rule: boundary.never_imports
+    severity: error
