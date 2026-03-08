@@ -303,6 +303,7 @@ fn check_envelope(
             file_path,
             &ctx.config.envelope.import_patterns,
             &ctx.config.envelope.function_pattern,
+            contract.r#match.pattern.as_deref(),
         ) {
             Ok(analysis) => analysis,
             Err(_) => continue,
@@ -336,28 +337,11 @@ fn check_envelope(
             continue;
         }
 
-        let mut matching_calls = analysis
+        let matching_calls = analysis
             .calls
             .into_iter()
             .filter(|call| call.contract_id == contract.id)
             .collect::<Vec<_>>();
-
-        if let Some(function_name) = contract.r#match.pattern.as_deref() {
-            let source = match fs::read_to_string(file_path) {
-                Ok(source) => source,
-                Err(_) => continue,
-            };
-
-            matching_calls = match envelope::find_exported_function_span(&source, function_name) {
-                Some((span_start, span_end)) => {
-                    envelope::filter_calls_by_span(&matching_calls, span_start, span_end)
-                        .into_iter()
-                        .cloned()
-                        .collect()
-                }
-                None => Vec::new(),
-            };
-        }
 
         if matching_calls.is_empty() {
             violations.push(ContractRuleViolation::new(

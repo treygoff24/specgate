@@ -39,6 +39,7 @@ pub fn analyze_file_for_envelope(
     path: &Path,
     import_patterns: &[String],
     function_pattern: &str,
+    match_pattern: Option<&str>,
 ) -> Result<EnvelopeAnalysis, EnvelopeError> {
     let source = fs::read_to_string(path).map_err(EnvelopeError::FileRead)?;
 
@@ -64,6 +65,18 @@ pub fn analyze_file_for_envelope(
 
     for statement in &parser_return.program.body {
         visit_statement_for_calls(statement, &mapper, &mut state);
+    }
+
+    if let Some(function_name) = match_pattern {
+        if let Some((span_start, span_end)) =
+            find_exported_function_span_in_statements(&parser_return.program.body, function_name)
+        {
+            state
+                .calls
+                .retain(|call| call.span_start >= span_start && call.span_end <= span_end);
+        } else {
+            state.calls.clear();
+        }
     }
 
     let mut import_bindings = state.import_bindings.into_iter().collect::<Vec<_>>();
@@ -103,13 +116,20 @@ pub fn find_exported_function_span(source: &str, function_name: &str) -> Option<
         return None;
     }
 
-    for statement in &parser_return.program.body {
+    find_exported_function_span_in_statements(&parser_return.program.body, function_name)
+}
+
+fn find_exported_function_span_in_statements(
+    statements: &[Statement<'_>],
+    function_name: &str,
+) -> Option<(u32, u32)> {
+    for statement in statements {
         if let Some(span) = exported_function_span_from_statement(statement, function_name) {
             return Some(span);
         }
     }
 
-    for statement in &parser_return.program.body {
+    for statement in statements {
         if let Statement::ExportNamedDeclaration(decl) = statement
             && decl.declaration.is_none()
             && decl.source.is_none()
@@ -118,7 +138,7 @@ pub fn find_exported_function_span(source: &str, function_name: &str) -> Option<
                 .iter()
                 .any(|specifier| specifier.local.name() == function_name)
         {
-            return find_local_function_span(&parser_return.program.body, function_name);
+            return find_local_function_span(statements, function_name);
         }
     }
 
@@ -1012,7 +1032,7 @@ mod tests {
         let file_path = temp.path().join("sample.ts");
         fs::write(&file_path, source).expect("write sample");
 
-        analyze_file_for_envelope(&file_path, import_patterns, function_pattern)
+        analyze_file_for_envelope(&file_path, import_patterns, function_pattern, None)
             .expect("envelope analysis")
     }
 
@@ -1188,6 +1208,34 @@ mod tests {
         let delete_calls = filter_calls_by_span(&analysis.calls, delete_span.0, delete_span.1);
 
         assert!(delete_calls.is_empty());
+    }
+
+    #[test]
+    fn analyze_file_for_envelope_scopes_calls_when_match_pattern_is_set() {
+        let source = "import { boundary } from 'specgate-envelope';\n\nexport function createUser() {\n  return data;\n}\n\nexport function other() {\n  boundary.validate('create_user', data);\n}\n";
+
+        let temp = TempDir::new().expect("tempdir");
+        let file_path = temp.path().join("sample.ts");
+        fs::write(&file_path, source).expect("write sample");
+
+        let scoped_create = analyze_file_for_envelope(
+            &file_path,
+            &["specgate-envelope".to_string()],
+            "boundary.validate",
+            Some("createUser"),
+        )
+        .expect("envelope analysis");
+        assert!(scoped_create.calls.is_empty());
+
+        let scoped_other = analyze_file_for_envelope(
+            &file_path,
+            &["specgate-envelope".to_string()],
+            "boundary.validate",
+            Some("other"),
+        )
+        .expect("envelope analysis");
+        assert_eq!(scoped_other.calls.len(), 1);
+        assert_eq!(scoped_other.calls[0].contract_id, "create_user");
     }
 
     #[test]

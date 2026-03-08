@@ -48,16 +48,30 @@ Specgate’s envelope check is intentionally practical and supports the followin
 - `as const`: `boundary.validate('create_user' as const, data)`
 - Optional chaining: `boundary?.validate('create_user', data)`
 
-## match.pattern scoping
+## Export patterns and `match.pattern` scoping
 
-If `match.pattern: "createUser"` is set, the envelope check is scoped to that function’s AST subtree. A valid `boundary.validate(...)` call elsewhere in the same file does **not** satisfy the contract.
+If `match.pattern` is specified, Specgate looks for the named export in the matched file and scopes envelope-call matching to that export. A valid `boundary.validate(...)` call elsewhere in the same file does **not** satisfy the contract.
+
+Supported export forms include:
+
+- `export function name() { ... }`
+- `export async function name() { ... }`
+- `export const name = () => { ... }`
+- `export const name = function() { ... }`
+- `export default function name() { ... }`
+- `export const name = withWrapper(() => { ... })` (HOC/wrapper patterns)
+- `export { name }` (indirect exports with prior declaration)
+- Class methods within exported classes
+
+If your codebase uses export patterns not listed above, omit `match.pattern` to fall back to file-level checking, or restructure the export to use a supported form.
 
 ## Known limitations (by design)
 
 - Presence-based, not control-flow: a call inside `if (...) { ... }` still satisfies coverage.
 - No cross-file resolution: if validation happens in a helper, point `match.files` at the helper.
+- Re-exported functions from other modules are not followed cross-file.
+- Class dotted patterns (for example `UserService.createUser`) are not supported — use just the method name (`createUser`).
 - Computed member expressions are not detected: `boundary['validate'](...)` does not match.
-- Namespace imports are not detected: `import * as envelope from '...'`.
 - Dynamic imports are not detected: `const { boundary } = await import('...')`.
 - Type-only imports don't count (they are erased at runtime).
 
