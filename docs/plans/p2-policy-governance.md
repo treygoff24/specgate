@@ -4,9 +4,9 @@
 
 **Goal:** Add a new `specgate policy-diff` command that compares `.spec.yml` policy between two git refs and deterministically classifies each change as **widening**, **narrowing**, or **structural**.
 
-**Architecture:** Implement policy diffing as a new `src/policy/` domain (separate from runtime rule evaluation in `src/rules/`) with a field-aware semantic classifier over parsed `SpecFile` structs. `src/cli/policy_diff.rs` becomes the command surface, while `src/policy/git.rs` handles ref/diff/blob retrieval with shallow-clone diagnostics and process-efficient batching.
+**Architecture:** Implement policy diffing as a new `src/policy/` domain (separate from runtime rule evaluation in `src/rules/`) with a field-aware semantic classifier over parsed `SpecFile` structs. `src/cli/policy_diff.rs` becomes the command surface, while `src/policy/git.rs` handles ref/diff/blob retrieval with shallow-clone diagnostics, null-safe parsing, and process-efficient batching.
 
-**Tech Stack:** Rust 2024, clap, serde/serde_json, yaml_serde (`serde_yml`), git subprocesses (`git diff`, `git cat-file --batch`, `git ls-tree`), existing Specgate CLI/error conventions.
+**Tech Stack:** Rust 2024, clap, serde/serde_json, yaml_serde (`serde_yml`), git subprocesses (`git diff -z --name-status`, `git cat-file --batch -Z`, scoped `git ls-tree -rz`), existing Specgate CLI/error conventions.
 
 ---
 
@@ -19,11 +19,15 @@
   - `--head <ref>` (optional, default `HEAD`)
   - `--format human|json|ndjson` (default `human`)
 - Field-level widening/narrowing/structural classification for **all `SpecFile` fields**
+- **Fail-closed file-operation semantics for governance safety:**
+  - any `.spec.yml` deletion (`D`) is widening
+  - any `.spec.yml` rename/copy (`R*`/`C*`) is widening-risk in MVP (exit 1)
 - Shallow clone detection + graceful error (with explicit CI remediation)
-- Git diff scoping optimization:
-  - first `git diff --name-status ... -- '*.spec.yml'`
-  - then blob retrieval only for changed paths, batched (no per-file process spawning)
-- Integration tests using adversarial policy-change fixtures (widening attempts, mixed changes, parse failures)
+- Git diff + blob loading optimization:
+  - first `git diff -z --name-status --find-renames --diff-filter=ACDMRT <base>..<head> -- '*.spec.yml'`
+  - then blob retrieval only for changed paths, batched via `git cat-file --batch -Z` (no per-file process spawning)
+- Monorepo-safe `boundaries.path` comparison via **scoped file universe discovery** (no full-repo `git ls-tree -r` by default)
+- Integration tests using adversarial policy-change fixtures (rename bypass attempts, deletion, malformed YAML, weird filenames)
 - Exit code contract:
   - `0` = no widenings (only narrowing/structural/no changes)
   - `1` = one or more widenings detected
@@ -31,7 +35,7 @@
 
 ## Explicitly deferred follow-up
 
-- Semantic module rename pairing (old module == new module inference)
+- Semantic rename pairing that can safely downgrade `R*`/`C*` from widening-risk when content is semantically equivalent
 - Cross-file compensation analysis ("A widened but B narrowed")
 - `specgate check --deny-widenings`
 - CODEOWNERS automation/integration (guidance docs only now)
@@ -43,12 +47,15 @@
 
 ## 1.1 Module placement decision (Athena finding #6)
 
-**Decision:** place this feature in a new top-level module: `src/policy/`, not `src/rules/`.
+**Athena feedback (accurate):** Athena recommended placing diff/classification in `src/rules/` (likely `src/rules/diff.rs`) to keep policy logic together.
 
-**Why:**
+**Decision for this plan:** still place this feature in a new top-level module: `src/policy/`, not `src/rules/`.
+
+**Why this plan keeps `src/policy/`:**
 - `src/rules/` is runtime code-policy evaluation over dependency graph edges (`specgate check`).
-- `policy-diff` is *governance of policy artifacts across git history* (git IO, ref validation, ref-scoped YAML loading, diff rendering).
-- Mixing git/ref concerns into `rules/` would couple runtime evaluation with VCS plumbing and reduce maintainability.
+- `policy-diff` is governance over policy artifacts across git history (git IO, ref validation, ref-scoped YAML loading, diff rendering).
+- Keeping git/ref plumbing in `src/policy/` avoids coupling VCS concerns into runtime rule evaluation paths.
+- This is a deliberate architecture tradeoff, not an Athena-endorsed location choice.
 
 **Boundary:**
 - `src/policy/` owns ref loading + semantic diffing + classification model.
@@ -74,13 +81,16 @@
 
 1. CLI parses command args (`policy-diff --base ... --head ... --format ...`).
 2. `policy::git` validates git context and refs.
-3. `policy::git` runs **one** scoped path discovery call:
-   - `git diff --name-status --find-renames --diff-filter=ACMRT <base>..<head> -- '*.spec.yml'`
-4. MVP behavior for rename/copy statuses (`R*`, `C*`):
-   - mark as deferred limitation entry (structural warning), do not classify as widening/narrowing.
-5. `policy::git` batch-loads blob contents for needed paths/refs (`git cat-file --batch`), not per-file process spawning.
+3. `policy::git` runs one scoped path discovery call with null-terminated output:
+   - `git diff -z --name-status --find-renames --diff-filter=ACDMRT <base>..<head> -- '*.spec.yml'`
+4. File-level status classification runs before field-level parsing:
+   - `D` on `.spec.yml` => widening (fail-closed)
+   - `R*`/`C*` on `.spec.yml` => widening-risk in MVP (fail-closed)
+   - `A` on `.spec.yml` => structural (new policy artifact, not a widening bypass)
+   - `M`/`T` => continue to blob load + semantic field comparison
+5. `policy::git` batch-loads blob contents for needed `<ref>:<path>` tuples via `git cat-file --batch -Z`, not per-file process spawning.
 6. Parse YAML into `SpecFile` at both refs.
-7. `policy::classify` performs field-aware semantic comparison.
+7. `policy::classify` performs field-aware semantic comparison for `A`/`M`/`T` records.
 8. `policy::render` emits human/json/ndjson.
 9. CLI computes exit code from summary (`has_widening`, runtime errors).
 
@@ -195,13 +205,28 @@ pub enum PolicyDiffFormat {
 
 ## 3) YAML Structural Diff Semantics (mandatory detail)
 
-All comparisons are on parsed structs (`SpecFile`, `Boundaries`, `Constraint`, `BoundaryContract`) — **never raw text**.
+All comparisons are on parsed structs (`SpecFile`, `Boundaries`, `Constraint`, `BoundaryContract`) and git status metadata, never raw text.
 
 Normalization before comparison:
 - Trim strings for set-like fields
 - Dedupe + sort list fields into `BTreeSet<String>` when order is non-semantic
 - Compare `visibility` via defaulted value (`None => Public`)
 - Compare `allow_imports_from` and `allow_imported_by` with tri-state semantics (restricted vs unrestricted)
+
+## 3.0 File-level semantics (`git diff --name-status`)
+
+These rules execute first and are **fail-closed** for governance:
+
+| Status | Meaning | MVP classification | Rationale |
+|---|---|---|---|
+| `A` | New `.spec.yml` | Structural | New module governance is not a widening bypass |
+| `M`/`T` | In-place modified `.spec.yml` | Delegated to field-level matrices | Standard semantic diff |
+| `D` | Deleted `.spec.yml` | **Widening** | Removing a policy file removes all constraints for that module |
+| `R*` / `C*` | Renamed/copied `.spec.yml` | **Widening (widening-risk) in MVP** | Prevent rename/copy bypass until semantic pairing is implemented |
+
+Notes:
+- Rename/copy is intentionally strict in MVP; governance must not be bypassable by moving policy files.
+- Future rename pairing may allow a non-widening result when old/new policies are semantically equivalent.
 
 ## 3.1 Field matrix for `SpecFile`
 
@@ -216,6 +241,7 @@ Normalization before comparison:
 | `boundaries` | Delegated to boundaries matrix below |
 | `constraints` | Constraint matrix below |
 | `spec_path` | Ignored (not serialized policy field) |
+| file presence (`A`/`D`/`R`/`C`) | Handled by file-level semantics in 3.0 |
 
 ## 3.2 Field matrix for `Boundaries`
 
@@ -244,7 +270,9 @@ MVP conservative-but-complete behavior:
   - `error -> warning` = widening
   - `warning -> error` = narrowing
 - `message` change = structural
-- Added/removed constraints = structural by default in MVP (explicitly conservative; rule-aware semantic interpretation is follow-up)
+- Added/removed constraints = structural by default in MVP.
+
+This is a conservative under-reporting choice: adding constraints is usually narrowing, but MVP keeps add/remove structural until rule-specific semantics are implemented.
 
 ## 3.4 Contract semantics (`Vec<BoundaryContract>`)
 
@@ -263,24 +291,28 @@ Match contracts by `id`.
   - `direction` change = structural in MVP
   - `imports_contract` add/remove = structural in MVP
 
-## 3.5 `boundaries.path` coverage algorithm
+## 3.5 `boundaries.path` coverage algorithm (monorepo-safe)
 
-Because `path` is semantic glob ownership, classification uses a file-universe coverage check:
+Because `path` is semantic glob ownership, classification uses a scoped file-universe coverage check, not a whole-repo tree walk.
 
-1. Build file universe as union of tracked files from both refs:
-   - `git ls-tree -r --name-only <base>`
-   - `git ls-tree -r --name-only <head>`
-2. Filter to source-like files (`.ts,.tsx,.js,.jsx,.mts,.cts`) plus `.spec.yml` for ownership edges.
-3. Compile base/head globs with `globset`.
-4. Evaluate matched set cardinality and strict subset/superset relationship.
+1. Derive candidate path prefixes from base/head `boundaries.path` globs for the module under comparison:
+   - extract static prefix before first wildcard (`*`, `?`, `[`)
+   - if empty prefix, fall back to module directory inferred from spec path
+2. Build prefix union and de-duplicate.
+3. Query tracked files for each ref only under those prefixes:
+   - `git ls-tree -rz --name-only <base> -- <prefix...>`
+   - `git ls-tree -rz --name-only <head> -- <prefix...>`
+4. Filter to source-like files (`.ts,.tsx,.js,.jsx,.mts,.cts`) plus `.spec.yml` for ownership edges.
+5. Compile base/head globs with `globset`.
+6. Evaluate matched set cardinality and strict subset/superset relationship.
 
 Classification:
 - `head ⊃ base` => widening
 - `head ⊂ base` => narrowing
 - equal => structural
-- invalid/ambiguous glob compile -> structural + warning entry
+- invalid glob OR unbounded prefix set => structural + limitation entry (`path_coverage_unbounded_mvp`)
 
-This addresses the reviewer point that path changes are semantic, not textual.
+This keeps default behavior scalable for monorepos by avoiding O(N_repo) `git ls-tree -r` scans.
 
 ---
 
@@ -302,25 +334,27 @@ If ref object missing and repository is shallow:
 If ref missing but repo not shallow:
 - return `git.invalid_ref` runtime error.
 
-## 4.2 Git process optimization (Opus finding #3)
+## 4.2 Git process optimization + null-safe parsing
 
 MVP implementation requirement:
-- **Single scoped diff call first**
-  - `git diff --name-status --find-renames --diff-filter=ACMRT <base>..<head> -- '*.spec.yml'`
+- **Single scoped diff call first (NUL-terminated):**
+  - `git diff -z --name-status --find-renames --diff-filter=ACDMRT <base>..<head> -- '*.spec.yml'`
+- Parse status/path tuples from NUL-delimited output; do not rely on shell-style quoting.
 - Then only changed spec paths are loaded from refs.
-- Blob retrieval is batched via `git cat-file --batch` (one process per ref), not N `git show` calls.
+- Blob retrieval is batched via `git cat-file --batch -Z` (one process per ref), not N `git show` calls.
+- Path-universe discovery for `boundaries.path` uses scoped `git ls-tree -rz --name-only` calls only.
 
-## 4.3 Rename handling (mandatory scope decision)
+## 4.3 Rename/copy handling (fail-closed in MVP)
 
-MVP does **not** attempt semantic rename pairing.
+MVP does not attempt semantic rename pairing.
 
 Behavior in MVP:
 - detect rename/copy statuses from `--name-status --find-renames`
-- emit structural limitation entries like:
-  - `"module rename/copy detected for modules/foo.spec.yml -> modules/bar.spec.yml; semantic pairing deferred"`
-- exclude those pairs from widening/narrowing classification to avoid false delete/add interpretation
+- classify any `.spec.yml` rename/copy (`R*`/`C*`) as widening-risk (widening)
+- include explicit detail in report, e.g.:
+  - `"rename/copy of policy file modules/foo.spec.yml -> modules/bar.spec.yml treated as widening-risk in MVP"`
 
-Follow-up will implement full rename pairing with similarity/module-id reconciliation.
+Rationale: governance cannot be bypassed by packaging a widening inside a rename/copy.
 
 ---
 
@@ -333,19 +367,19 @@ Example skeleton:
 ```text
 Policy diff: base=origin/main head=HEAD
 
-WIDENING (2)
+WIDENING (3)
   - module=api/orders field=boundaries.allow_imports_from detail=added ["shared/db"]
   - module=api/orders field=boundaries.visibility detail=private -> internal
+  - module=core/auth field=spec_file detail=deletion of modules/core/auth.spec.yml
 
 NARROWING (1)
   - module=ui/checkout field=boundaries.never_imports detail=added ["api/internal"]
 
-STRUCTURAL (3)
+STRUCTURAL (2)
   - module=core/auth field=description detail=text changed
   - module=core/auth field=constraints detail=constraint message changed
-  - limitation: rename detected modules/a.spec.yml -> modules/b.spec.yml (deferred)
 
-Summary: modules_changed=2 widening=2 narrowing=1 structural=3
+Summary: modules_changed=2 widening=3 narrowing=1 structural=2
 ```
 
 ## 5.2 JSON format
@@ -412,8 +446,8 @@ Deliverables:
 Deliverables:
 - git repo/ref validators
 - shallow clone diagnostics
-- `git diff --name-status --find-renames ... '*.spec.yml'` parser
-- changed path set + rename limitation extraction
+- NUL-safe parser for `git diff -z --name-status --find-renames --diff-filter=ACDMRT ... '*.spec.yml'`
+- changed path set + file-operation classification (`A/M/T` vs `D` vs `R/C` fail-closed)
 
 ---
 
@@ -431,7 +465,7 @@ Deliverables:
 **Estimate:** 280–420 LOC
 
 Deliverables:
-- `git cat-file --batch` based blob retrieval for `<ref>:<path>` tuples
+- `git cat-file --batch -Z` based blob retrieval for `<ref>:<path>` tuples
 - YAML parse to `SpecFile` for base/head snapshots
 - per-file parse error collection (`PolicyDiffErrorEntry`)
 
@@ -473,9 +507,10 @@ Deliverables:
 **Estimate:** 220–340 LOC
 
 Deliverables:
-- union file-universe retrieval from `git ls-tree`
+- prefix derivation from compared path globs
+- scoped file-universe retrieval via `git ls-tree -rz --name-only <ref> -- <prefix...>`
 - glob coverage superset/subset comparison
-- ambiguity fallback behavior
+- unbounded-glob ambiguity fallback behavior (structural + limitation)
 
 ---
 
@@ -536,7 +571,10 @@ Deliverables:
 - temp git repo setup helper (init/commit/tag)
 - fixture scenarios for widening/narrowing/structural/mixed
 - shallow clone simulation test (expected graceful error)
-- rename detection limitation test
+- rename + widening bypass attempt test (must fail closed as widening)
+- pure spec deletion test (must classify widening)
+- malformed YAML in base/head tests (must exit 2, no panic)
+- weird filename tests (spaces/unicode/special chars) with NUL-safe git parsing
 
 ---
 
@@ -556,7 +594,8 @@ Deliverables:
 Deliverables:
 - command examples
 - GitHub Actions `fetch-depth: 0` guidance
-- explicit MVP limitations (rename/cross-file/config diff deferred)
+- explicit MVP behavior: rename/copy and deletion are fail-closed widenings
+- deferred items: semantic rename pairing, cross-file compensation, config-level governance
 
 ---
 
@@ -571,8 +610,13 @@ Deliverables:
   - `visibility` partial-order transitions
   - `envelope` required/optional transitions
   - `max_new_per_diff` is config-level (explicitly **not** in MVP command output)
+- File-operation semantics tests:
+  - `.spec.yml` deletion (`D`) => widening
+  - `.spec.yml` rename/copy (`R*`/`C*`) => widening-risk widening
 - Constraint severity change tests (`error<->warning`)
+- Constraint add/remove marked structural in MVP (with explicit conservative-note assertion)
 - Contract add/remove and contract-match pattern/files tests
+- Null-terminated git parser tests for paths with spaces/unicode/escaped characters
 - Deterministic sort tests
 - NDJSON summary line tests
 
@@ -596,15 +640,19 @@ Scenarios (adversarial emphasis):
 6. `narrowing_only_change_set`
 7. `structural_only_reorder_comments` (same semantics)
 8. `mixed_widen_narrow_structural`
-9. `rename_detected_deferred` (R-status surfaces limitation)
-10. `shallow_clone_missing_base_ref` (graceful guidance)
-11. `invalid_yaml_in_base_ref` (runtime error entry, no panic)
-12. `path_glob_broadened` and `path_glob_narrowed`
+9. `rename_with_widening_attempt_fail_closed` (R-status cannot bypass governance)
+10. `pure_spec_deletion_is_widening`
+11. `shallow_clone_missing_base_ref` (graceful guidance)
+12. `invalid_yaml_in_base_ref_exit_2` (runtime error entry, no panic)
+13. `invalid_yaml_in_head_ref_exit_2` (runtime error entry, no panic)
+14. `path_glob_broadened` and `path_glob_narrowed`
+15. `spec_filename_with_spaces_and_unicode` (NUL-safe parsing proof)
 
 Assertions:
 - deterministic summary counts
 - correct classification labels
-- zero panic/crash on malformed history
+- rename/copy and deletion paths produce widening
+- malformed YAML fails closed with exit `2` and no panic
 - stable JSON shape for CI consumption
 
 ---
@@ -614,11 +662,13 @@ Assertions:
 | Risk | Impact | Likelihood | Mitigation |
 |---|---:|---:|---|
 | Shallow clone base/head not available | High | High (CI default) | explicit shallow detection + actionable error text + doc guidance |
-| Rename false positives (delete+add) | High | Medium | detect `R*`/`C*`, emit limitation, exclude from semantic class in MVP |
-| Over/under-classifying path glob changes | Medium | Medium | coverage comparison over union file tree + ambiguity fallback to structural |
-| Constraint semantics too conservative | Medium | Medium | document that add/remove constraints are structural in MVP; follow-up rule-aware classifier |
+| Rename/copy used as governance bypass | High | Medium | classify `R*`/`C*` on `.spec.yml` as widening-risk in MVP (fail-closed) |
+| Spec file deletion silently removes governance | High | Medium | classify `.spec.yml` `D` as widening |
+| Over/under-classifying path glob changes | Medium | Medium | scoped prefix coverage comparison + unbounded fallback to structural limitation |
+| Full-repo tree walk performance on monorepos | Medium | Medium | avoid global `git ls-tree -r`; use scoped `ls-tree -rz` by candidate prefixes |
+| Constraint semantics too conservative | Medium | Medium | document that add/remove constraints are structural in MVP and under-report narrowing; follow-up rule-aware classifier |
 | Parse failures in historical ref | Medium | Medium | collect per-file errors, return runtime code 2, never panic |
-| N git process performance regression | Medium | Low | one scoped diff call + batched cat-file + bounded ls-tree calls |
+| Git path quoting/escaping bugs | High | Low | require `-z`/`-Z` and test weird filenames |
 | Non-deterministic ordering | High | Low | explicit stable sorts on modules/fields/errors/events |
 
 ---
@@ -627,12 +677,12 @@ Assertions:
 
 ### Checkpoint A (after Task 3)
 - `src/policy/` exists with `mod.rs`, `types.rs`, `git.rs`
-- batched blob retrieval implemented (no loop of per-file `git show` process spawns)
+- batched blob retrieval implemented (`git cat-file --batch -Z`, no loop of per-file `git show` spawns)
 - tests proving shallow clone error code/message path pass
 
 ### Checkpoint B (after Task 5)
-- full classifier exists for all `SpecFile` fields
-- `boundaries.path` superset/subset logic covered by tests
+- full classifier exists for all `SpecFile` fields + file-operation semantics
+- `boundaries.path` superset/subset logic covered by tests using scoped universe retrieval
 - unit test count for `src/policy/tests.rs` >= 25
 
 ### Checkpoint C (after Task 7)
@@ -641,8 +691,8 @@ Assertions:
 - JSON output includes `schema_version`, `summary`, `diffs`, `errors`
 
 ### Checkpoint D (after Task 8)
-- `tests/policy_diff_integration.rs` green with >= 10 scenarios
-- includes explicit shallow clone + rename limitation cases
+- `tests/policy_diff_integration.rs` green with >= 12 scenarios
+- includes explicit rename bypass attempt, pure deletion, malformed YAML (base/head), weird filename cases
 - deterministic snapshot assertions pass in repeated runs
 
 ### Final Gate
@@ -686,4 +736,5 @@ Interpretation:
 
 - **`max_new_per_diff` widening detection** belongs to config diffing (`specgate.config.yml`), not `.spec.yml`; deferred by design in this MVP per requested scope boundaries.
 - **Cross-file compensation analysis** intentionally deferred to avoid false trust in net-zero arithmetic without domain constraints.
+- **Semantic rename pairing** is deferred, but MVP remains fail-closed by classifying rename/copy as widening-risk.
 - **`check --deny-widenings`** should call into the same `policy::diff` API in follow-up; no duplicate logic.
