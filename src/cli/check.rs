@@ -31,6 +31,8 @@ pub enum OutputFormat {
     Json,
     /// Newline-delimited JSON (one violation per line).
     Ndjson,
+    /// SARIF 2.1.0 format for code scanning tools.
+    Sarif,
 }
 
 impl OutputFormat {
@@ -74,7 +76,7 @@ pub struct CheckArgs {
     pub no_telemetry: bool,
 
     // Output format
-    /// Output format (`human`, `json`, or `ndjson`).
+    /// Output format (`human`, `json`, `ndjson`, or `sarif`).
     /// Defaults to `human` if stdout is a TTY, `json` otherwise.
     #[arg(long, value_enum)]
     pub format: Option<OutputFormat>,
@@ -409,6 +411,11 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         OutputFormat::Ndjson => CliRunResult {
             exit_code,
             stdout: verdict::format::format_verdict_ndjson(&verdict),
+            stderr: String::new(),
+        },
+        OutputFormat::Sarif => CliRunResult {
+            exit_code,
+            stdout: verdict::format::format_verdict_sarif(&verdict),
             stderr: String::new(),
         },
     };
@@ -754,6 +761,10 @@ mod tests {
             OutputFormat::effective_format(Some(OutputFormat::Ndjson)),
             OutputFormat::Ndjson
         );
+        assert_eq!(
+            OutputFormat::effective_format(Some(OutputFormat::Sarif)),
+            OutputFormat::Sarif
+        );
     }
 
     #[test]
@@ -762,9 +773,11 @@ mod tests {
         let human: OutputFormat = clap::ValueEnum::from_str("human", true).unwrap();
         let json: OutputFormat = clap::ValueEnum::from_str("json", true).unwrap();
         let ndjson: OutputFormat = clap::ValueEnum::from_str("ndjson", true).unwrap();
+        let sarif: OutputFormat = clap::ValueEnum::from_str("sarif", true).unwrap();
 
         assert_eq!(human, OutputFormat::Human);
         assert_eq!(json, OutputFormat::Json);
         assert_eq!(ndjson, OutputFormat::Ndjson);
+        assert_eq!(sarif, OutputFormat::Sarif);
     }
 }
