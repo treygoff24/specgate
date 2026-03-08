@@ -1,0 +1,5 @@
+version: "2.2"
+module: module-b
+boundaries:
+  path: src/module-b/**/*
+constraints: []

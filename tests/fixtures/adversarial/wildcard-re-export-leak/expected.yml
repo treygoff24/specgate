@@ -1,0 +1,8 @@
+assertion: catch
+violations:
+  - rule: "boundary.public_api"
+    from_module: "consumer"
+    to_module: "internal"
+gap_reason: null
+future_priority: null
+notes: "Wildcard exports should not leak private internals across module boundaries."
