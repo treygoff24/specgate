@@ -232,6 +232,33 @@ boundaries:
     - core/api  # Domain should not depend on API
 ```
 
+### Contract Example: Envelope Enforcement
+
+Version `2.3` specs can require handler-side validation for boundary contracts:
+
+```yaml
+# In your spec file
+boundaries:
+  contracts:
+    - id: create_user
+      file: contracts/create-user.json
+      envelope: required
+      match:
+        files:
+          - "src/api/handlers/user.ts"
+        pattern: "createUser"  # optional: scope to this function
+```
+
+```typescript
+// In your handler - this is what specgate checks for
+import { boundary } from 'specgate-envelope';
+
+export async function createUser(req: Request) {
+  const validated = boundary.validate('create_user', req.body);
+  // ... use validated data
+}
+```
+
 ### Use Blast-Radius Mode
 
 Only check affected modules:
