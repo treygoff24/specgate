@@ -43,7 +43,7 @@ use crate::rules::{
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, Severity, SpecConfig, SpecFile, ValidationLevel,
+    self, Severity, SpecConfig, ValidationLevel,
     workspace_discovery::discover_workspace_packages_with_config,
 };
 use crate::verdict::{
@@ -112,13 +112,6 @@ where
         Command::Baseline(args) => baseline_cmd::handle_baseline(args),
         Command::Doctor(args) => doctor::handle_doctor(args),
     }
-}
-
-#[derive(Debug, Serialize)]
-struct HashedSpec {
-    module: String,
-    path: String,
-    spec: SpecFile,
 }
 
 #[cfg(test)]

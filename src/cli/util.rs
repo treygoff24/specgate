@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct HashedSpec {
+    pub(crate) module: String,
+    pub(crate) path: String,
+    pub(crate) spec: crate::spec::SpecFile,
+}
+
 pub(crate) fn runtime_error_json(
     code: &str,
     message: &str,
