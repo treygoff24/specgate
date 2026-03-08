@@ -6,6 +6,7 @@
 pub mod check;
 mod doctor;
 pub mod init;
+pub mod types;
 pub mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +28,7 @@ use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_
 use crate::graph::DependencyGraph;
 use crate::resolver::classify::extract_package_name;
 use crate::resolver::nearest_tsconfig_for_dir_uncached;
-use crate::resolver::{ModuleMapOverlap, ModuleResolver, ModuleResolverOptions, ResolvedImport};
+use crate::resolver::{ModuleResolver, ModuleResolverOptions, ResolvedImport};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
@@ -36,8 +37,8 @@ use crate::rules::{
 };
 use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
 use crate::spec::{
-    self, Severity, SpecConfig, SpecFile, ValidationLevel, ValidationReport,
-    types::CURRENT_SPEC_VERSION, workspace_discovery::discover_workspace_packages_with_config,
+    self, Severity, SpecConfig, SpecFile, ValidationLevel, types::CURRENT_SPEC_VERSION,
+    workspace_discovery::discover_workspace_packages_with_config,
 };
 use crate::verdict::{
     self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
@@ -48,44 +49,8 @@ use crate::verdict::{
 // Re-export from submodules for convenience
 pub use check::{CheckArgs, CheckOutputMode, DiffMode, OutputFormat};
 pub use init::InitArgs as InitArgsEnhanced;
+pub use types::*;
 pub use validate::ValidateArgs;
-
-pub const EXIT_CODE_PASS: i32 = 0;
-pub const EXIT_CODE_POLICY_VIOLATIONS: i32 = 1;
-pub const EXIT_CODE_RUNTIME_ERROR: i32 = 2;
-pub const EXIT_CODE_DOCTOR_MISMATCH: i32 = 3;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CliRunResult {
-    pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-impl CliRunResult {
-    fn json<T: Serialize>(exit_code: i32, payload: &T) -> Self {
-        match serde_json::to_string_pretty(payload) {
-            Ok(json) => Self {
-                exit_code,
-                stdout: format!("{json}\n"),
-                stderr: String::new(),
-            },
-            Err(error) => Self {
-                exit_code: EXIT_CODE_RUNTIME_ERROR,
-                stdout: String::new(),
-                stderr: format!("failed to serialize CLI JSON output: {error}\n"),
-            },
-        }
-    }
-
-    fn clap_error(error: clap::Error) -> Self {
-        Self {
-            exit_code: error.exit_code(),
-            stdout: String::new(),
-            stderr: format!("{error}"),
-        }
-    }
-}
 
 #[derive(Debug, Parser)]
 #[command(name = "specgate")]
@@ -210,79 +175,6 @@ impl DoctorCompareParserMode {
             Self::Legacy => "legacy",
         }
     }
-}
-
-#[derive(Debug, Clone)]
-struct LoadedProject {
-    project_root: PathBuf,
-    config: SpecConfig,
-    specs: Vec<SpecFile>,
-    validation: ValidationReport,
-}
-
-#[derive(Debug, Clone)]
-struct AnalysisArtifacts {
-    policy_violations: Vec<PolicyViolation>,
-    layer_config_issues: Vec<String>,
-    module_map_overlaps: Vec<ModuleMapOverlap>,
-    parse_warning_count: usize,
-    graph_nodes: usize,
-    graph_edges: usize,
-    suppressed_violations: usize,
-    edge_pairs: BTreeSet<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-struct GovernanceHashes {
-    config_hash: String,
-    spec_hash: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ErrorOutput {
-    schema_version: String,
-    status: String,
-    code: String,
-    message: String,
-    details: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ValidateOutput {
-    schema_version: String,
-    status: String,
-    spec_count: usize,
-    error_count: usize,
-    warning_count: usize,
-    issues: Vec<ValidateIssueOutput>,
-}
-
-#[derive(Debug, Serialize)]
-struct ValidateIssueOutput {
-    level: String,
-    module: String,
-    message: String,
-    spec_path: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct BaselineOutput {
-    schema_version: String,
-    status: String,
-    baseline_path: String,
-    entry_count: usize,
-    source_violation_count: usize,
-    refreshed: bool,
-    stale_entries_pruned: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct InitOutput {
-    schema_version: String,
-    status: String,
-    project_root: String,
-    created: Vec<String>,
-    skipped_existing: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
