@@ -1,0 +1,9 @@
+version: "2.3"
+module: app
+boundaries:
+  path: src/app/**/*
+  never_imports:
+    - debug
+constraints:
+  - rule: boundary.never_imports
+    severity: error

@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "public_api constraints are not enforced through wildcard re-export surfaces"
+future_priority: "P9"
+notes: "Wildcard exports currently allow private internals to leak without triggering boundary.public_api."

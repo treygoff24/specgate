@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "Unresolved imports are currently silent — no warning or error"
+future_priority: "P6"
+notes: "Non-resolving relative import is ignored by current diagnostics pipeline."

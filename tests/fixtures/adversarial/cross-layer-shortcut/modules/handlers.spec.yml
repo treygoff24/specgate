@@ -1,0 +1,9 @@
+version: "2.2"
+module: handlers
+boundaries:
+  path: src/handlers/**/*
+  never_imports:
+    - database
+constraints:
+  - rule: boundary.never_imports
+    severity: error

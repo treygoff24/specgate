@@ -1,0 +1,5 @@
+version: "2.2"
+module: api
+boundaries:
+  path: src/shared/**/*
+constraints: []

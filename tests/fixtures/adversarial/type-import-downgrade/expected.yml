@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "No type vs value import distinction in boundary rules"
+future_priority: "Future"
+notes: "Value import of an interface-only symbol is not distinguished from type-only in boundary checks."

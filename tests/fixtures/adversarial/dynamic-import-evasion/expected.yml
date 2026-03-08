@@ -1,0 +1,8 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "app"
+    to_module: "secrets"
+gap_reason: null
+future_priority: null
+notes: "Dynamic import() is now detected as a module edge and correctly violates boundary.never_imports."

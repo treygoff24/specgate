@@ -1,0 +1,6 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "app"
+    to_module: "debug"
+notes: "Conditional require() calls are statically detected and correctly violate boundary.never_imports."

@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "Multi-hop barrel re-export chains are not currently collapsed into direct module-to-module edges"
+future_priority: "P9"
+notes: "A forbidden dependency hidden behind chained re-exports currently evades boundary.never_imports detection."

@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "No test boundary rules yet"
+future_priority: "P9"
+notes: "Production code importing test helpers is currently not a dedicated boundary rule."

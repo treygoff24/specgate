@@ -1,0 +1,9 @@
+version: "2.2"
+module: internal
+boundaries:
+  path: src/internal/**/*
+  public_api:
+    - src/internal/public.ts
+constraints:
+  - rule: boundary.public_api
+    severity: error

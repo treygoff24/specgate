@@ -1,0 +1,8 @@
+assertion: catch
+violations:
+  - rule: "no-circular-deps"
+    from_module: "alpha"
+    to_module: null
+gap_reason: null
+future_priority: null
+notes: "A cycle formed via barrel-style index files should trigger circular dependency checks."

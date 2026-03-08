@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@internal/*": ["src/core/internal/*"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,6 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "app"
+    to_module: "secrets"
+notes: "Relative traversal import ../../../secrets/keys is normalized and correctly mapped to the secrets module."
