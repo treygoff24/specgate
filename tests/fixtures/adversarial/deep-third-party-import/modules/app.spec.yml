@@ -1,0 +1,5 @@
+version: "2.3"
+module: app
+boundaries:
+  path: src/app/**/*
+constraints: []

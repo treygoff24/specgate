@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "No deep-import rules yet"
+future_priority: "P9"
+notes: "Deep import into third-party internal package path is currently not modeled."

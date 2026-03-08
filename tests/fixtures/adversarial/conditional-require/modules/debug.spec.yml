@@ -1,0 +1,5 @@
+version: "2.3"
+module: debug
+boundaries:
+  path: src/debug/**/*
+constraints: []

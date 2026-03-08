@@ -1,0 +1,4 @@
+assertion: clean_pass
+gap_reason: "Dynamic imports are expression-level, not statically analyzable as module edges by design"
+future_priority: null
+notes: "Dynamic import() currently bypasses boundary.never_imports edge detection."

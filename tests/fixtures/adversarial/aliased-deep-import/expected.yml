@@ -1,0 +1,6 @@
+assertion: catch
+violations:
+  - rule: "boundary.never_imports"
+    from_module: "app"
+    to_module: "core"
+notes: "tsconfig path alias @internal/* resolves to src/core/internal/* and is enforced by boundary.never_imports."
