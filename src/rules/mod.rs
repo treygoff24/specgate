@@ -11,6 +11,7 @@ pub mod boundary;
 pub mod circular;
 pub mod contracts;
 pub mod dependencies;
+pub mod envelope;
 pub mod layers;
 
 pub use boundary::{
