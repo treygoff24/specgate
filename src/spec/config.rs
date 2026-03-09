@@ -80,6 +80,10 @@ pub struct SpecConfig {
     /// Import hygiene rules for catching common agent mistakes.
     #[serde(default)]
     pub import_hygiene: ImportHygieneConfig,
+    /// Whether ownership validation findings are errors or warnings.
+    /// When true, overlapping and unclaimed files are errors (exit code 1).
+    #[serde(default)]
+    pub strict_ownership: bool,
 }
 
 /// Envelope validation settings for contract enforcement.
@@ -300,6 +304,7 @@ impl Default for SpecConfig {
             envelope: EnvelopeConfig::default(),
             unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
             import_hygiene: ImportHygieneConfig::default(),
+            strict_ownership: false,
         }
     }
 }
@@ -548,5 +553,25 @@ telemetry:
             err.contains("must not use path traversal"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_strict_ownership_defaults_false() {
+        let config = SpecConfig::default();
+        assert!(!config.strict_ownership);
+    }
+
+    #[test]
+    fn test_strict_ownership_parses_true() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("strict_ownership: true\n").expect("parse config");
+        assert!(parsed.strict_ownership);
+    }
+
+    #[test]
+    fn test_config_backward_compat_without_strict_ownership() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("spec_dirs:\n  - specs\n").expect("parse config");
+        assert!(!parsed.strict_ownership);
     }
 }

@@ -1,6 +1,7 @@
 mod compare;
 mod focus;
 mod overview;
+mod ownership;
 mod parity;
 mod trace_io;
 mod trace_parser;
@@ -29,6 +30,8 @@ pub(crate) struct DoctorArgs {
 pub(crate) enum DoctorCommand {
     /// Compare Specgate dependency edges with a configured trace source.
     Compare(DoctorCompareArgs),
+    /// Validate module ownership: detect overlaps, unclaimed files, orphaned specs.
+    Ownership(ownership::DoctorOwnershipArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -85,6 +88,10 @@ impl DoctorCompareParserMode {
 pub(super) fn handle_doctor(args: DoctorArgs) -> CliRunResult {
     match args.command {
         Some(DoctorCommand::Compare(compare_args)) => compare::handle_doctor_compare(compare_args),
+        Some(DoctorCommand::Ownership(ownership_args)) => {
+            ownership::handle_doctor_ownership(ownership_args)
+        }
+
         None => overview::handle_doctor_overview(args.common),
     }
 }

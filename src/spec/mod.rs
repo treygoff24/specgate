@@ -8,6 +8,7 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 pub mod config;
+pub mod ownership;
 pub mod types;
 pub mod validation;
 pub mod workspace_discovery;
