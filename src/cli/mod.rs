@@ -31,7 +31,6 @@ use crate::baseline::{
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
-use crate::graph::DependencyGraph;
 use crate::resolver::nearest_tsconfig_for_dir_uncached;
 use crate::resolver::{ModuleResolver, ModuleResolverOptions};
 use crate::rules::boundary::evaluate_boundary_rules;
@@ -45,9 +44,9 @@ use crate::spec::{
     self, Severity, ValidationLevel, workspace_discovery::discover_workspace_packages_with_config,
 };
 use crate::verdict::{
-    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
-    TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    build_verdict_with_options,
+    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, EdgeClassification, GovernanceContext,
+    PolicyViolation, TelemetryEventName, UnresolvedEdge, VerdictBuildOptions, VerdictIdentity,
+    VerdictMetrics, VerdictStatus, build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience

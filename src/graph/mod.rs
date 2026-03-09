@@ -111,6 +111,21 @@ struct EdgeRequest {
     ignored_by_comment: bool,
 }
 
+/// Record of an import that could not be resolved to a first-party file.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UnresolvedImportRecord {
+    /// File containing the import.
+    pub from: PathBuf,
+    /// Raw import specifier as written.
+    pub specifier: String,
+    /// Edge kind (e.g., DynamicImport or RuntimeImport).
+    pub kind: EdgeKind,
+    /// Source line number.
+    pub line: Option<u32>,
+    /// Whether the import resolved to a third-party/external package.
+    pub is_external: bool,
+}
+
 pub struct DependencyGraph {
     project_root: PathBuf,
     graph: DiGraph<FileNode, EdgeRecord>,
@@ -119,6 +134,7 @@ pub struct DependencyGraph {
     reverse_module_edges: BTreeMap<String, BTreeSet<String>>,
     canonical_lookup_cache: RefCell<BTreeMap<PathBuf, PathBuf>>,
     discovery_warnings: Vec<DiscoveryWarning>,
+    unresolved_imports: Vec<UnresolvedImportRecord>,
 }
 
 impl DependencyGraph {
@@ -158,6 +174,7 @@ impl DependencyGraph {
         }
 
         let mut pending_edges = BTreeSet::new();
+        let mut unresolved_imports = Vec::new();
 
         for (from_path, from_idx) in &file_index {
             let requests = {
@@ -169,33 +186,52 @@ impl DependencyGraph {
 
             for request in requests {
                 let resolved = resolver.resolve(from_path, &request.specifier);
-                let ResolvedImport::FirstParty { resolved_path, .. } = resolved else {
-                    continue;
-                };
+                match &resolved {
+                    ResolvedImport::FirstParty { resolved_path, .. } => {
+                        let Some(target_idx) = file_index.get(resolved_path) else {
+                            continue;
+                        };
 
-                let Some(target_idx) = file_index.get(&resolved_path) else {
-                    continue;
-                };
+                        let target_path = graph
+                            .node_weight(*target_idx)
+                            .expect("node index should remain valid")
+                            .path
+                            .clone();
 
-                let target_path = graph
-                    .node_weight(*target_idx)
-                    .expect("node index should remain valid")
-                    .path
-                    .clone();
-
-                pending_edges.insert(EdgeRecord {
-                    from: from_path.clone(),
-                    to: target_path,
-                    kind: request.kind,
-                    specifier: request.specifier.clone(),
-                    line: request.line,
-                    column: request.column,
-                    span_start: request.span_start,
-                    span_end: request.span_end,
-                    ignored_by_comment: request.ignored_by_comment,
-                });
+                        pending_edges.insert(EdgeRecord {
+                            from: from_path.clone(),
+                            to: target_path,
+                            kind: request.kind,
+                            specifier: request.specifier.clone(),
+                            line: request.line,
+                            column: request.column,
+                            span_start: request.span_start,
+                            span_end: request.span_end,
+                            ignored_by_comment: request.ignored_by_comment,
+                        });
+                    }
+                    ResolvedImport::ThirdParty { .. } => {
+                        unresolved_imports.push(UnresolvedImportRecord {
+                            from: from_path.clone(),
+                            specifier: request.specifier.clone(),
+                            kind: request.kind,
+                            line: request.line,
+                            is_external: true,
+                        });
+                    }
+                    ResolvedImport::Unresolvable { .. } => {
+                        unresolved_imports.push(UnresolvedImportRecord {
+                            from: from_path.clone(),
+                            specifier: request.specifier.clone(),
+                            kind: request.kind,
+                            line: request.line,
+                            is_external: false,
+                        });
+                    }
+                }
             }
         }
+        unresolved_imports.sort();
 
         for edge in pending_edges {
             let from_idx = *file_index
@@ -217,6 +253,7 @@ impl DependencyGraph {
             reverse_module_edges,
             canonical_lookup_cache: RefCell::new(BTreeMap::new()),
             discovery_warnings: discovery.warnings,
+            unresolved_imports,
         })
     }
 
@@ -233,6 +270,11 @@ impl DependencyGraph {
     /// Non-fatal discovery diagnostics collected while walking the filesystem.
     pub fn discovery_warnings(&self) -> &[DiscoveryWarning] {
         &self.discovery_warnings
+    }
+
+    /// All non-first-party import records (external + unresolvable), sorted deterministically.
+    pub fn unresolved_imports(&self) -> &[UnresolvedImportRecord] {
+        &self.unresolved_imports
     }
 
     /// Canonical project root used by this graph.

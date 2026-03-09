@@ -394,6 +394,10 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     verdict.workspace_packages =
         build_workspace_packages_info(&loaded.project_root, &loaded.config);
 
+    // Wire edge classification into verdict
+    verdict.edge_classification = Some(artifacts.edge_classification);
+    verdict.unresolved_edges = artifacts.unresolved_edges;
+
     let exit_code = match verdict.status {
         VerdictStatus::Pass => EXIT_CODE_PASS,
         VerdictStatus::Fail => EXIT_CODE_POLICY_VIOLATIONS,

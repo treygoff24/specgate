@@ -636,6 +636,8 @@ mod tests {
             governance: None,
             telemetry: None,
             workspace_packages: None,
+            edge_classification: None,
+            unresolved_edges: Vec::new(),
         }
     }
 
@@ -684,6 +686,8 @@ mod tests {
             governance: None,
             telemetry: None,
             workspace_packages: None,
+            edge_classification: None,
+            unresolved_edges: Vec::new(),
         }
     }
 
