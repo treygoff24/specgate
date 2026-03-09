@@ -48,6 +48,10 @@ pub struct SpecConfig {
     /// Envelope validation configuration for boundary contracts.
     #[serde(default)]
     pub envelope: EnvelopeConfig,
+    /// Whether ownership validation findings are errors or warnings.
+    /// When true, overlapping and unclaimed files are errors (exit code 1).
+    #[serde(default)]
+    pub strict_ownership: bool,
 }
 
 /// Envelope validation settings for contract enforcement.
@@ -257,6 +261,7 @@ impl Default for SpecConfig {
             enforce_type_only_imports: default_enforce_type_only_imports(),
             tsconfig_filename: default_tsconfig_filename(),
             envelope: EnvelopeConfig::default(),
+            strict_ownership: false,
         }
     }
 }
@@ -469,5 +474,25 @@ telemetry:
             err.contains("must not use path traversal"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_strict_ownership_defaults_false() {
+        let config = SpecConfig::default();
+        assert!(!config.strict_ownership);
+    }
+
+    #[test]
+    fn test_strict_ownership_parses_true() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("strict_ownership: true\n").expect("parse config");
+        assert!(parsed.strict_ownership);
+    }
+
+    #[test]
+    fn test_config_backward_compat_without_strict_ownership() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("spec_dirs:\n  - specs\n").expect("parse config");
+        assert!(!parsed.strict_ownership);
     }
 }
