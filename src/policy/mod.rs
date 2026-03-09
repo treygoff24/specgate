@@ -1,5 +1,10 @@
+pub mod git;
 pub mod types;
 
+pub use git::{
+    DiscoveredSpecFileChanges, FailClosedSpecOperation, PolicyGitError, discover_spec_file_changes,
+    parse_name_status_z,
+};
 pub use types::{
     ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION,
     PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
