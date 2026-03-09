@@ -48,6 +48,9 @@ pub struct SpecConfig {
     /// Envelope validation configuration for boundary contracts.
     #[serde(default)]
     pub envelope: EnvelopeConfig,
+    /// Policy for unresolved import edges.
+    #[serde(default)]
+    pub unresolved_edge_policy: UnresolvedEdgePolicy,
 }
 
 /// Envelope validation settings for contract enforcement.
@@ -104,6 +107,15 @@ impl StaleBaselinePolicy {
             Self::Fail => "fail",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UnresolvedEdgePolicy {
+    #[default]
+    Warn,
+    Error,
+    Ignore,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
@@ -257,6 +269,7 @@ impl Default for SpecConfig {
             enforce_type_only_imports: default_enforce_type_only_imports(),
             tsconfig_filename: default_tsconfig_filename(),
             envelope: EnvelopeConfig::default(),
+            unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
         }
     }
 }
@@ -456,6 +469,42 @@ telemetry:
                 "unexpected error for '{bad}': {err}"
             );
         }
+    }
+
+    #[test]
+    fn test_unresolved_edge_policy_config_parse() {
+        let warn: SpecConfig =
+            yaml_serde::from_str("unresolved_edge_policy: warn\n").expect("parse warn");
+        assert_eq!(warn.unresolved_edge_policy, UnresolvedEdgePolicy::Warn);
+
+        let error: SpecConfig =
+            yaml_serde::from_str("unresolved_edge_policy: error\n").expect("parse error");
+        assert_eq!(error.unresolved_edge_policy, UnresolvedEdgePolicy::Error);
+
+        let ignore: SpecConfig =
+            yaml_serde::from_str("unresolved_edge_policy: ignore\n").expect("parse ignore");
+        assert_eq!(ignore.unresolved_edge_policy, UnresolvedEdgePolicy::Ignore);
+    }
+
+    #[test]
+    fn test_unresolved_edge_policy_defaults_to_warn() {
+        let config = SpecConfig::default();
+        assert_eq!(config.unresolved_edge_policy, UnresolvedEdgePolicy::Warn);
+    }
+
+    #[test]
+    fn test_config_backward_compat_without_unresolved_policy() {
+        // Old config without the field should still parse and default to Warn
+        let parsed: SpecConfig =
+            yaml_serde::from_str("spec_dirs:\n  - specs\n").expect("parse old config");
+        assert_eq!(parsed.unresolved_edge_policy, UnresolvedEdgePolicy::Warn);
+        assert_eq!(parsed.spec_dirs, vec!["specs"]);
+    }
+
+    #[test]
+    fn test_unresolved_edge_policy_serializes_correctly() {
+        let rendered = serde_json::to_string(&SpecConfig::default()).expect("serialize");
+        assert!(rendered.contains("\"unresolved_edge_policy\":\"warn\""));
     }
 
     #[test]

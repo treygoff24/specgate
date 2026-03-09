@@ -1,4 +1,75 @@
+use crate::graph::{DependencyGraph, EdgeKind};
+
 use super::*;
+
+/// Build edge classification and unresolved edge list from a dependency graph.
+///
+/// Uses the graph's tracked unresolved imports (external and unresolvable) plus
+/// the first-party edges already in the graph.
+pub(crate) fn build_edge_classification(
+    project_root: &std::path::Path,
+    graph: &DependencyGraph,
+    policy: crate::spec::config::UnresolvedEdgePolicy,
+) -> (EdgeClassification, Vec<UnresolvedEdge>) {
+    use crate::spec::config::UnresolvedEdgePolicy;
+
+    let mut resolved = 0usize;
+    let mut external = 0usize;
+    let mut type_only = 0usize;
+
+    // Count first-party resolved edges
+    for edge in graph.dependency_edges() {
+        if edge.kind == EdgeKind::TypeOnlyImport {
+            type_only += 1;
+        } else {
+            resolved += 1;
+        }
+    }
+
+    let mut unresolved_literal = 0usize;
+    let mut unresolved_dynamic = 0usize;
+    let mut unresolved_edges: Vec<UnresolvedEdge> = Vec::new();
+
+    for record in graph.unresolved_imports() {
+        if record.is_external {
+            external += 1;
+            // External imports are not reported as unresolved edges
+            continue;
+        }
+
+        let kind_str = if record.kind == EdgeKind::DynamicImport {
+            unresolved_dynamic += 1;
+            "unresolved_dynamic"
+        } else {
+            unresolved_literal += 1;
+            "unresolved_literal"
+        };
+
+        if matches!(policy, UnresolvedEdgePolicy::Ignore) {
+            continue;
+        }
+
+        unresolved_edges.push(UnresolvedEdge {
+            from: normalize_repo_relative(project_root, &record.from),
+            specifier: record.specifier.clone(),
+            kind: kind_str.to_string(),
+            line: record.line,
+        });
+    }
+
+    // Sort deterministically: by from, then specifier
+    unresolved_edges.sort_by(|a, b| a.from.cmp(&b.from).then_with(|| a.specifier.cmp(&b.specifier)));
+
+    let classification = EdgeClassification {
+        resolved,
+        unresolved_literal,
+        unresolved_dynamic,
+        external,
+        type_only,
+    };
+
+    (classification, unresolved_edges)
+}
 
 pub(crate) fn analyze_project(
     loaded: &LoadedProject,
@@ -184,6 +255,39 @@ pub(crate) fn analyze_project(
 
     verdict::sort_policy_violations(&mut policy_violations);
 
+    let (edge_classification, unresolved_edges) = build_edge_classification(
+        &loaded.project_root,
+        &graph,
+        loaded.config.unresolved_edge_policy,
+    );
+
+    // If policy is Error, generate PolicyViolation entries for unresolved literal imports
+    if loaded.config.unresolved_edge_policy == crate::spec::config::UnresolvedEdgePolicy::Error {
+        for edge in &unresolved_edges {
+            if edge.kind == "unresolved_literal" {
+                policy_violations.push(PolicyViolation {
+                    rule: "edge.unresolved".to_string(),
+                    severity: Severity::Error,
+                    message: format!("unresolved import: '{}'", edge.specifier),
+                    from_file: std::path::PathBuf::from(&edge.from),
+                    to_file: None,
+                    from_module: None,
+                    to_module: None,
+                    line: edge.line,
+                    column: None,
+                    expected: None,
+                    actual: Some(edge.specifier.clone()),
+                    remediation_hint: Some(
+                        "Verify the import specifier resolves to a file within the project."
+                            .to_string(),
+                    ),
+                    contract_id: None,
+                });
+            }
+        }
+        verdict::sort_policy_violations(&mut policy_violations);
+    }
+
     Ok(AnalysisArtifacts {
         policy_violations,
         layer_config_issues,
@@ -193,5 +297,7 @@ pub(crate) fn analyze_project(
         graph_edges: graph.edge_count(),
         suppressed_violations,
         edge_pairs,
+        edge_classification,
+        unresolved_edges,
     })
 }

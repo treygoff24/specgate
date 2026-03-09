@@ -56,6 +56,24 @@ pub struct FingerprintedViolation {
     pub disposition: ViolationDisposition,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EdgeClassification {
+    pub resolved: usize,
+    pub unresolved_literal: usize,
+    pub unresolved_dynamic: usize,
+    pub external: usize,
+    pub type_only: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnresolvedEdge {
+    pub from: String,
+    pub specifier: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VerdictStatus {
@@ -197,6 +215,10 @@ pub struct Verdict {
     pub telemetry: Option<AnonymizedTelemetryEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_packages: Option<Vec<WorkspacePackageInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_classification: Option<EdgeClassification>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unresolved_edges: Vec<UnresolvedEdge>,
 }
 
 /// Governance context for verdict building.
@@ -321,6 +343,8 @@ pub fn build_verdict_with_options(
         governance: governance_payload,
         telemetry: options.telemetry,
         workspace_packages: None,
+        edge_classification: None,
+        unresolved_edges: Vec::new(),
     }
 }
 
@@ -423,6 +447,121 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    // ---- EdgeClassification tests ----
+
+    #[test]
+    fn test_edge_classification_serialization() {
+        let classification = EdgeClassification {
+            resolved: 10,
+            unresolved_literal: 2,
+            unresolved_dynamic: 1,
+            external: 5,
+            type_only: 3,
+        };
+        let json = serde_json::to_string(&classification).expect("serialize");
+        let restored: EdgeClassification = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored, classification);
+        assert!(json.contains("\"resolved\":10"));
+        assert!(json.contains("\"unresolved_literal\":2"));
+        assert!(json.contains("\"unresolved_dynamic\":1"));
+        assert!(json.contains("\"external\":5"));
+        assert!(json.contains("\"type_only\":3"));
+    }
+
+    #[test]
+    fn test_unresolved_edge_serialization_with_line() {
+        let edge = UnresolvedEdge {
+            from: "src/a.ts".to_string(),
+            specifier: "./missing".to_string(),
+            kind: "unresolved_literal".to_string(),
+            line: Some(42),
+        };
+        let json = serde_json::to_string(&edge).expect("serialize");
+        let restored: UnresolvedEdge = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored, edge);
+        assert!(json.contains("\"line\":42"));
+    }
+
+    #[test]
+    fn test_unresolved_edge_serialization_omits_line_when_none() {
+        let edge = UnresolvedEdge {
+            from: "src/a.ts".to_string(),
+            specifier: "./missing".to_string(),
+            kind: "unresolved_dynamic".to_string(),
+            line: None,
+        };
+        let json = serde_json::to_string(&edge).expect("serialize");
+        assert!(!json.contains("\"line\""), "line should be omitted: {json}");
+    }
+
+    #[test]
+    fn test_verdict_with_edge_classification() {
+        let entries: Vec<FingerprintedViolation> = vec![];
+        let mut verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        verdict.edge_classification = Some(EdgeClassification {
+            resolved: 5,
+            unresolved_literal: 1,
+            unresolved_dynamic: 0,
+            external: 2,
+            type_only: 1,
+        });
+        let json = serde_json::to_string(&verdict).expect("serialize");
+        assert!(json.contains("\"edge_classification\""), "should include edge_classification: {json}");
+        assert!(json.contains("\"resolved\":5"));
+    }
+
+    #[test]
+    fn test_verdict_without_edge_classification() {
+        let entries: Vec<FingerprintedViolation> = vec![];
+        let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        let json = serde_json::to_string(&verdict).expect("serialize");
+        assert!(!json.contains("\"edge_classification\""), "should omit edge_classification when None: {json}");
+    }
+
+    #[test]
+    fn test_verdict_with_unresolved_edges() {
+        let entries: Vec<FingerprintedViolation> = vec![];
+        let mut verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        verdict.unresolved_edges = vec![
+            UnresolvedEdge {
+                from: "src/a.ts".to_string(),
+                specifier: "./missing".to_string(),
+                kind: "unresolved_literal".to_string(),
+                line: Some(5),
+            },
+        ];
+        let json = serde_json::to_string(&verdict).expect("serialize");
+        assert!(json.contains("\"unresolved_edges\""), "should include unresolved_edges: {json}");
+        assert!(json.contains("\"src/a.ts\""));
+    }
+
+    #[test]
+    fn test_verdict_without_unresolved_edges_omits_field() {
+        let entries: Vec<FingerprintedViolation> = vec![];
+        let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        let json = serde_json::to_string(&verdict).expect("serialize");
+        assert!(!json.contains("\"unresolved_edges\""), "should omit unresolved_edges when empty: {json}");
+    }
+
+    #[test]
+    fn test_edge_classification_counts_are_correct() {
+        // Verify zero-value classification serializes correctly
+        let classification = EdgeClassification {
+            resolved: 0,
+            unresolved_literal: 0,
+            unresolved_dynamic: 0,
+            external: 0,
+            type_only: 0,
+        };
+        let json = serde_json::to_string(&classification).expect("serialize");
+        let restored: EdgeClassification = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.resolved, 0);
+        assert_eq!(restored.unresolved_literal, 0);
+        assert_eq!(restored.unresolved_dynamic, 0);
+        assert_eq!(restored.external, 0);
+        assert_eq!(restored.type_only, 0);
+    }
 
     fn violation(
         rule: &str,
