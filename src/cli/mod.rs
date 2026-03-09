@@ -1,7 +1,7 @@
 //! CLI module for Specgate.
 //!
 //! This module provides the command-line interface with subcommands for
-//! check, validate, init, baseline, and doctor operations.
+//! check, validate, init, baseline, doctor, and policy-diff operations.
 
 mod analysis;
 mod baseline_cmd;
@@ -9,6 +9,7 @@ mod blast;
 pub mod check;
 mod doctor;
 pub mod init;
+mod policy_diff;
 mod project;
 mod severity;
 pub mod types;
@@ -59,6 +60,7 @@ pub(crate) use blast::*;
 pub use check::{CheckArgs, CheckOutputMode, DiffMode, OutputFormat};
 pub(crate) use doctor::*;
 pub use init::InitArgs as InitArgsEnhanced;
+pub(crate) use policy_diff::PolicyDiffArgs;
 pub(crate) use project::*;
 pub(crate) use severity::*;
 pub use types::*;
@@ -86,6 +88,8 @@ enum Command {
     Doctor(DoctorArgs),
     /// Generate a baseline file for current violations.
     Baseline(BaselineArgs),
+    /// Compare `.spec.yml` policy snapshots between git refs.
+    PolicyDiff(PolicyDiffArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -111,6 +115,7 @@ where
         Command::Init(args) => init::handle_init(args),
         Command::Baseline(args) => baseline_cmd::handle_baseline(args),
         Command::Doctor(args) => doctor::handle_doctor(args),
+        Command::PolicyDiff(args) => policy_diff::handle_policy_diff(args),
     }
 }
 

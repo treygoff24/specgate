@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::Command;
 
 use serde_json::Value;
 use tempfile::TempDir;
@@ -599,4 +600,122 @@ fn init_scaffold_includes_version_2_3_and_empty_contracts() {
     assert!(spec_content.contains("module: \"app\""));
     assert!(spec_content.contains("boundaries:"));
     assert!(spec_content.contains("constraints: []"));
+}
+
+fn run_git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("execute git command");
+
+    if !output.status.success() {
+        panic!(
+            "git {:?} failed:
+stdout: {}
+stderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    String::from_utf8(output.stdout)
+        .expect("git output should be valid UTF-8")
+        .trim()
+        .to_string()
+}
+
+fn init_git_repo(root: &Path) {
+    run_git(root, &["init", "--initial-branch=main"]);
+    run_git(
+        root,
+        &["config", "user.email", "specgate-tests@example.com"],
+    );
+    run_git(root, &["config", "user.name", "Specgate Tests"]);
+}
+
+fn commit_all(root: &Path, message: &str) {
+    run_git(root, &["add", "-A"]);
+    run_git(root, &["commit", "-m", message]);
+}
+
+#[test]
+fn policy_diff_runtime_errors_are_exit_code_two() {
+    let temp = TempDir::new().expect("tempdir");
+
+    let result = run([
+        "specgate",
+        "policy-diff",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(result.exit_code, 2);
+
+    let parsed = parse_json(&result.stdout);
+    let diffs = parsed["diffs"].as_array().expect("diffs array");
+    assert!(diffs.is_empty());
+
+    let summary = &parsed["summary"];
+    assert_eq!(summary["modules_changed"].as_u64().unwrap(), 0);
+    assert_eq!(summary["widening_changes"].as_u64().unwrap(), 0);
+    assert_eq!(summary["narrowing_changes"].as_u64().unwrap(), 0);
+    assert_eq!(summary["structural_changes"].as_u64().unwrap(), 0);
+    assert!(!summary["has_widening"].as_bool().unwrap());
+
+    let errors = parsed["errors"].as_array().expect("errors array");
+    assert!(!errors.is_empty());
+}
+
+#[test]
+fn policy_diff_parse_errors_return_runtime_exit_code() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nconstraints: []\n",
+    );
+    commit_all(temp.path(), "base");
+
+    // Intentionally broken YAML on head.
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nboundaries: [\n  path: src/**/*\n",
+    );
+    commit_all(temp.path(), "bad head");
+
+    let result = run([
+        "specgate",
+        "policy-diff",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(result.exit_code, 2);
+    let parsed = parse_json(&result.stdout);
+    let diffs = parsed["diffs"].as_array().expect("diffs array");
+    assert!(diffs.is_empty());
+
+    let summary = &parsed["summary"];
+    assert_eq!(summary["modules_changed"].as_u64().unwrap(), 0);
+    assert_eq!(summary["widening_changes"].as_u64().unwrap(), 0);
+    assert_eq!(summary["narrowing_changes"].as_u64().unwrap(), 0);
+    assert_eq!(summary["structural_changes"].as_u64().unwrap(), 0);
+    assert!(!summary["has_widening"].as_bool().unwrap());
+
+    let errors = parsed["errors"].as_array().expect("errors list");
+    assert!(!errors.is_empty());
+    assert_eq!(errors[0]["code"], "policy.spec_parse_error");
 }

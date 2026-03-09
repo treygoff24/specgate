@@ -40,6 +40,7 @@ See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes)
 | [**Operator Guide**](docs/reference/operator-guide.md) | **Start here** — Complete onboarding path |
 | [First 15 Minutes](docs/reference/getting-started.md) | Quick hands-on tutorial |
 | [Spec Language Reference](docs/reference/spec-language.md) | YAML spec file format |
+| [Policy diff reference](docs/reference/policy-diff.md) | Compare `.spec.yml` policy across git refs and detect widenings |
 | [MVP Merge Gate](docs/reference/mvp-merge-gate.md) | Single merge-ready gate definition |
 | [TS/JS v1 Support Matrix](docs/reference/support-matrix-v1.md) | Tier 1/2/3 commitments, downgrade rules, stable/beta semantics |
 
@@ -99,6 +100,25 @@ Deterministic JSON output with pass/fail status, violations, and policy metadata
 ```
 
 See [CI Gate Understanding](docs/design/ci-gate-understanding.md) for complete CI patterns.
+
+### Policy diff
+
+Use `specgate policy-diff --base origin/main` to compare `.spec.yml` policy between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs and `--format json` or `--format ndjson` for machine readable output. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
+
+For exit code `2`, `policy-diff` keeps structured entries in `errors` but clears authoritative classification payload fields (`diffs` and non-zero summary counters) so consumers do not treat partial output as a gate signal.
+
+In the MVP, deleting a `.spec.yml` file is always a widening, and renaming or copying a `.spec.yml` file is also treated as a widening risk. In CI, fetch full history before diffing against remote refs.
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+
+- name: Detect policy widenings
+  run: specgate policy-diff --base origin/main
+```
+
+See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, and current deferred items.
 
 ## Project Status
 

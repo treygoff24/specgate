@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use super::types::PolicyDiffErrorEntry;
+use crate::spec::SpecFile;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiscoveredSpecFileChanges {
@@ -52,6 +55,79 @@ impl fmt::Display for PolicyGitError {
 }
 
 impl Error for PolicyGitError {}
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadedSpecSnapshots {
+    pub snapshots: Vec<SpecSnapshotPair>,
+    pub errors: Vec<PolicyDiffErrorEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpecSnapshotPair {
+    pub spec_path: String,
+    pub base_spec: Option<SpecFile>,
+    pub head_spec: Option<SpecFile>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredAndLoadedSpecSnapshots {
+    pub discovered: DiscoveredSpecFileChanges,
+    pub loaded: LoadedSpecSnapshots,
+}
+
+pub fn discover_and_load_spec_snapshots(
+    project_root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+) -> Result<DiscoveredAndLoadedSpecSnapshots, PolicyGitError> {
+    let discovered = discover_spec_file_changes(project_root, base_ref, head_ref)?;
+    let loaded = load_spec_snapshots_for_changed_paths(
+        project_root,
+        base_ref,
+        head_ref,
+        &discovered.changed_spec_paths,
+    )?;
+
+    Ok(DiscoveredAndLoadedSpecSnapshots { discovered, loaded })
+}
+
+pub fn load_spec_snapshots_for_changed_paths(
+    project_root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+    changed_spec_paths: &BTreeSet<String>,
+) -> Result<LoadedSpecSnapshots, PolicyGitError> {
+    validate_git_worktree(project_root)?;
+    validate_ref_exists(project_root, base_ref)?;
+    validate_ref_exists(project_root, head_ref)?;
+
+    if changed_spec_paths.is_empty() {
+        return Ok(LoadedSpecSnapshots::default());
+    }
+
+    let mut snapshots = Vec::with_capacity(changed_spec_paths.len());
+    let mut errors = Vec::new();
+
+    let ordered_paths: Vec<String> = changed_spec_paths.iter().cloned().collect();
+    let base_blobs = load_blob_batch_for_ref(project_root, base_ref, &ordered_paths)?;
+    let head_blobs = load_blob_batch_for_ref(project_root, head_ref, &ordered_paths)?;
+
+    for (index, spec_path) in ordered_paths.iter().enumerate() {
+        let base_blob = base_blobs[index].as_deref();
+        let head_blob = head_blobs[index].as_deref();
+
+        let base_spec = parse_spec_blob(base_ref, spec_path, base_blob, &mut errors);
+        let head_spec = parse_spec_blob(head_ref, spec_path, head_blob, &mut errors);
+
+        snapshots.push(SpecSnapshotPair {
+            spec_path: spec_path.clone(),
+            base_spec,
+            head_spec,
+        });
+    }
+
+    Ok(LoadedSpecSnapshots { snapshots, errors })
+}
 
 pub fn discover_spec_file_changes(
     project_root: &Path,
@@ -184,6 +260,251 @@ fn is_shallow_repository(project_root: &Path) -> Result<bool, PolicyGitError> {
 
     let is_shallow = String::from_utf8_lossy(&output.stdout);
     Ok(is_shallow.trim() == "true")
+}
+
+fn load_blob_batch_for_ref(
+    project_root: &Path,
+    reference: &str,
+    spec_paths: &[String],
+) -> Result<Vec<Option<Vec<u8>>>, PolicyGitError> {
+    if spec_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut batch_stdin = Vec::new();
+    for spec_path in spec_paths {
+        batch_stdin.extend_from_slice(format!("{reference}:{spec_path}").as_bytes());
+        batch_stdin.push(0);
+    }
+
+    let output = Command::new("git")
+        .args(["cat-file", "--batch", "-Z"])
+        .current_dir(project_root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin.write_all(&batch_stdin)?;
+            }
+
+            child.wait_with_output()
+        })
+        .map_err(|error| {
+            PolicyGitError::new(
+                "git.command_failed",
+                format!("failed to execute git cat-file --batch -Z: {error}"),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PolicyGitError::new(
+            "git.cat_file_failed",
+            format!("git cat-file --batch -Z failed: {}", stderr.trim()),
+        ));
+    }
+
+    parse_batch_output(reference, spec_paths, &output.stdout)
+}
+
+fn parse_batch_output(
+    reference: &str,
+    spec_paths: &[String],
+    raw: &[u8],
+) -> Result<Vec<Option<Vec<u8>>>, PolicyGitError> {
+    let mut cursor = 0;
+    let mut blobs = Vec::with_capacity(spec_paths.len());
+
+    for spec_path in spec_paths {
+        let header = read_nul_terminated(raw, &mut cursor).ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!(
+                    "truncated git cat-file output while reading header for {reference}:{spec_path}"
+                ),
+            )
+        })?;
+
+        let header_text = String::from_utf8(header.to_vec()).map_err(|_| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("non-UTF-8 header in git cat-file output for {reference}:{spec_path}"),
+            )
+        })?;
+
+        if header_text.ends_with(" missing") {
+            blobs.push(None);
+            continue;
+        }
+
+        let mut fields = header_text.split_whitespace();
+        let _oid = fields.next().ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("malformed cat-file header for {reference}:{spec_path}: {header_text}"),
+            )
+        })?;
+        let object_type = fields.next().ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("malformed cat-file header for {reference}:{spec_path}: {header_text}"),
+            )
+        })?;
+        let size_text = fields.next().ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("malformed cat-file header for {reference}:{spec_path}: {header_text}"),
+            )
+        })?;
+
+        if object_type != "blob" {
+            return Err(PolicyGitError::new(
+                "git.batch_parse_error",
+                format!(
+                    "expected blob for {reference}:{spec_path}, got '{object_type}' ({header_text})"
+                ),
+            ));
+        }
+
+        let size = size_text.parse::<usize>().map_err(|_| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("invalid blob size in header for {reference}:{spec_path}: {header_text}"),
+            )
+        })?;
+
+        let end = cursor.checked_add(size).ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("blob size overflow for {reference}:{spec_path}"),
+            )
+        })?;
+
+        let blob = raw.get(cursor..end).ok_or_else(|| {
+            PolicyGitError::new(
+                "git.batch_parse_error",
+                format!(
+                    "truncated git cat-file output while reading blob for {reference}:{spec_path}"
+                ),
+            )
+        })?;
+        cursor = end;
+
+        if raw.get(cursor) != Some(&0) {
+            return Err(PolicyGitError::new(
+                "git.batch_parse_error",
+                format!("missing NUL separator after blob for {reference}:{spec_path}"),
+            ));
+        }
+        cursor += 1;
+
+        blobs.push(Some(blob.to_vec()));
+    }
+
+    Ok(blobs)
+}
+
+fn read_nul_terminated<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    let start = *cursor;
+    let relative_end = raw.get(start..)?.iter().position(|byte| *byte == b'\0')?;
+    let end = start + relative_end;
+    *cursor = end + 1;
+    Some(&raw[start..end])
+}
+
+fn parse_spec_blob(
+    reference: &str,
+    spec_path: &str,
+    blob: Option<&[u8]>,
+    errors: &mut Vec<PolicyDiffErrorEntry>,
+) -> Option<SpecFile> {
+    let blob = blob?;
+
+    let source = match String::from_utf8(blob.to_vec()) {
+        Ok(source) => source,
+        Err(_) => {
+            errors.push(PolicyDiffErrorEntry {
+                code: "policy.spec_blob_non_utf8".to_string(),
+                message: format!("{reference}:{spec_path} is not valid UTF-8"),
+                spec_path: Some(spec_path.to_string()),
+            });
+            return None;
+        }
+    };
+
+    let mut spec: SpecFile = match yaml_serde::from_str(&source) {
+        Ok(spec) => spec,
+        Err(error) => {
+            errors.push(PolicyDiffErrorEntry {
+                code: "policy.spec_parse_error".to_string(),
+                message: format!("failed to parse {reference}:{spec_path}: {error}"),
+                spec_path: Some(spec_path.to_string()),
+            });
+            return None;
+        }
+    };
+
+    spec.spec_path = Some(PathBuf::from(spec_path));
+    Some(spec)
+}
+
+pub fn list_tracked_files_scoped(
+    project_root: &Path,
+    reference: &str,
+    prefixes: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, PolicyGitError> {
+    validate_git_worktree(project_root)?;
+    validate_ref_exists(project_root, reference)?;
+
+    if prefixes.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+
+    let mut command = Command::new("git");
+    command
+        .arg("ls-tree")
+        .arg("-r")
+        .arg("-z")
+        .arg("--name-only")
+        .arg(reference)
+        .arg("--");
+
+    for prefix in prefixes {
+        command.arg(prefix);
+    }
+
+    let output = command
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| {
+            PolicyGitError::new(
+                "git.command_failed",
+                format!("failed to execute git ls-tree: {error}"),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PolicyGitError::new(
+            "git.ls_tree_failed",
+            format!("git ls-tree failed: {}", stderr.trim()),
+        ));
+    }
+
+    let mut files = BTreeSet::new();
+    for token in output
+        .stdout
+        .split(|byte| *byte == b'\0')
+        .filter(|token| !token.is_empty())
+    {
+        files.insert(parse_utf8_token(token, "path")?);
+    }
+
+    Ok(files)
 }
 
 pub fn parse_name_status_z(raw: &[u8]) -> Result<DiscoveredSpecFileChanges, PolicyGitError> {
