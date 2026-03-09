@@ -8,6 +8,13 @@ use crate::deterministic::normalize_path;
 use crate::spec::types::SpecFile;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvalidGlob {
+    pub module_id: String,
+    pub pattern: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnershipReport {
     pub total_source_files: usize,
     pub claimed_files: usize,
@@ -15,6 +22,8 @@ pub struct OwnershipReport {
     pub overlapping_files: Vec<OverlapEntry>,
     pub duplicate_module_ids: Vec<DuplicateModule>,
     pub orphaned_specs: Vec<OrphanedSpec>,
+    /// Globs that failed to compile — surfaced instead of silently dropped.
+    pub invalid_globs: Vec<InvalidGlob>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,63 +51,90 @@ pub fn validate_ownership(
     specs: &[SpecFile],
     source_files: &[PathBuf],
 ) -> OwnershipReport {
-    let duplicate_module_ids = detect_duplicate_module_ids(specs);
+    let duplicate_module_ids = detect_duplicate_module_ids(project_root, specs);
 
-    // Build per-spec glob matchers for specs that have boundaries.path
-    let spec_matchers: Vec<(String, String, GlobSet)> = specs
-        .iter()
-        .filter_map(|spec| {
-            let boundaries = spec.boundaries.as_ref()?;
-            let path_glob = boundaries.path.as_ref()?;
-            let spec_path = spec
-                .spec_path
-                .as_ref()
-                .map(|p| normalize_repo_relative(project_root, p))
-                .unwrap_or_else(|| spec.module.clone());
+    // Build per-spec glob matchers for specs that have boundaries.path.
+    // Invalid globs are recorded instead of silently skipped (Finding #2).
+    let mut spec_matchers: Vec<(String, String, String, GlobSet)> = Vec::new();
+    let mut invalid_globs: Vec<InvalidGlob> = Vec::new();
 
-            let glob = Glob::new(path_glob).ok()?;
-            let mut builder = GlobSetBuilder::new();
-            builder.add(glob);
-            let globset = builder.build().ok()?;
+    for spec in specs {
+        let boundaries = match spec.boundaries.as_ref() {
+            Some(b) => b,
+            None => continue,
+        };
+        let path_glob = match boundaries.path.as_ref() {
+            Some(p) => p,
+            None => continue,
+        };
+        let spec_path = spec
+            .spec_path
+            .as_ref()
+            .map(|p| normalize_repo_relative(project_root, p))
+            .unwrap_or_else(|| spec.module.clone());
 
-            Some((spec.module.clone(), spec_path, globset))
-        })
-        .collect();
+        match Glob::new(path_glob) {
+            Ok(glob) => {
+                let mut builder = GlobSetBuilder::new();
+                builder.add(glob);
+                match builder.build() {
+                    Ok(globset) => {
+                        spec_matchers.push((spec.module.clone(), spec_path, path_glob.clone(), globset));
+                    }
+                    Err(e) => {
+                        invalid_globs.push(InvalidGlob {
+                            module_id: spec.module.clone(),
+                            pattern: path_glob.clone(),
+                            error: e.to_string(),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                invalid_globs.push(InvalidGlob {
+                    module_id: spec.module.clone(),
+                    pattern: path_glob.clone(),
+                    error: e.to_string(),
+                });
+            }
+        }
+    }
 
     let mut claimed_count = 0usize;
     let mut unclaimed_files: Vec<String> = Vec::new();
     let mut overlapping_files: Vec<OverlapEntry> = Vec::new();
 
-    // Track which source files each spec actually matches (for orphan detection)
-    let mut spec_match_counts: BTreeMap<String, usize> = spec_matchers
-        .iter()
-        .map(|(module_id, _, _)| (module_id.clone(), 0))
-        .collect();
+    // Track match counts by index to avoid collision when two specs share a module_id (Finding #3).
+    let mut match_counts: Vec<usize> = vec![0; spec_matchers.len()];
 
     for source_path in source_files {
         let rel = normalize_repo_relative(project_root, source_path);
 
-        let mut claimants: Vec<String> = Vec::new();
-        for (module_id, _, globset) in &spec_matchers {
-            if globset.is_match(&rel) {
-                claimants.push(module_id.clone());
-            }
-        }
-        claimants.sort();
+        let matched_indices: Vec<usize> = spec_matchers
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, _, _, globset))| globset.is_match(&rel))
+            .map(|(i, _)| i)
+            .collect();
 
-        match claimants.len() {
+        for &i in &matched_indices {
+            match_counts[i] += 1;
+        }
+
+        match matched_indices.len() {
             0 => {
                 unclaimed_files.push(rel);
             }
             1 => {
                 claimed_count += 1;
-                *spec_match_counts.get_mut(&claimants[0]).unwrap() += 1;
             }
             _ => {
                 claimed_count += 1;
-                for m in &claimants {
-                    *spec_match_counts.get_mut(m).unwrap() += 1;
-                }
+                let mut claimants: Vec<String> = matched_indices
+                    .iter()
+                    .map(|&i| spec_matchers[i].0.clone())
+                    .collect();
+                claimants.sort();
                 overlapping_files.push(OverlapEntry {
                     file: rel,
                     claimed_by: claimants,
@@ -112,20 +148,12 @@ pub fn validate_ownership(
 
     let mut orphaned_specs: Vec<OrphanedSpec> = spec_matchers
         .iter()
-        .filter(|(module_id, _, _)| spec_match_counts.get(module_id).copied().unwrap_or(0) == 0)
-        .map(|(module_id, spec_path, _)| {
-            let path_glob = specs
-                .iter()
-                .find(|s| &s.module == module_id)
-                .and_then(|s| s.boundaries.as_ref())
-                .and_then(|b| b.path.as_ref())
-                .cloned()
-                .unwrap_or_default();
-            OrphanedSpec {
-                module_id: module_id.clone(),
-                spec_path: spec_path.clone(),
-                path_glob,
-            }
+        .enumerate()
+        .filter(|(i, _)| match_counts[*i] == 0)
+        .map(|(_, (module_id, spec_path, path_glob, _))| OrphanedSpec {
+            module_id: module_id.clone(),
+            spec_path: spec_path.clone(),
+            path_glob: path_glob.clone(),
         })
         .collect();
     orphaned_specs.sort_by(|a, b| a.module_id.cmp(&b.module_id));
@@ -137,17 +165,21 @@ pub fn validate_ownership(
         overlapping_files,
         duplicate_module_ids,
         orphaned_specs,
+        invalid_globs,
     }
 }
 
-fn detect_duplicate_module_ids(specs: &[SpecFile]) -> Vec<DuplicateModule> {
+fn detect_duplicate_module_ids(project_root: &Path, specs: &[SpecFile]) -> Vec<DuplicateModule> {
     let mut by_module: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for spec in specs {
+        // Finding #12: normalize spec_paths so the same file with different path
+        // representations (absolute vs relative, backslash vs forward-slash) is
+        // detected as a duplicate.
         let spec_path = spec
             .spec_path
             .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| normalize_repo_relative(project_root, p))
             .unwrap_or_else(|| format!("<{}>", spec.module));
         by_module
             .entry(spec.module.clone())
@@ -327,10 +359,92 @@ mod tests {
                 spec_path: "specs/old.spec.yml".to_string(),
                 path_glob: "src/old/**".to_string(),
             }],
+            invalid_globs: vec![],
         };
 
         let json = serde_json::to_string(&report).expect("serialize");
         let restored: OwnershipReport = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(restored, report);
+    }
+
+    // --- Finding #2: invalid globs are surfaced in report.invalid_globs ---
+
+    #[test]
+    fn test_invalid_glob_reported_not_swallowed() {
+        // "[invalid" is an unclosed bracket — globset rejects it
+        let specs = vec![make_spec("bad-module", Some("[invalid"))];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(report.invalid_globs.len(), 1);
+        assert_eq!(report.invalid_globs[0].module_id, "bad-module");
+        assert_eq!(report.invalid_globs[0].pattern, "[invalid");
+        assert!(
+            !report.invalid_globs[0].error.is_empty(),
+            "error message should be non-empty"
+        );
+        // The spec should NOT appear as an orphan (it wasn't added to matchers)
+        assert!(report.orphaned_specs.is_empty());
+    }
+
+    // --- Finding #3: orphan detection per spec-matcher index, not per module_id ---
+
+    #[test]
+    fn test_orphan_detection_index_based_no_collision() {
+        // Two specs with the same module_id but different globs.
+        // One glob matches a file; the other matches nothing.
+        let specs = vec![
+            make_spec("auth", Some("src/auth/**")),
+            make_spec("auth", Some("src/payments/**")),
+        ];
+        let source = files(&["src/auth/index.ts"]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        // The payments glob matches nothing -> should be orphaned
+        assert_eq!(
+            report.orphaned_specs.len(),
+            1,
+            "expected one orphan, got: {:?}",
+            report.orphaned_specs
+        );
+        assert_eq!(report.orphaned_specs[0].module_id, "auth");
+        assert_eq!(report.orphaned_specs[0].path_glob, "src/payments/**");
+    }
+
+    // --- Finding #12: duplicate_module_ids normalizes spec_paths ---
+
+    #[test]
+    fn test_duplicate_module_paths_are_normalized() {
+        let specs = vec![
+            make_spec_with_path(
+                "api/core",
+                None,
+                Some("/project/specs/a/api-core.spec.yml"),
+            ),
+            make_spec_with_path(
+                "api/core",
+                None,
+                Some("/project/specs/b/api-core.spec.yml"),
+            ),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(report.duplicate_module_ids.len(), 1);
+        assert_eq!(report.duplicate_module_ids[0].module_id, "api/core");
+        // Paths should be repo-relative, not absolute
+        for path in &report.duplicate_module_ids[0].spec_paths {
+            assert!(
+                !path.starts_with('/'),
+                "expected repo-relative path, got absolute: {path}"
+            );
+            assert!(
+                path.starts_with("specs/"),
+                "expected specs/... path, got: {path}"
+            );
+        }
     }
 }

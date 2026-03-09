@@ -17,7 +17,10 @@ pub(crate) fn build_edge_classification(
     let mut external = 0usize;
     let mut type_only = 0usize;
 
-    // Count first-party resolved edges
+    // Count first-party resolved edges.
+    // Note: first-party imports that resolve to files outside the TS/JS discovery
+    // set (e.g., .json files) are not added as graph edges, so they are not counted
+    // here. This is intentional — those files are not part of the analysis boundary.
     for edge in graph.dependency_edges() {
         if edge.kind == EdgeKind::TypeOnlyImport {
             type_only += 1;
@@ -34,6 +37,12 @@ pub(crate) fn build_edge_classification(
         if record.is_external {
             external += 1;
             // External imports are not reported as unresolved edges
+            continue;
+        }
+
+        // Imports suppressed by @specgate-ignore comments are excluded from
+        // all counts and never reported as unresolved edges.
+        if record.ignored_by_comment {
             continue;
         }
 
@@ -281,29 +290,28 @@ pub(crate) fn analyze_project(
         loaded.config.unresolved_edge_policy,
     );
 
-    // If policy is Error, generate PolicyViolation entries for unresolved literal imports
+    // If policy is Error, generate PolicyViolation entries for all unresolved imports
+    // (both unresolved_literal and unresolved_dynamic are escalated).
     if loaded.config.unresolved_edge_policy == crate::spec::config::UnresolvedEdgePolicy::Error {
         for edge in &unresolved_edges {
-            if edge.kind == "unresolved_literal" {
-                policy_violations.push(PolicyViolation {
-                    rule: "edge.unresolved".to_string(),
-                    severity: Severity::Error,
-                    message: format!("unresolved import: '{}'", edge.specifier),
-                    from_file: std::path::PathBuf::from(&edge.from),
-                    to_file: None,
-                    from_module: None,
-                    to_module: None,
-                    line: edge.line,
-                    column: None,
-                    expected: None,
-                    actual: Some(edge.specifier.clone()),
-                    remediation_hint: Some(
-                        "Verify the import specifier resolves to a file within the project."
-                            .to_string(),
-                    ),
-                    contract_id: None,
-                });
-            }
+            policy_violations.push(PolicyViolation {
+                rule: "edge.unresolved".to_string(),
+                severity: Severity::Error,
+                message: format!("unresolved import: '{}'", edge.specifier),
+                from_file: std::path::PathBuf::from(&edge.from),
+                to_file: None,
+                from_module: None,
+                to_module: None,
+                line: edge.line,
+                column: None,
+                expected: None,
+                actual: Some(edge.specifier.clone()),
+                remediation_hint: Some(
+                    "Verify the import specifier resolves to a file within the project."
+                        .to_string(),
+                ),
+                contract_id: None,
+            });
         }
         verdict::sort_policy_violations(&mut policy_violations);
     }
@@ -320,4 +328,135 @@ pub(crate) fn analyze_project(
         edge_classification,
         unresolved_edges,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::spec::config::UnresolvedEdgePolicy;
+
+    use super::build_edge_classification;
+
+    #[test]
+    fn ignored_unresolved_import_not_counted_in_classification() {
+        // An ignored unresolved import (ignored_by_comment = true) should not
+        // be counted in unresolved_literal or unresolved_dynamic totals and
+        // should not appear in the unresolved_edges output.
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::graph::DependencyGraph;
+        use crate::resolver::ModuleResolver;
+        use crate::spec::{Boundaries, SpecConfig, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+
+        // File with one ignored unresolvable import and one non-ignored unresolvable import
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "// @specgate-ignore: temporary\nimport { x } from './missing-ignored';\nimport { y } from './missing-normal';\nconsole.log(x, y);\n",
+        )
+        .expect("write main");
+
+        let spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "app".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("src/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: Vec::new(),
+            spec_path: None,
+        };
+
+        let mut resolver = ModuleResolver::new(temp.path(), &[spec]).expect("resolver");
+        let config = SpecConfig::default();
+        let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
+
+        let (classification, edges) =
+            build_edge_classification(temp.path(), &graph, UnresolvedEdgePolicy::Warn);
+
+        // Only the non-ignored import should be counted
+        assert_eq!(
+            classification.unresolved_literal, 1,
+            "ignored import should not be counted: got {classification:?}"
+        );
+        // And it should not appear in the reported edges
+        assert_eq!(
+            edges.len(),
+            1,
+            "ignored edge should be excluded from unresolved_edges"
+        );
+        assert!(
+            edges[0].specifier.contains("missing-normal"),
+            "only the non-ignored specifier should appear"
+        );
+    }
+
+    #[test]
+    fn unresolved_dynamic_escalated_when_policy_error() {
+        // When unresolved_edge_policy=Error, dynamic imports that fail to resolve
+        // should also appear in unresolved_edges (not only literal imports).
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::graph::DependencyGraph;
+        use crate::resolver::ModuleResolver;
+        use crate::spec::{Boundaries, SpecConfig, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+
+        // One static unresolvable + one dynamic unresolvable
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "import { x } from './missing-static';\nasync function load() { await import('./missing-dynamic'); }\nconsole.log(x);\n",
+        )
+        .expect("write main");
+
+        let spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "app".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("src/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: Vec::new(),
+            spec_path: None,
+        };
+
+        let mut resolver = ModuleResolver::new(temp.path(), &[spec]).expect("resolver");
+        let config = SpecConfig::default();
+        let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
+
+        let (classification, edges) =
+            build_edge_classification(temp.path(), &graph, UnresolvedEdgePolicy::Error);
+
+        assert_eq!(classification.unresolved_literal, 1, "one literal unresolved");
+        assert_eq!(classification.unresolved_dynamic, 1, "one dynamic unresolved");
+
+        // Both kinds should appear in unresolved_edges when policy is Error
+        assert_eq!(
+            edges.len(),
+            2,
+            "both literal and dynamic unresolved imports should appear when policy=Error; got {edges:?}"
+        );
+        let kinds: Vec<&str> = edges.iter().map(|e| e.kind.as_str()).collect();
+        assert!(
+            kinds.contains(&"unresolved_literal"),
+            "literal should be in edges"
+        );
+        assert!(
+            kinds.contains(&"unresolved_dynamic"),
+            "dynamic should be in edges"
+        );
+    }
 }

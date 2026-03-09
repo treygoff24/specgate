@@ -37,6 +37,21 @@ pub(super) fn handle_doctor_ownership(args: DoctorOwnershipArgs) -> CliRunResult
         Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),
     };
 
+    // Finding #13: validation gate — block on spec errors before analysis
+    if loaded.validation.has_errors() {
+        let details = loaded
+            .validation
+            .errors()
+            .into_iter()
+            .map(|issue| format!("{}: {}", issue.module, issue.message))
+            .collect();
+        return runtime_error_json(
+            "validation",
+            "spec validation failed; run `specgate validate` for details",
+            details,
+        );
+    }
+
     let discovery = match discover_source_files(&loaded.project_root, &loaded.config.exclude) {
         Ok(d) => d,
         Err(error) => {
@@ -53,7 +68,8 @@ pub(super) fn handle_doctor_ownership(args: DoctorOwnershipArgs) -> CliRunResult
     let has_findings = !report.unclaimed_files.is_empty()
         || !report.overlapping_files.is_empty()
         || !report.orphaned_specs.is_empty()
-        || !report.duplicate_module_ids.is_empty();
+        || !report.duplicate_module_ids.is_empty()
+        || !report.invalid_globs.is_empty();
 
     let exit_code = if loaded.config.strict_ownership && has_findings {
         EXIT_CODE_POLICY_VIOLATIONS
@@ -128,6 +144,18 @@ fn render_human(report: &OwnershipReport) -> String {
         for dup in &report.duplicate_module_ids {
             let paths = dup.spec_paths.join(", ");
             out.push_str(&format!("  {} -> {paths}\n", dup.module_id));
+        }
+    }
+
+    if report.invalid_globs.is_empty() {
+        out.push_str("\nInvalid globs: none\n");
+    } else {
+        out.push_str("\nInvalid globs:\n");
+        for ig in &report.invalid_globs {
+            out.push_str(&format!(
+                "  {} -> pattern \"{}\" error: {}\n",
+                ig.module_id, ig.pattern, ig.error
+            ));
         }
     }
 

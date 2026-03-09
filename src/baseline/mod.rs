@@ -61,14 +61,16 @@ pub struct BaselineEntry {
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<u32>,
-    /// Who suppressed this violation (e.g., "john@example.com", "team-platform")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional owner/team responsible for this suppressed violation.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
-    /// Why this violation is suppressed
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional reason for suppressing this violation.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// Per-entry expiry date (ISO 8601 format: "2026-06-01")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional expiry date in YYYY-MM-DD format. When the current date is past this date,
+    /// the entry is considered expired and the violation will re-surface as new.
+    /// Invalid date formats are treated as "never expires" (safe default).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>,
 }
 
@@ -111,30 +113,60 @@ pub enum BaselineError {
 
 pub type Result<T> = std::result::Result<T, BaselineError>;
 
-/// Internal struct for preserving owner/reason/expires_at during refresh.
+/// Annotation metadata preserved from an existing baseline entry during refresh.
+#[derive(Debug, Clone, Default)]
 struct BaselineEntryMetadata {
     owner: Option<String>,
     reason: Option<String>,
     expires_at: Option<String>,
 }
 
-/// Options for `classify_violations_with_options`.
-#[derive(Debug, Clone, Default)]
-pub struct ClassifyOptions {
-    /// Current date for expiry checks (ISO 8601: "2026-03-09").
-    /// When `None`, expiry checks are skipped and all baseline entries are valid.
-    pub current_date: Option<String>,
+/// Returns true if the string matches the `YYYY-MM-DD` date format.
+///
+/// This only checks structural validity (4 digits, dash, 2 digits, dash, 2 digits).
+/// Invalid formats are never treated as expired — they are silently treated as "never expires".
+pub fn is_valid_date_format(s: &str) -> bool {
+    if s.len() != 10 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    bytes[0].is_ascii_digit()
+        && bytes[1].is_ascii_digit()
+        && bytes[2].is_ascii_digit()
+        && bytes[3].is_ascii_digit()
+        && bytes[4] == b'-'
+        && bytes[5].is_ascii_digit()
+        && bytes[6].is_ascii_digit()
+        && bytes[7] == b'-'
+        && bytes[8].is_ascii_digit()
+        && bytes[9].is_ascii_digit()
 }
 
-/// Returns `true` if the baseline entry has an `expires_at` date that is on or before `now`.
+/// Returns true if the baseline entry has expired relative to `current_date`.
 ///
-/// ISO 8601 dates (YYYY-MM-DD) sort lexicographically, so a simple string comparison suffices.
-/// When `expires_at` is `None`, the entry never expires.
-pub fn is_entry_expired(entry: &BaselineEntry, now: &str) -> bool {
+/// An entry is expired when:
+/// - It has an `expires_at` date
+/// - The date string is valid YYYY-MM-DD format
+/// - The date is strictly before `current_date` (lexicographic comparison is safe for ISO 8601)
+///
+/// If `expires_at` is absent or has an invalid format, returns false (safe default).
+pub fn is_entry_expired(entry: &BaselineEntry, current_date: &str) -> bool {
     match &entry.expires_at {
         None => false,
-        Some(expires) => expires.as_str() <= now,
+        Some(expires_at) => {
+            if !is_valid_date_format(expires_at) {
+                return false;
+            }
+            expires_at.as_str() < current_date
+        }
     }
+}
+
+/// Options for expiry-aware violation classification.
+#[derive(Debug, Clone)]
+pub struct ClassifyOptions {
+    /// Current date in YYYY-MM-DD format used to evaluate `expires_at` on baseline entries.
+    pub current_date: String,
 }
 
 pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
@@ -516,41 +548,48 @@ pub fn classify_violations_with_stale(
     (classified, stale_count)
 }
 
-/// Classify violations against baseline with extended options (e.g., expiry checks).
+/// Classify violations against baseline with expiry awareness.
 ///
-/// Returns a tuple of (classified violations, stale baseline entry count).
-/// When `options.current_date` is set, baseline entries with an `expires_at` date on or
-/// before that date are treated as expired and will NOT suppress matching violations.
+/// Returns `(classified violations, stale baseline entry count, expired baseline entry count)`.
+/// Expired entries are treated as if they are not in the baseline, so the violations they
+/// previously suppressed will appear as new.
 pub fn classify_violations_with_options(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
-    options: ClassifyOptions,
-) -> (Vec<FingerprintedViolation>, usize) {
-    // Filter baseline entries if current_date is set: expired entries are excluded from matching.
-    let filtered_baseline: Option<BaselineFile>;
-    let effective_baseline = if let Some(date) = &options.current_date {
-        if let Some(b) = baseline {
-            let non_expired_entries: Vec<BaselineEntry> = b
-                .entries
+    options: &ClassifyOptions,
+) -> (Vec<FingerprintedViolation>, usize, usize) {
+    let expired_count = baseline
+        .map(|b| {
+            b.entries
                 .iter()
-                .filter(|e| !is_entry_expired(e, date))
-                .cloned()
-                .collect();
-            filtered_baseline = Some(BaselineFile {
-                version: b.version.clone(),
-                generated_from: b.generated_from.clone(),
-                entries: non_expired_entries,
-            });
-            filtered_baseline.as_ref()
-        } else {
-            None
-        }
-    } else {
-        baseline
-    };
+                .filter(|e| is_entry_expired(e, &options.current_date))
+                .count()
+        })
+        .unwrap_or(0);
 
-    classify_violations_with_stale(project_root, violations, effective_baseline)
+    // Build a filtered baseline that excludes expired entries
+    let filtered_baseline: Option<BaselineFile> = baseline.map(|b| {
+        let filtered_entries = b
+            .entries
+            .iter()
+            .filter(|e| !is_entry_expired(e, &options.current_date))
+            .cloned()
+            .collect();
+        BaselineFile {
+            version: b.version.clone(),
+            generated_from: b.generated_from.clone(),
+            entries: filtered_entries,
+        }
+    });
+
+    let (classified, stale) = classify_violations_with_stale(
+        project_root,
+        violations,
+        filtered_baseline.as_ref(),
+    );
+
+    (classified, stale, expired_count)
 }
 
 /// Stable content fingerprint for baseline matching and verdict identity.
@@ -1117,12 +1156,31 @@ mod tests {
         assert_eq!(entry.expires_at, None);
     }
 
+    // --- Date format validation ---
+
     #[test]
-    fn test_is_entry_expired_before_date() {
+    fn test_valid_date_format_accepted() {
+        assert!(is_valid_date_format("2026-03-09"));
+        assert!(is_valid_date_format("2000-01-01"));
+        assert!(is_valid_date_format("9999-12-31"));
+    }
+
+    #[test]
+    fn test_invalid_date_format_not_expired() {
+        // Invalid formats should never be treated as expired (safe default)
+        assert!(!is_valid_date_format("next-week"));
+        assert!(!is_valid_date_format("2026/03/09"));
+        assert!(!is_valid_date_format(""));
+        assert!(!is_valid_date_format("03-09-2026"));
+        assert!(!is_valid_date_format("2026-3-9"));
+    }
+
+    #[test]
+    fn test_entry_with_invalid_expires_at_is_not_expired() {
         let entry = BaselineEntry {
-            fingerprint: "sha256:abc".to_string(),
+            fingerprint: "fp".to_string(),
             positional_fingerprint: None,
-            rule: "test".to_string(),
+            rule: "boundary.never_imports".to_string(),
             severity: crate::spec::Severity::Error,
             message: "msg".to_string(),
             from_file: "src/a.ts".to_string(),
@@ -1133,19 +1191,18 @@ mod tests {
             column: None,
             owner: None,
             reason: None,
-            expires_at: Some("2026-12-31".to_string()),
+            expires_at: Some("next-week".to_string()),
         };
-
-        // Entry expires in the future — not expired
+        // Invalid date format => not expired (safe default)
         assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
 
     #[test]
-    fn test_is_entry_expired_on_date() {
+    fn test_entry_with_past_expires_at_is_expired() {
         let entry = BaselineEntry {
-            fingerprint: "sha256:abc".to_string(),
+            fingerprint: "fp".to_string(),
             positional_fingerprint: None,
-            rule: "test".to_string(),
+            rule: "boundary.never_imports".to_string(),
             severity: crate::spec::Severity::Error,
             message: "msg".to_string(),
             from_file: "src/a.ts".to_string(),
@@ -1156,19 +1213,17 @@ mod tests {
             column: None,
             owner: None,
             reason: None,
-            expires_at: Some("2026-03-09".to_string()),
+            expires_at: Some("2026-01-01".to_string()),
         };
-
-        // Entry expiring today IS expired
         assert!(is_entry_expired(&entry, "2026-03-09"));
     }
 
     #[test]
-    fn test_is_entry_expired_past_date() {
+    fn test_entry_with_future_expires_at_is_not_expired() {
         let entry = BaselineEntry {
-            fingerprint: "sha256:abc".to_string(),
+            fingerprint: "fp".to_string(),
             positional_fingerprint: None,
-            rule: "test".to_string(),
+            rule: "boundary.never_imports".to_string(),
             severity: crate::spec::Severity::Error,
             message: "msg".to_string(),
             from_file: "src/a.ts".to_string(),
@@ -1179,19 +1234,17 @@ mod tests {
             column: None,
             owner: None,
             reason: None,
-            expires_at: Some("2025-01-01".to_string()),
+            expires_at: Some("2099-12-31".to_string()),
         };
-
-        // Entry expired in the past
-        assert!(is_entry_expired(&entry, "2026-03-09"));
+        assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
 
     #[test]
-    fn test_is_entry_expired_no_expiry() {
+    fn test_entry_without_expires_at_is_never_expired() {
         let entry = BaselineEntry {
-            fingerprint: "sha256:abc".to_string(),
+            fingerprint: "fp".to_string(),
             positional_fingerprint: None,
-            rule: "test".to_string(),
+            rule: "boundary.never_imports".to_string(),
             severity: crate::spec::Severity::Error,
             message: "msg".to_string(),
             from_file: "src/a.ts".to_string(),
@@ -1204,18 +1257,18 @@ mod tests {
             reason: None,
             expires_at: None,
         };
-
-        // Entry without expiry is never expired
         assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
 
+    // --- classify_violations_with_options ---
+
     #[test]
-    fn test_classify_skips_expired_baseline_entries() {
+    fn test_classify_with_options_expired_entry_treated_as_new() {
         let project_root = Path::new(".");
         let v = violation("A", "src/a.ts");
         let fingerprint = fingerprint_violation(project_root, &v);
 
-        // Baseline entry that is already expired
+        // Build a baseline with an expired entry
         let baseline = BaselineFile {
             version: BASELINE_FILE_VERSION.to_string(),
             generated_from: BaselineGeneratedFrom::default(),
@@ -1233,31 +1286,30 @@ mod tests {
                 column: v.column,
                 owner: None,
                 reason: None,
-                expires_at: Some("2025-01-01".to_string()), // past date
+                expires_at: Some("2020-01-01".to_string()), // expired
             }],
         };
 
-        let (classified, _) = classify_violations_with_options(
+        let (classified, _stale, expired) = classify_violations_with_options(
             project_root,
             &[v],
             Some(&baseline),
-            ClassifyOptions {
-                current_date: Some("2026-03-09".to_string()),
+            &ClassifyOptions {
+                current_date: "2026-03-09".to_string(),
             },
         );
 
         assert_eq!(classified.len(), 1);
-        // Expired baseline entry — violation should be treated as New
         assert_eq!(classified[0].disposition, ViolationDisposition::New);
+        assert_eq!(expired, 1);
     }
 
     #[test]
-    fn test_classify_keeps_non_expired_baseline_entries() {
+    fn test_classify_with_options_non_expired_entry_treated_as_baseline() {
         let project_root = Path::new(".");
         let v = violation("A", "src/a.ts");
         let fingerprint = fingerprint_violation(project_root, &v);
 
-        // Baseline entry with future expiry
         let baseline = BaselineFile {
             version: BASELINE_FILE_VERSION.to_string(),
             generated_from: BaselineGeneratedFrom::default(),
@@ -1275,63 +1327,22 @@ mod tests {
                 column: v.column,
                 owner: None,
                 reason: None,
-                expires_at: Some("2027-12-31".to_string()), // future date
+                expires_at: Some("2099-12-31".to_string()), // not expired
             }],
         };
 
-        let (classified, _) = classify_violations_with_options(
+        let (classified, _stale, expired) = classify_violations_with_options(
             project_root,
             &[v],
             Some(&baseline),
-            ClassifyOptions {
-                current_date: Some("2026-03-09".to_string()),
+            &ClassifyOptions {
+                current_date: "2026-03-09".to_string(),
             },
         );
 
         assert_eq!(classified.len(), 1);
-        // Future expiry — violation should still be suppressed
         assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
-    }
-
-    #[test]
-    fn test_classify_without_date_ignores_expiry() {
-        let project_root = Path::new(".");
-        let v = violation("A", "src/a.ts");
-        let fingerprint = fingerprint_violation(project_root, &v);
-
-        // Baseline entry that is already expired
-        let baseline = BaselineFile {
-            version: BASELINE_FILE_VERSION.to_string(),
-            generated_from: BaselineGeneratedFrom::default(),
-            entries: vec![BaselineEntry {
-                fingerprint,
-                positional_fingerprint: positional_fingerprint_for_violation(&v),
-                rule: v.rule.clone(),
-                severity: v.severity,
-                message: v.message.clone(),
-                from_file: "src/a.ts".to_string(),
-                to_file: Some("src/provider/index.ts".to_string()),
-                from_module: v.from_module.clone(),
-                to_module: v.to_module.clone(),
-                line: v.line,
-                column: v.column,
-                owner: None,
-                reason: None,
-                expires_at: Some("2025-01-01".to_string()), // past date
-            }],
-        };
-
-        // No current_date — expiry check should be skipped
-        let (classified, _) = classify_violations_with_options(
-            project_root,
-            &[v],
-            Some(&baseline),
-            ClassifyOptions { current_date: None },
-        );
-
-        assert_eq!(classified.len(), 1);
-        // Without date, expired entries are still valid
-        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+        assert_eq!(expired, 0);
     }
 
     #[test]

@@ -189,18 +189,48 @@ impl ViolationStats {
 /// Format a verdict for human-readable output.
 /// Shows rule, message, hint/suggestion for each violation, plus a summary.
 pub fn format_verdict_human(verdict: &Verdict) -> String {
-    if verdict.violations.is_empty() {
-        return format!("✓ No violations found\n\n{}", format_summary_human(verdict));
-    }
-
     let mut lines = Vec::new();
 
-    for violation in &verdict.violations {
-        lines.push(format_violation_human_line(violation));
+    if verdict.violations.is_empty() {
+        lines.push("✓ No violations found".to_string());
         lines.push(String::new());
+    } else {
+        for violation in &verdict.violations {
+            lines.push(format_violation_human_line(violation));
+            lines.push(String::new());
+        }
     }
 
     lines.push(format_summary_human(verdict));
+
+    if let Some(ec) = &verdict.edge_classification {
+        lines.push(String::new());
+        lines.push("Edge classification:".to_string());
+        lines.push(format!(
+            "  Resolved: {}  Type-only: {}  External: {}",
+            ec.resolved, ec.type_only, ec.external
+        ));
+        lines.push(format!(
+            "  Unresolved (literal): {}  Unresolved (dynamic): {}",
+            ec.unresolved_literal, ec.unresolved_dynamic
+        ));
+    }
+
+    if !verdict.unresolved_edges.is_empty() {
+        lines.push(String::new());
+        lines.push("Unresolved imports:".to_string());
+        for edge in &verdict.unresolved_edges {
+            let location = if let Some(line) = edge.line {
+                format!("{}:{}", edge.from, line)
+            } else {
+                edge.from.clone()
+            };
+            lines.push(format!(
+                "  {} -> '{}' ({})",
+                location, edge.specifier, edge.kind
+            ));
+        }
+    }
 
     lines.join("\n")
 }
@@ -1108,5 +1138,115 @@ mod tests {
         assert_eq!(parsed["version"], "2.1.0");
         assert_eq!(parsed["runs"][0]["tool"]["driver"]["name"], "specgate");
         assert_eq!(parsed["runs"][0]["tool"]["driver"]["version"], "0.1.0");
+    }
+
+    #[test]
+    fn human_output_includes_edge_classification() {
+        // When a verdict has edge_classification set, format_verdict_human should
+        // include a section showing the edge counts.
+        use crate::verdict::EdgeClassification;
+
+        let mut verdict = empty_verdict();
+        verdict.edge_classification = Some(EdgeClassification {
+            resolved: 342,
+            type_only: 12,
+            external: 28,
+            unresolved_literal: 3,
+            unresolved_dynamic: 7,
+        });
+
+        let output = format_verdict_human(&verdict);
+
+        assert!(
+            output.contains("Edge classification"),
+            "should show edge classification section: {output}"
+        );
+        assert!(
+            output.contains("342"),
+            "should show resolved count: {output}"
+        );
+        assert!(
+            output.contains("12"),
+            "should show type_only count: {output}"
+        );
+        assert!(
+            output.contains("28"),
+            "should show external count: {output}"
+        );
+        assert!(
+            output.contains("3"),
+            "should show unresolved_literal count: {output}"
+        );
+        assert!(
+            output.contains("7"),
+            "should show unresolved_dynamic count: {output}"
+        );
+    }
+
+    #[test]
+    fn human_output_includes_unresolved_edges() {
+        // When a verdict has unresolved_edges, format_verdict_human should show them.
+        use crate::verdict::UnresolvedEdge;
+
+        let mut verdict = empty_verdict();
+        verdict.unresolved_edges = vec![
+            UnresolvedEdge {
+                from: "src/api/handler.ts".to_string(),
+                specifier: "./missing-module".to_string(),
+                kind: "unresolved_literal".to_string(),
+                line: Some(42),
+            },
+            UnresolvedEdge {
+                from: "src/utils/loader.ts".to_string(),
+                specifier: "./dynamic-missing".to_string(),
+                kind: "unresolved_dynamic".to_string(),
+                line: None,
+            },
+        ];
+
+        let output = format_verdict_human(&verdict);
+
+        assert!(
+            output.contains("Unresolved imports"),
+            "should show unresolved imports section: {output}"
+        );
+        assert!(
+            output.contains("src/api/handler.ts"),
+            "should show from file: {output}"
+        );
+        assert!(
+            output.contains("./missing-module"),
+            "should show specifier: {output}"
+        );
+        assert!(
+            output.contains("unresolved_literal"),
+            "should show kind: {output}"
+        );
+        assert!(
+            output.contains("src/utils/loader.ts"),
+            "should show second from file: {output}"
+        );
+    }
+
+    #[test]
+    fn human_output_omits_edge_classification_when_none() {
+        // When edge_classification is None, the section should not appear.
+        let verdict = empty_verdict();
+        let output = format_verdict_human(&verdict);
+        assert!(
+            !output.contains("Edge classification"),
+            "should not show edge classification when None: {output}"
+        );
+    }
+
+    #[test]
+    fn human_output_omits_unresolved_edges_when_empty() {
+        // When unresolved_edges is empty, the section should not appear.
+        let verdict = empty_verdict();
+        let output = format_verdict_human(&verdict);
+        assert!(
+            !output.contains("Unresolved imports"),
+            "should not show unresolved imports when empty: {output}"
+        );
     }
 }

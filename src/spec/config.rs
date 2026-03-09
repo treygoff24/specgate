@@ -80,8 +80,8 @@ pub struct SpecConfig {
     /// Import hygiene rules for catching common agent mistakes.
     #[serde(default)]
     pub import_hygiene: ImportHygieneConfig,
-    /// Whether ownership validation findings are errors or warnings.
-    /// When true, overlapping and unclaimed files are errors (exit code 1).
+    /// When true, any ownership finding (overlapping, unclaimed, orphaned, or duplicate)
+    /// causes a non-zero exit code.
     #[serde(default)]
     pub strict_ownership: bool,
 }

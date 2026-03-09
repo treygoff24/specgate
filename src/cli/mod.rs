@@ -25,8 +25,8 @@ use std::time::Instant;
 use clap::{Args, Parser, Subcommand};
 
 use crate::baseline::{
-    BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations_with_stale, load_optional_baseline, refresh_baseline_with_metadata,
+    BaselineGeneratedFrom, ClassifyOptions, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
+    classify_violations_with_options, load_optional_baseline, refresh_baseline_with_metadata,
     write_baseline,
 };
 use crate::build_info;

@@ -21,6 +21,9 @@ use clap::Args;
 
 use crate::baseline::DEFAULT_BASELINE_PATH;
 
+// Used for expiry-aware classification (current_date)
+use chrono::Local;
+
 /// Output format for the check command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[value(rename_all = "lower")]
@@ -283,8 +286,14 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     };
 
     let classify_start = Instant::now();
-    let (classified, stale_baseline_entries) =
-        classify_violations_with_stale(&loaded.project_root, &policy_violations, baseline.as_ref());
+    let current_date = Local::now().format("%Y-%m-%d").to_string();
+    let (classified, stale_baseline_entries, expired_baseline_entries) =
+        classify_violations_with_options(
+            &loaded.project_root,
+            &policy_violations,
+            baseline.as_ref(),
+            &ClassifyOptions { current_date },
+        );
     record_timing(&mut timings, "classify_baseline", classify_start);
 
     let governance = match compute_governance_hashes(&loaded) {
@@ -341,6 +350,7 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         &classified,
         artifacts.suppressed_violations,
         stale_baseline_entries,
+        expired_baseline_entries,
     );
     let fail_on_stale =
         loaded.config.stale_baseline == StaleBaselinePolicy::Fail && stale_baseline_entries > 0;
@@ -381,7 +391,7 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         },
         GovernanceContext {
             stale_baseline_entries,
-            expired_baseline_entries: 0,
+            expired_baseline_entries,
             rule_deltas: Vec::new(),
             policy_change_detected: false,
         },
@@ -532,8 +542,14 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
         }
     };
 
-    let (classified, stale_baseline_entries) =
-        classify_violations_with_stale(&loaded.project_root, &policy_violations, baseline.as_ref());
+    let current_date = Local::now().format("%Y-%m-%d").to_string();
+    let (classified, stale_baseline_entries, _expired_baseline_entries) =
+        classify_violations_with_options(
+            &loaded.project_root,
+            &policy_violations,
+            baseline.as_ref(),
+            &ClassifyOptions { current_date },
+        );
 
     // Filter based on diff mode
     let filtered: Vec<_> = match diff_mode {

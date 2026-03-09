@@ -74,6 +74,7 @@ pub(crate) fn compute_telemetry_summary(
     classified: &[verdict::FingerprintedViolation],
     _suppressed_violations: usize,
     stale_baseline_entries: usize,
+    expired_baseline_entries: usize,
 ) -> AnonymizedTelemetrySummary {
     let total_violations = classified.len();
     let new_violations = classified
@@ -97,7 +98,7 @@ pub(crate) fn compute_telemetry_summary(
         new_error_violations,
         new_warning_violations,
         stale_baseline_entries,
-        expired_baseline_entries: 0,
+        expired_baseline_entries,
     }
 }
 

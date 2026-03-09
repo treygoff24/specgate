@@ -124,6 +124,8 @@ pub struct UnresolvedImportRecord {
     pub line: Option<u32>,
     /// Whether the import resolved to a third-party/external package.
     pub is_external: bool,
+    /// Whether the import was suppressed by a @specgate-ignore comment.
+    pub ignored_by_comment: bool,
 }
 
 pub struct DependencyGraph {
@@ -217,6 +219,7 @@ impl DependencyGraph {
                             kind: request.kind,
                             line: request.line,
                             is_external: true,
+                            ignored_by_comment: request.ignored_by_comment,
                         });
                     }
                     ResolvedImport::Unresolvable { .. } => {
@@ -226,6 +229,7 @@ impl DependencyGraph {
                             kind: request.kind,
                             line: request.line,
                             is_external: false,
+                            ignored_by_comment: request.ignored_by_comment,
                         });
                     }
                 }
@@ -1056,6 +1060,32 @@ console.log(value, dep);
             graph
                 .affected_modules(&[temp.path().join("src/does-not-exist.ts")])
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn unresolved_import_record_carries_ignored_flag() {
+        // An import preceded by @specgate-ignore that fails to resolve should
+        // carry ignored_by_comment = true in UnresolvedImportRecord.
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "// @specgate-ignore: temporary\nimport { x } from './missing-module';\nconsole.log(x);\n",
+        )
+        .expect("write main");
+
+        let specs = vec![spec("app", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let config = SpecConfig::default();
+        let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
+
+        let unresolved = graph.unresolved_imports();
+        assert_eq!(unresolved.len(), 1, "should have one unresolved import");
+        assert!(
+            unresolved[0].ignored_by_comment,
+            "ignored import should carry ignored_by_comment = true"
         );
     }
 }
