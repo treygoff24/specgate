@@ -38,7 +38,7 @@ P4 no longer needs the render trait — it extends existing `verdict::format`.
 
 ### The problem
 
-`src/cli/mod.rs` contains ~50 private functions and ~15 private types. `src/cli/doctor.rs` already uses `use super::*;` and depends on ~30 of these private items. Moving functions to new files changes Rust's visibility rules.
+`src/cli/mod.rs` contains ~50 private functions and ~15 private types. The `doctor` command depends on ~30 of these private items across its compare, trace, and overview flows. Moving functions to new files changes Rust's visibility rules.
 
 ### The solution
 
@@ -69,11 +69,11 @@ P4 no longer needs the render trait — it extends existing `verdict::format`.
    pub(crate) use util::*;
    ```
 
-3. **`doctor.rs`'s existing `use super::*;` continues to work.** The re-exports from `mod.rs` make all extracted items accessible through `super`.
+3. **Doctor submodules can import shared CLI helpers without widening public API surface.** The re-exports from `mod.rs` keep shared items available inside `cli/`, while `doctor/mod.rs` and sibling files can use explicit `super::` or `crate::cli::` imports as needed.
 
 4. **Tests that call private functions move with those functions.** Specifically:
    - `escape_yaml_double_quoted_escapes_control_chars` (line 3559) → moves to `init.rs` test module
-   - `parse_structured_snapshot_keeps_schema_version_validation` (line 3480) → moves to `doctor.rs` test module
+   - `parse_structured_snapshot_keeps_schema_version_validation` (line 3480) → moves to `doctor/tests.rs`
    - All other tests in `mod tests` call `run()` (the CLI entry point) and are end-to-end. They stay in `mod.rs` until P1.12, then move to a dedicated `tests.rs` integration module.
 
 ### Re-export invariant
@@ -296,9 +296,9 @@ After every P1 task: `use super::*` in any `src/cli/*.rs` file must resolve all 
 
 ---
 
-### P1.11 — Move remaining doctor logic (~1,100 LOC move)
+### P1.11 — Move remaining doctor logic into `src/cli/doctor/` (~1,100 LOC move)
 
-**Move to existing `src/cli/doctor.rs`:**
+**Move into `src/cli/doctor/` submodules rooted at `src/cli/doctor/mod.rs`:**
 
 *Types and structs:*
 - `DoctorCompareFocus`, `DoctorCompareFocusOutput`, `DoctorCompareResolutionOutput`
@@ -339,17 +339,17 @@ After every P1 task: `use super::*` in any `src/cli/*.rs` file must resolve all 
 - `doctor_compare_beta_channel_enabled()`
 - `build_workspace_packages_info()`
 
-**Visibility:** Items stay private within `doctor.rs` unless needed by other modules. `build_workspace_packages_info()` becomes `pub(crate)` (used from `handle_check`).
+**Visibility:** Items stay private within the `doctor` module tree unless needed by other modules. `build_workspace_packages_info()` becomes `pub(crate)` (used from `handle_check`).
 
-**Test migration:** Move `parse_structured_snapshot_keeps_schema_version_validation` test (line 3480) and `doctor_compare_auto_mode_scans_nested_json_trace_payload` test (line 3431) into `doctor.rs` test module. Both test doctor-specific functions.
+**Test migration:** Move `parse_structured_snapshot_keeps_schema_version_validation` test (line 3480) and `doctor_compare_auto_mode_scans_nested_json_trace_payload` test (line 3431) into `src/cli/doctor/tests.rs`. Both test doctor-specific functions.
 
-**Note:** After this move, `doctor.rs` will be ~1,385 lines. This is acceptable for now. If future work makes it unwieldy, split into `doctor/mod.rs`, `doctor/compare.rs`, `doctor/trace.rs`. Not in scope for P1.
+**Note:** This step lands directly in a split `src/cli/doctor/` layout (`mod.rs`, `compare.rs`, `overview.rs`, `trace_*`, etc.) instead of first creating a new `doctor.rs` monolith. The important invariant is keeping doctor-only logic out of `mod.rs` while preserving behavior and deterministic output.
 
 **`mod.rs` change:** No new re-exports needed (doctor items stay internal to doctor).
 
-**Commit:** `refactor(cli): consolidate doctor logic into doctor.rs`
+**Commit:** `refactor(cli): split doctor command into submodules`
 
-**🔴 CHECKPOINT:** `mod.rs` must be under 500 lines. `doctor.rs` should be ~1,385 lines. All migrated tests pass. `cargo test` and `cargo clippy` clean.
+**🔴 CHECKPOINT:** `mod.rs` must be under 500 lines. The `src/cli/doctor/` subtree owns the extracted doctor logic. All migrated tests pass. `cargo test` and `cargo clippy` clean.
 
 ---
 
@@ -366,7 +366,7 @@ After every P1 task: `use super::*` in any `src/cli/*.rs` file must resolve all 
 
 **Tasks:**
 1. Move `BaselineArgs`, `InitArgs` (the clap structs) to their respective command modules (`baseline_cmd.rs`, `init.rs`). These are closely coupled to their handlers.
-2. Move `DoctorArgs`, `DoctorCommand`, `DoctorCompareArgs`, `DoctorCompareParserMode` to `doctor.rs`. Currently in `mod.rs` lines 164-211.
+2. Move `DoctorArgs`, `DoctorCommand`, `DoctorCompareArgs`, `DoctorCompareParserMode` to `src/cli/doctor/mod.rs`. Currently in `mod.rs` lines 164-211.
 3. Verify `mod.rs` is under 150 lines (module decls + Cli + Command + run + re-exports + CommonProjectArgs).
 4. Move the E2E tests to `src/cli/tests.rs` (new file). These tests use `run()` which remains in `mod.rs` and is accessible via `use super::*`.
 
@@ -610,6 +610,6 @@ All three priorities can run in parallel on separate branches.
 **Checkpoint assertions:**
 ```
 After P1.6:  mod.rs < 2,900 lines  |  blast.rs exists        |  cargo test passes
-After P1.11: mod.rs < 500 lines    |  doctor.rs ~ 1,385 lines |  cargo test passes
+After P1.11: mod.rs < 500 lines    |  doctor/ subtree exists  |  cargo test passes
 After P1.12: mod.rs < 150 lines    |  tests.rs exists         |  full gate green
 ```

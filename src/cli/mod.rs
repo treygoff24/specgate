@@ -23,7 +23,6 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
-use serde::{Deserialize, Serialize};
 
 use crate::baseline::{
     BaselineGeneratedFrom, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
@@ -33,24 +32,22 @@ use crate::baseline::{
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
 use crate::graph::DependencyGraph;
-use crate::resolver::classify::extract_package_name;
 use crate::resolver::nearest_tsconfig_for_dir_uncached;
-use crate::resolver::{ModuleResolver, ModuleResolverOptions, ResolvedImport};
+use crate::resolver::{ModuleResolver, ModuleResolverOptions};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
     RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
     is_canonical_import_rule_id,
 };
-use crate::spec::config::{ReleaseChannel, StaleBaselinePolicy};
+use crate::spec::config::StaleBaselinePolicy;
 use crate::spec::{
-    self, Severity, SpecConfig, ValidationLevel,
-    workspace_discovery::discover_workspace_packages_with_config,
+    self, Severity, ValidationLevel, workspace_discovery::discover_workspace_packages_with_config,
 };
 use crate::verdict::{
     self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, GovernanceContext, PolicyViolation,
     TelemetryEventName, VerdictBuildOptions, VerdictIdentity, VerdictMetrics, VerdictStatus,
-    WorkspacePackageInfo, build_verdict_with_options,
+    build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience
