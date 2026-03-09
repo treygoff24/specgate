@@ -3,6 +3,32 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Import hygiene rules for catching common agent mistakes.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+pub struct ImportHygieneConfig {
+    /// Deny deep imports into third-party packages.
+    /// Each entry is a package name — imports deeper than the package entrypoint are flagged.
+    /// Example: ["express", "react"] → flags `import { x } from 'express/lib/internal'`
+    #[serde(default)]
+    pub deny_deep_imports: Vec<String>,
+
+    /// Test-production boundary enforcement.
+    #[serde(default)]
+    pub test_boundary: TestBoundaryConfig,
+}
+
+/// Test-production boundary enforcement configuration.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+pub struct TestBoundaryConfig {
+    /// Additional test file patterns beyond the global test_patterns.
+    #[serde(default)]
+    pub test_patterns: Vec<String>,
+
+    /// When true, flag production files that import from test files.
+    #[serde(default)]
+    pub deny_production_imports: bool,
+}
+
 /// Project-level configuration parsed from `specgate.config.yml`.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SpecConfig {
@@ -48,6 +74,9 @@ pub struct SpecConfig {
     /// Envelope validation configuration for boundary contracts.
     #[serde(default)]
     pub envelope: EnvelopeConfig,
+    /// Import hygiene rules for catching common agent mistakes.
+    #[serde(default)]
+    pub import_hygiene: ImportHygieneConfig,
 }
 
 /// Envelope validation settings for contract enforcement.
@@ -257,6 +286,7 @@ impl Default for SpecConfig {
             enforce_type_only_imports: default_enforce_type_only_imports(),
             tsconfig_filename: default_tsconfig_filename(),
             envelope: EnvelopeConfig::default(),
+            import_hygiene: ImportHygieneConfig::default(),
         }
     }
 }

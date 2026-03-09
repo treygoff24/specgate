@@ -176,6 +176,26 @@ pub(crate) fn analyze_project(
         .collect::<Vec<_>>();
     policy_violations.extend(contract_violations);
 
+    let hygiene_violations = evaluate_hygiene_rules(&ctx)
+        .into_iter()
+        .map(|violation| PolicyViolation {
+            rule: violation.rule,
+            severity: Severity::Error,
+            message: violation.message,
+            from_file: violation.from_file,
+            to_file: violation.to_file,
+            from_module: violation.from_module,
+            to_module: violation.to_module,
+            line: violation.line,
+            column: violation.column,
+            expected: None,
+            actual: None,
+            remediation_hint: None,
+            contract_id: None,
+        })
+        .collect::<Vec<_>>();
+    policy_violations.extend(hygiene_violations);
+
     let layer_config_issues = layer_report
         .config_issues
         .into_iter()

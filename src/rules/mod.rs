@@ -12,6 +12,7 @@ pub mod circular;
 pub mod contracts;
 pub mod dependencies;
 pub mod envelope;
+pub mod hygiene;
 pub mod layers;
 
 pub use boundary::{
@@ -30,6 +31,9 @@ pub use contracts::{
 pub use dependencies::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule,
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
+};
+pub use hygiene::{
+    HYGIENE_DEEP_THIRD_PARTY_RULE_ID, HYGIENE_TEST_IN_PRODUCTION_RULE_ID, evaluate_hygiene_rules,
 };
 pub use layers::{
     ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,
