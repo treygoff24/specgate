@@ -36,7 +36,7 @@ use crate::resolver::{ModuleResolver, ModuleResolverOptions};
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
-    RuleWithResolver, evaluate_enforce_layer, evaluate_no_circular_deps,
+    RuleWithResolver, evaluate_enforce_layer, evaluate_hygiene_rules, evaluate_no_circular_deps,
     is_canonical_import_rule_id,
 };
 use crate::spec::config::StaleBaselinePolicy;
