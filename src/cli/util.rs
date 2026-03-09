@@ -97,6 +97,7 @@ pub(crate) fn compute_telemetry_summary(
         new_error_violations,
         new_warning_violations,
         stale_baseline_entries,
+        expired_baseline_entries: 0,
     }
 }
 

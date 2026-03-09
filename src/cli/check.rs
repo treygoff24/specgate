@@ -381,6 +381,7 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         },
         GovernanceContext {
             stale_baseline_entries,
+            expired_baseline_entries: 0,
             rule_deltas: Vec::new(),
             policy_change_detected: false,
         },

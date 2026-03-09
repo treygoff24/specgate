@@ -135,6 +135,7 @@ pub struct AnonymizedTelemetrySummary {
     pub new_error_violations: usize,
     pub new_warning_violations: usize,
     pub stale_baseline_entries: usize,
+    pub expired_baseline_entries: usize,
 }
 
 impl From<VerdictSummary> for AnonymizedTelemetrySummary {
@@ -203,6 +204,8 @@ pub struct Verdict {
 pub struct GovernanceContext {
     /// Number of baseline entries that no longer match any current violations.
     pub stale_baseline_entries: usize,
+    /// Number of baseline entries that have passed their expiry date.
+    pub expired_baseline_entries: usize,
     /// Rule deltas computed from spec changes in diff-aware mode.
     pub rule_deltas: Vec<String>,
     /// Whether policy changes were detected in diff-aware mode.
@@ -275,6 +278,7 @@ pub fn build_verdict_with_options(
         &rendered,
         suppressed_violations,
         governance.stale_baseline_entries,
+        governance.expired_baseline_entries,
     );
     let fail_on_stale = options.stale_baseline_policy == StaleBaselinePolicy::Fail
         && summary.core.stale_baseline_entries > 0;
@@ -373,6 +377,7 @@ fn summarize(
     violations: &[VerdictViolation],
     suppressed_violations: usize,
     stale_baseline_entries: usize,
+    expired_baseline_entries: usize,
 ) -> VerdictSummary {
     let total_violations = violations.len();
     let new_violations = violations
@@ -404,6 +409,7 @@ fn summarize(
             new_error_violations,
             new_warning_violations,
             stale_baseline_entries,
+            expired_baseline_entries,
         },
         suppressed_violations,
         error_violations,
@@ -562,6 +568,7 @@ mod tests {
             identity("deterministic"),
             GovernanceContext {
                 stale_baseline_entries: 5,
+                expired_baseline_entries: 0,
                 rule_deltas: Vec::new(),
                 policy_change_detected: false,
             },
@@ -593,6 +600,7 @@ mod tests {
             identity("deterministic"),
             GovernanceContext {
                 stale_baseline_entries: 0,
+                expired_baseline_entries: 0,
                 rule_deltas: rule_deltas.clone(),
                 policy_change_detected: true,
             },
@@ -621,6 +629,7 @@ mod tests {
             identity("deterministic"),
             GovernanceContext {
                 stale_baseline_entries: 2,
+                expired_baseline_entries: 0,
                 rule_deltas: Vec::new(),
                 policy_change_detected: false,
             },
@@ -635,6 +644,7 @@ mod tests {
             identity("deterministic"),
             GovernanceContext {
                 stale_baseline_entries: 2,
+                expired_baseline_entries: 0,
                 rule_deltas: Vec::new(),
                 policy_change_detected: false,
             },
@@ -653,6 +663,33 @@ mod tests {
         );
         let rendered = serde_json::to_string(&fail_verdict).expect("serialize");
         assert!(rendered.contains("\"stale_baseline_policy\":\"fail\""));
+    }
+
+    #[test]
+    fn test_expired_baseline_count_in_governance() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.never_imports", Severity::Error, "src/a.ts", "bad"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let verdict = build_verdict_with_governance(
+            Path::new("."),
+            &entries,
+            0,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 0,
+                expired_baseline_entries: 3,
+                rule_deltas: Vec::new(),
+                policy_change_detected: false,
+            },
+        );
+
+        assert_eq!(verdict.summary.core.expired_baseline_entries, 3);
+        let rendered = serde_json::to_string(&verdict).expect("serialize");
+        assert!(rendered.contains("\"expired_baseline_entries\":3"));
     }
 
     #[test]
@@ -677,6 +714,7 @@ mod tests {
                 new_error_violations: 1,
                 new_warning_violations: 0,
                 stale_baseline_entries: 0,
+                expired_baseline_entries: 0,
             },
         };
 

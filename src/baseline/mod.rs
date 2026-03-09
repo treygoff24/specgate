@@ -61,6 +61,15 @@ pub struct BaselineEntry {
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<u32>,
+    /// Who suppressed this violation (e.g., "john@example.com", "team-platform")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Why this violation is suppressed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Per-entry expiry date (ISO 8601 format: "2026-06-01")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 impl Default for BaselineFile {
@@ -101,6 +110,32 @@ pub enum BaselineError {
 }
 
 pub type Result<T> = std::result::Result<T, BaselineError>;
+
+/// Internal struct for preserving owner/reason/expires_at during refresh.
+struct BaselineEntryMetadata {
+    owner: Option<String>,
+    reason: Option<String>,
+    expires_at: Option<String>,
+}
+
+/// Options for `classify_violations_with_options`.
+#[derive(Debug, Clone, Default)]
+pub struct ClassifyOptions {
+    /// Current date for expiry checks (ISO 8601: "2026-03-09").
+    /// When `None`, expiry checks are skipped and all baseline entries are valid.
+    pub current_date: Option<String>,
+}
+
+/// Returns `true` if the baseline entry has an `expires_at` date that is on or before `now`.
+///
+/// ISO 8601 dates (YYYY-MM-DD) sort lexicographically, so a simple string comparison suffices.
+/// When `expires_at` is `None`, the entry never expires.
+pub fn is_entry_expired(entry: &BaselineEntry, now: &str) -> bool {
+    match &entry.expires_at {
+        None => false,
+        Some(expires) => expires.as_str() <= now,
+    }
+}
 
 pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
     if !path.exists() {
@@ -164,6 +199,9 @@ pub fn build_baseline_with_metadata(
             to_module: violation.to_module.clone(),
             line: violation.line,
             column: violation.column,
+            owner: None,
+            reason: None,
+            expires_at: None,
         })
         .collect::<Vec<_>>();
 
@@ -211,6 +249,9 @@ fn build_baseline_from_classified_with_metadata(
             to_module: f.violation.to_module.clone(),
             line: f.violation.line,
             column: f.violation.column,
+            owner: None,
+            reason: None,
+            expires_at: None,
         })
         .collect::<Vec<_>>();
 
@@ -267,6 +308,27 @@ pub fn refresh_baseline_with_metadata(
         .map(build_legacy_fingerprint_counts)
         .unwrap_or_default();
 
+    // Build a lookup for preserving owner/reason/expires_at from existing entries.
+    // Key is the stable content fingerprint; value is a queue of metadata to pop from.
+    let metadata_by_primary: std::collections::BTreeMap<String, Vec<BaselineEntryMetadata>> =
+        baseline
+            .map(|b| {
+                let mut map: std::collections::BTreeMap<String, Vec<BaselineEntryMetadata>> =
+                    std::collections::BTreeMap::new();
+                for entry in &b.entries {
+                    let key = stable_content_fingerprint_for_entry(entry);
+                    map.entry(key).or_default().push(BaselineEntryMetadata {
+                        owner: entry.owner.clone(),
+                        reason: entry.reason.clone(),
+                        expires_at: entry.expires_at.clone(),
+                    });
+                }
+                map
+            })
+            .unwrap_or_default();
+    // Keep a mutable copy to pop from as we match
+    let mut remaining_metadata = metadata_by_primary;
+
     let baseline_entry_count = baseline.map(|b| b.entries.len()).unwrap_or(0);
     let mut matched_baseline_entries = 0usize;
 
@@ -277,21 +339,50 @@ pub fn refresh_baseline_with_metadata(
             let fingerprint = fingerprint_violation(project_root, violation);
             let positional_fingerprint = positional_fingerprint_for_violation(violation);
 
-            let _disposition = if let Some(remaining) = remaining_by_primary.get_mut(&fingerprint) {
+            let matched = if let Some(remaining) = remaining_by_primary.get_mut(&fingerprint) {
                 if consume_baseline_match(remaining, positional_fingerprint.as_deref()) {
                     matched_baseline_entries += 1;
-                    ViolationDisposition::Baseline
+                    true
                 } else {
-                    ViolationDisposition::New
+                    false
                 }
             } else {
                 let legacy_fingerprint = legacy_fingerprint_violation(project_root, violation);
                 if consume_legacy_fingerprint(&mut remaining_legacy, &legacy_fingerprint) {
                     matched_baseline_entries += 1;
-                    ViolationDisposition::Baseline
+                    true
                 } else {
-                    ViolationDisposition::New
+                    false
                 }
+            };
+
+            // Preserve owner/reason/expires_at when a matching entry exists
+            let (owner, reason, expires_at) = if matched {
+                let key = stable_content_fingerprint(
+                    &violation.rule,
+                    violation.severity,
+                    &violation.message,
+                    &normalize_repo_relative(project_root, &violation.from_file),
+                    violation
+                        .to_file
+                        .as_ref()
+                        .map(|p| normalize_repo_relative(project_root, p))
+                        .as_deref(),
+                    violation.from_module.as_deref(),
+                    violation.to_module.as_deref(),
+                );
+                if let Some(meta_list) = remaining_metadata.get_mut(&key) {
+                    if !meta_list.is_empty() {
+                        let meta = meta_list.remove(0);
+                        (meta.owner, meta.reason, meta.expires_at)
+                    } else {
+                        (None, None, None)
+                    }
+                } else {
+                    (None, None, None)
+                }
+            } else {
+                (None, None, None)
             };
 
             // Directly build BaselineEntry instead of FingerprintedViolation
@@ -310,6 +401,9 @@ pub fn refresh_baseline_with_metadata(
                 to_module: violation.to_module.clone(),
                 line: violation.line,
                 column: violation.column,
+                owner,
+                reason,
+                expires_at,
             }
         })
         .collect::<Vec<_>>();
@@ -420,6 +514,43 @@ pub fn classify_violations_with_stale(
     let stale_count = baseline_entry_count.saturating_sub(matched_baseline_entries);
 
     (classified, stale_count)
+}
+
+/// Classify violations against baseline with extended options (e.g., expiry checks).
+///
+/// Returns a tuple of (classified violations, stale baseline entry count).
+/// When `options.current_date` is set, baseline entries with an `expires_at` date on or
+/// before that date are treated as expired and will NOT suppress matching violations.
+pub fn classify_violations_with_options(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+    options: ClassifyOptions,
+) -> (Vec<FingerprintedViolation>, usize) {
+    // Filter baseline entries if current_date is set: expired entries are excluded from matching.
+    let filtered_baseline: Option<BaselineFile>;
+    let effective_baseline = if let Some(date) = &options.current_date {
+        if let Some(b) = baseline {
+            let non_expired_entries: Vec<BaselineEntry> = b
+                .entries
+                .iter()
+                .filter(|e| !is_entry_expired(e, date))
+                .cloned()
+                .collect();
+            filtered_baseline = Some(BaselineFile {
+                version: b.version.clone(),
+                generated_from: b.generated_from.clone(),
+                entries: non_expired_entries,
+            });
+            filtered_baseline.as_ref()
+        } else {
+            None
+        }
+    } else {
+        baseline
+    };
+
+    classify_violations_with_stale(project_root, violations, effective_baseline)
 }
 
 /// Stable content fingerprint for baseline matching and verdict identity.
@@ -678,6 +809,9 @@ mod tests {
                 to_module: v.to_module.clone(),
                 line: v.line,
                 column: v.column,
+                owner: None,
+                reason: None,
+                expires_at: None,
             }],
         };
 
@@ -708,6 +842,9 @@ mod tests {
                 to_module: baseline_violation.to_module.clone(),
                 line: baseline_violation.line,
                 column: baseline_violation.column,
+                owner: None,
+                reason: None,
+                expires_at: None,
             }],
         };
 
@@ -925,5 +1062,326 @@ mod tests {
             refreshed.baseline.generated_from.spec_hash,
             provided_metadata.spec_hash
         );
+    }
+
+    // ===== Baseline V2 Enhancement Tests =====
+
+    #[test]
+    fn test_baseline_entry_with_owner_reason_serialization() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+        let fingerprint = fingerprint_violation(project_root, &v);
+
+        let entry = BaselineEntry {
+            fingerprint: fingerprint.clone(),
+            positional_fingerprint: None,
+            rule: v.rule.clone(),
+            severity: v.severity,
+            message: v.message.clone(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: v.from_module.clone(),
+            to_module: v.to_module.clone(),
+            line: None,
+            column: None,
+            owner: Some("john@example.com".to_string()),
+            reason: Some("Legacy code, tracked in JIRA-123".to_string()),
+            expires_at: Some("2026-06-01".to_string()),
+        };
+
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        let deserialized: BaselineEntry = serde_json::from_str(&serialized).expect("deserialize");
+
+        assert_eq!(deserialized.owner, Some("john@example.com".to_string()));
+        assert_eq!(
+            deserialized.reason,
+            Some("Legacy code, tracked in JIRA-123".to_string())
+        );
+        assert_eq!(deserialized.expires_at, Some("2026-06-01".to_string()));
+    }
+
+    #[test]
+    fn test_baseline_entry_without_optional_fields_backward_compat() {
+        let json = r#"{
+            "fingerprint": "sha256:abc",
+            "rule": "boundary.never_imports",
+            "severity": "error",
+            "message": "some message",
+            "from_file": "src/a.ts"
+        }"#;
+
+        let entry: BaselineEntry = serde_json::from_str(json).expect("deserialize");
+
+        assert_eq!(entry.owner, None);
+        assert_eq!(entry.reason, None);
+        assert_eq!(entry.expires_at, None);
+    }
+
+    #[test]
+    fn test_is_entry_expired_before_date() {
+        let entry = BaselineEntry {
+            fingerprint: "sha256:abc".to_string(),
+            positional_fingerprint: None,
+            rule: "test".to_string(),
+            severity: crate::spec::Severity::Error,
+            message: "msg".to_string(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: None,
+            to_module: None,
+            line: None,
+            column: None,
+            owner: None,
+            reason: None,
+            expires_at: Some("2026-12-31".to_string()),
+        };
+
+        // Entry expires in the future — not expired
+        assert!(!is_entry_expired(&entry, "2026-03-09"));
+    }
+
+    #[test]
+    fn test_is_entry_expired_on_date() {
+        let entry = BaselineEntry {
+            fingerprint: "sha256:abc".to_string(),
+            positional_fingerprint: None,
+            rule: "test".to_string(),
+            severity: crate::spec::Severity::Error,
+            message: "msg".to_string(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: None,
+            to_module: None,
+            line: None,
+            column: None,
+            owner: None,
+            reason: None,
+            expires_at: Some("2026-03-09".to_string()),
+        };
+
+        // Entry expiring today IS expired
+        assert!(is_entry_expired(&entry, "2026-03-09"));
+    }
+
+    #[test]
+    fn test_is_entry_expired_past_date() {
+        let entry = BaselineEntry {
+            fingerprint: "sha256:abc".to_string(),
+            positional_fingerprint: None,
+            rule: "test".to_string(),
+            severity: crate::spec::Severity::Error,
+            message: "msg".to_string(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: None,
+            to_module: None,
+            line: None,
+            column: None,
+            owner: None,
+            reason: None,
+            expires_at: Some("2025-01-01".to_string()),
+        };
+
+        // Entry expired in the past
+        assert!(is_entry_expired(&entry, "2026-03-09"));
+    }
+
+    #[test]
+    fn test_is_entry_expired_no_expiry() {
+        let entry = BaselineEntry {
+            fingerprint: "sha256:abc".to_string(),
+            positional_fingerprint: None,
+            rule: "test".to_string(),
+            severity: crate::spec::Severity::Error,
+            message: "msg".to_string(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: None,
+            to_module: None,
+            line: None,
+            column: None,
+            owner: None,
+            reason: None,
+            expires_at: None,
+        };
+
+        // Entry without expiry is never expired
+        assert!(!is_entry_expired(&entry, "2026-03-09"));
+    }
+
+    #[test]
+    fn test_classify_skips_expired_baseline_entries() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+        let fingerprint = fingerprint_violation(project_root, &v);
+
+        // Baseline entry that is already expired
+        let baseline = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
+            entries: vec![BaselineEntry {
+                fingerprint,
+                positional_fingerprint: positional_fingerprint_for_violation(&v),
+                rule: v.rule.clone(),
+                severity: v.severity,
+                message: v.message.clone(),
+                from_file: "src/a.ts".to_string(),
+                to_file: Some("src/provider/index.ts".to_string()),
+                from_module: v.from_module.clone(),
+                to_module: v.to_module.clone(),
+                line: v.line,
+                column: v.column,
+                owner: None,
+                reason: None,
+                expires_at: Some("2025-01-01".to_string()), // past date
+            }],
+        };
+
+        let (classified, _) = classify_violations_with_options(
+            project_root,
+            &[v],
+            Some(&baseline),
+            ClassifyOptions {
+                current_date: Some("2026-03-09".to_string()),
+            },
+        );
+
+        assert_eq!(classified.len(), 1);
+        // Expired baseline entry — violation should be treated as New
+        assert_eq!(classified[0].disposition, ViolationDisposition::New);
+    }
+
+    #[test]
+    fn test_classify_keeps_non_expired_baseline_entries() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+        let fingerprint = fingerprint_violation(project_root, &v);
+
+        // Baseline entry with future expiry
+        let baseline = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
+            entries: vec![BaselineEntry {
+                fingerprint,
+                positional_fingerprint: positional_fingerprint_for_violation(&v),
+                rule: v.rule.clone(),
+                severity: v.severity,
+                message: v.message.clone(),
+                from_file: "src/a.ts".to_string(),
+                to_file: Some("src/provider/index.ts".to_string()),
+                from_module: v.from_module.clone(),
+                to_module: v.to_module.clone(),
+                line: v.line,
+                column: v.column,
+                owner: None,
+                reason: None,
+                expires_at: Some("2027-12-31".to_string()), // future date
+            }],
+        };
+
+        let (classified, _) = classify_violations_with_options(
+            project_root,
+            &[v],
+            Some(&baseline),
+            ClassifyOptions {
+                current_date: Some("2026-03-09".to_string()),
+            },
+        );
+
+        assert_eq!(classified.len(), 1);
+        // Future expiry — violation should still be suppressed
+        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+    }
+
+    #[test]
+    fn test_classify_without_date_ignores_expiry() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+        let fingerprint = fingerprint_violation(project_root, &v);
+
+        // Baseline entry that is already expired
+        let baseline = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
+            entries: vec![BaselineEntry {
+                fingerprint,
+                positional_fingerprint: positional_fingerprint_for_violation(&v),
+                rule: v.rule.clone(),
+                severity: v.severity,
+                message: v.message.clone(),
+                from_file: "src/a.ts".to_string(),
+                to_file: Some("src/provider/index.ts".to_string()),
+                from_module: v.from_module.clone(),
+                to_module: v.to_module.clone(),
+                line: v.line,
+                column: v.column,
+                owner: None,
+                reason: None,
+                expires_at: Some("2025-01-01".to_string()), // past date
+            }],
+        };
+
+        // No current_date — expiry check should be skipped
+        let (classified, _) = classify_violations_with_options(
+            project_root,
+            &[v],
+            Some(&baseline),
+            ClassifyOptions { current_date: None },
+        );
+
+        assert_eq!(classified.len(), 1);
+        // Without date, expired entries are still valid
+        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
+    }
+
+    #[test]
+    fn test_refresh_preserves_owner_reason_expires() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+        let fingerprint = fingerprint_violation(project_root, &v);
+
+        // Existing baseline entry has owner/reason/expires_at set manually
+        let existing = BaselineFile {
+            version: BASELINE_FILE_VERSION.to_string(),
+            generated_from: BaselineGeneratedFrom::default(),
+            entries: vec![BaselineEntry {
+                fingerprint,
+                positional_fingerprint: positional_fingerprint_for_violation(&v),
+                rule: v.rule.clone(),
+                severity: v.severity,
+                message: v.message.clone(),
+                from_file: "src/a.ts".to_string(),
+                to_file: Some("src/provider/index.ts".to_string()),
+                from_module: v.from_module.clone(),
+                to_module: v.to_module.clone(),
+                line: v.line,
+                column: v.column,
+                owner: Some("alice@example.com".to_string()),
+                reason: Some("Will fix in Q3".to_string()),
+                expires_at: Some("2026-09-01".to_string()),
+            }],
+        };
+
+        let refreshed = refresh_baseline(project_root, &[v], Some(&existing));
+
+        assert_eq!(refreshed.stale_entries_pruned, 0);
+        assert_eq!(refreshed.baseline.entries.len(), 1);
+        let entry = &refreshed.baseline.entries[0];
+        assert_eq!(entry.owner, Some("alice@example.com".to_string()));
+        assert_eq!(entry.reason, Some("Will fix in Q3".to_string()));
+        assert_eq!(entry.expires_at, Some("2026-09-01".to_string()));
+    }
+
+    #[test]
+    fn test_build_baseline_sets_optional_fields_to_none() {
+        let project_root = Path::new(".");
+        let v = violation("A", "src/a.ts");
+
+        let baseline = build_baseline(project_root, &[v]);
+        assert_eq!(baseline.entries.len(), 1);
+        let entry = &baseline.entries[0];
+        assert_eq!(entry.owner, None);
+        assert_eq!(entry.reason, None);
+        assert_eq!(entry.expires_at, None);
     }
 }
