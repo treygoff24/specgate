@@ -1,5 +1,10 @@
 # Hardening Phase — Implementation Plan v2
 
+> **Historical note:** This is a historical implementation plan snapshot. Some
+> items described here as deferred or future work have since shipped, while
+> current repo truth now lives in `docs/roadmap.md`, `docs/project-status.md`,
+> and the reference docs.
+
 **Date:** 2026-03-08
 **Author:** Lumen (Opus 4.6)
 **Revised after:** Adversarial reviews by Athena (Gemini) and Opus red-team

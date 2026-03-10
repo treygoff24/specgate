@@ -8,6 +8,7 @@ Specgate enforces strict version compatibility for spec files.
 
 - **Current version**: `2.3`
 - **Backward compatibility**: `2.2` remains supported
+- **Recommendation for new specs**: prefer `2.3`
 - **Policy**: Exact version match against supported versions
 
 ### Version Compatibility

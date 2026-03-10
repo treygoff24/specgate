@@ -28,8 +28,8 @@ jobs:
         run: cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
       - name: Run specgate
         run: specgate check --format sarif > specgate.sarif
-        continue-on-error: true
       - name: Upload SARIF
+        if: always() && hashFiles('specgate.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: specgate.sarif
@@ -41,3 +41,6 @@ jobs:
 - Rule IDs map to SARIF `reportingDescriptor` entries
 - File locations include line and column when available
 - Violation fingerprints enable stable baseline tracking across runs
+
+This example preserves normal `specgate check` exit behavior, so policy
+violations still fail CI while SARIF upload runs as a follow-on reporting step.

@@ -74,7 +74,7 @@ test_patterns: []
 Create `modules/core-api.spec.yml`:
 
 ```yaml
-version: "2.2"
+version: "2.3"
 module: core/api
 description: "Core API module"
 boundaries:
@@ -176,6 +176,7 @@ into your repository's `.github/workflows/specgate.yml`.
 Run the documented consumer checks locally before pushing:
 
 ```bash
+# Replace origin/main with your repo's default branch ref when needed.
 specgate check --output-mode deterministic
 specgate policy-diff --base origin/main
 specgate doctor ownership --project-root . --format json
@@ -187,7 +188,10 @@ Quick CI snippet:
 
 ```yaml
 - name: Specgate Check
-  run: specgate check --output-mode deterministic | tee .specgate-verdict.json
+  shell: bash
+  run: |
+    set -o pipefail
+    specgate check --output-mode deterministic | tee .specgate-verdict.json
 ```
 
 The consumer workflow template uploads `.specgate-verdict.json` as the `specgate-verdict`
@@ -275,7 +279,8 @@ Only check affected modules:
 specgate check
 
 # For PR/delta checks, use an explicit tracked ref.
-# Requires that origin/main exists and includes project history.
+# Replace origin/main with your repo's default branch ref when needed.
+# Requires that the chosen base ref exists and includes project history.
 git fetch origin main --depth=1
 specgate check --since origin/main
 

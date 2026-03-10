@@ -2,6 +2,11 @@
 
 Lightweight npm wrapper for Specgate distribution, including a focused TypeScript resolution snapshot generator that can be fed to `specgate doctor compare --tsc-trace`.
 
+This README is wrapper-specific. For the main product overview, install flow,
+and agent-facing routing, see:
+- [../../README.md](../../README.md)
+- [../../SPECGATE_FOR_AGENTS.md](../../SPECGATE_FOR_AGENTS.md)
+
 ## What this package provides
 
 - `specgate` wrapper binary

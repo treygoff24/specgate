@@ -1,5 +1,10 @@
 # Hardening Phase — Post-Phase 5 Roadmap
 
+> **Historical note:** This is a historical planning snapshot from before
+> `policy-diff`, `check --deny-widenings`, SARIF output, ownership diagnostics,
+> and release publication were fully closed out. Use `docs/roadmap.md`,
+> `docs/project-status.md`, and the reference docs for current behavior.
+
 **Date:** 2026-03-07
 **Author:** Lumen (Opus 4.6), synthesized from GPT 5.4 Pro external review + internal assessment
 **Sequence:** After Phase 5 (Envelope AST Check) is complete

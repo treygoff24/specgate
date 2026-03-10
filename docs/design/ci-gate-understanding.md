@@ -91,6 +91,10 @@ specgate check --output-mode metrics
 
 Use one of the following as the blocking governance check for PR CI.
 
+Examples below use `origin/main` as shorthand for the consumer repo's default
+branch ref. Substitute your actual default branch ref when it differs (for
+example `origin/master`).
+
 ```bash
 specgate policy-diff --base origin/main --format json
 ```
@@ -140,7 +144,7 @@ Baseline file format:
 {
   "version": "1",
   "generated_from": {
-    "tool_version": "0.1.0",
+    "tool_version": "0.3.0",
     "git_sha": "abc123",
     "config_hash": "...",
     "spec_hash": "..."
@@ -186,7 +190,9 @@ module|rule|severity|file|line|import_source|resolved_target
 
 # Check with baseline
 - name: Specgate Check
+  shell: bash
   run: |
+    set -o pipefail
     if [ "${{ github.ref }}" == "refs/heads/main" ]; then
       specgate check --output-mode deterministic | tee .specgate-verdict.json
     else
@@ -363,7 +369,9 @@ jobs:
           # ../examples/specgate-consumer-github-actions.yml
 
       - name: Run Specgate check
+        shell: bash
         run: |
+          set -o pipefail
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             specgate check --since origin/main --output-mode deterministic | tee .specgate-verdict.json
           else
@@ -372,7 +380,9 @@ jobs:
 
       - name: Detect policy widenings
         if: github.event_name == 'pull_request'
+        shell: bash
         run: |
+          set -o pipefail
           specgate policy-diff --base origin/main --format json | tee .specgate-policy-diff.json
 
       - name: Render SARIF
@@ -399,7 +409,7 @@ jobs:
 
 Check:
 - Config file syntax (`specgate validate`)
-- Spec file versions (must be `"2.2"`)
+- Spec file versions (must be `"2.2"` or `"2.3"`)
 - Module IDs are unique
 - File paths exist
 
@@ -436,7 +446,7 @@ Verify:
 
 - [Operator Guide](../reference/operator-guide.md) — Full onboarding
 - [MVP Merge Gate](../reference/mvp-merge-gate.md) — Single merge-ready checklist
-- [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) — Locked semantics
+- [Historical Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) — Original lock snapshot
 - [Tier A Fixture Design](tier-a-fixture-design.md) — Gate specification
 - [Roadmap](../roadmap.md) — MVP and release status
 - [Baseline policy](baseline-policy.md) — Baseline ownership and stale-entry guidance

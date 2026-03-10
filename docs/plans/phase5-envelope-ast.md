@@ -1,5 +1,10 @@
 # Phase 5: AST Envelope Static Check — Implementation Plan v2
 
+> **Historical note:** This is the implementation plan that led to the shipped
+> envelope AST check. Use `docs/reference/envelope-guide.md`,
+> `docs/reference/spec-language.md`, and `docs/roadmap.md` for current
+> operator-facing truth.
+
 **Date:** 2026-03-07
 **Author:** Lumen (Opus 4.6), synthesized from reviews by Athena (Gemini 3.1 Pro) and Nous (GPT 5.4)
 **Repo:** `~/Development/specgate`

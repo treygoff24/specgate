@@ -1,4 +1,9 @@
-# Wave 0: Contract Lock
+# Historical Wave 0: Contract Lock
+
+> **Historical note:** This is the original Wave 0 lock snapshot. It is kept
+> for historical context and may not reflect later shipped behavior. Use
+> `docs/reference/spec-language.md`, `docs/reference/operator-guide.md`, and
+> `docs/roadmap.md` for current truth.
 
 This document captures the contract lock established in Wave 0, ensuring stability for contract-critical surfaces.
 
@@ -13,7 +18,7 @@ This document captures the contract lock established in Wave 0, ensuring stabili
 
 Specgate enforces **strict version matching**:
 
-1. Only `version: "2.2"` is accepted in spec files
+1. `version: "2.2"` and `version: "2.3"` are accepted in spec files
 2. `version: "2.3"` is also accepted and is required when using `boundaries.contracts`
 3. Versions `2` or `2.0` are rejected with a clear error message
 4. Version validation occurs during `specgate validate` and `specgate check`
@@ -72,7 +77,7 @@ Contract tests are in `tests/contract_fixtures.rs`:
 2. **Public API behavior**: Glob matching, internal file violations
 3. **Blast-radius behavior**: Transitive importers, cycle handling
 4. **Deprecated flags**: Warning emission
-5. **Version enforcement**: Reject 2, accept 2.2
+5. **Version enforcement**: Reject 2, accept 2.2 and 2.3
 
 ## Changelog
 
@@ -81,7 +86,7 @@ Contract tests are in `tests/contract_fixtures.rs`:
 - Added `--baseline-diff` and `--baseline-new-only` flags (preferred)
 - Deprecated `--diff` and `--diff-new-only` with warnings
 - Added `--since <git-ref>` for blast-radius mode
-- Locked version to `2.2` with strict matching policy
+- Locked supported versions to exact-match semantics, later extended to `2.2` and `2.3`
 - Added `src/git_blast/` module for git integration
 - Added contract fixtures in `tests/contract_fixtures.rs`
 - Updated `docs/spec-language.md` with contract documentation

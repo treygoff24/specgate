@@ -2,6 +2,9 @@
 
 ## Pre-launch prerequisites
 
+Examples below use `origin/main` as shorthand for the consumer repo's default
+branch ref. Substitute your actual default branch ref when it differs.
+
 1. Confirm merge-gate pass (`./scripts/ci/mvp_gate.sh`) on the release commit.
 2. Verify baseline generated from clean mainline after gate pass.
 3. Confirm consumer workflow exists in target repos:

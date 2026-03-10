@@ -24,12 +24,26 @@ This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corp
 ### Step 1: Install and Initialize (2 min)
 
 ```bash
-# Preferred: install the published release artifact for your tag
-curl -fsSL -o /tmp/specgate-vX.Y.Z.tar.gz \
-  https://github.com/treygoff24/specgate/releases/download/vX.Y.Z/specgate-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+# Preferred: install the published release artifact for your tag and verify the checksum
+SPECGATE_TAG=vX.Y.Z
+SPECGATE_ARCH="x86_64-unknown-linux-gnu"
+SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_ARCH}.tar.gz"
+SPECGATE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}/${SPECGATE_ARCHIVE}"
+INSTALL_BIN_DIR="$HOME/.local/bin"
 
-# Fallback: install the published tag from source
-cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
+mkdir -p "$INSTALL_BIN_DIR"
+if \
+  curl -fsSL "$SPECGATE_URL" -o "/tmp/${SPECGATE_ARCHIVE}" && \
+  curl -fsSL "${SPECGATE_URL}.sha256" -o "/tmp/${SPECGATE_ARCHIVE}.sha256" && \
+  (cd /tmp && sha256sum -c "${SPECGATE_ARCHIVE}.sha256"); then
+  tar -xzf "/tmp/${SPECGATE_ARCHIVE}" -C /tmp
+  mv /tmp/specgate "$INSTALL_BIN_DIR/specgate"
+  chmod +x "$INSTALL_BIN_DIR/specgate"
+  export PATH="$INSTALL_BIN_DIR:$PATH"
+else
+  # Fallback: install the published tag from source
+  cargo install --locked --git https://github.com/treygoff24/specgate --tag "$SPECGATE_TAG"
+fi
 
 # Initialize a project
 cd your-project
@@ -45,7 +59,7 @@ This creates:
 Create `modules/core-api.spec.yml`:
 
 ```yaml
-version: "2.2"
+version: "2.3"
 module: core/api
 description: "Core API module - main entry point"
 boundaries:
@@ -124,7 +138,9 @@ Note: warning-only violations do not fail the pipeline because exit `1` is reser
 
 ## Wave 0 Contract
 
-The [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) defines locked semantics that won't change without explicit migration.
+The [Historical Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) captures
+the original lock snapshot. Treat it as historical context, not the primary
+source of current operator truth.
 
 ### Version Contract
 
@@ -218,7 +234,10 @@ jobs:
         run: cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
       
       - name: Check (Full on main, Blast-radius on PRs)
+        shell: bash
         run: |
+          set -o pipefail
+          # Replace origin/main with your repo's default branch ref when needed.
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
             specgate check --output-mode deterministic | tee .specgate-verdict.json
           else
@@ -338,7 +357,7 @@ Current command surface summary:
 - [Consumer GitHub Actions workflow](../examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
 - [Releasing Guide](../../RELEASING.md) — How to ship and promote releases.
 
-See [Roadmap](../roadmap.md#remaining-to-call-this-release-complete) for details.
+See [Roadmap](../roadmap.md#current-status) for details.
 
 ---
 
@@ -359,4 +378,4 @@ From the implementation plan's "Learned During Build":
 1. **Hands-on:** Complete the [First 15 Minutes](getting-started.md)
 2. **Policy governance:** Add `policy-diff` to CI with the canonical example workflow
 3. **CI polish:** Verify SARIF and ownership checks in [CI Gate Understanding](../design/ci-gate-understanding.md) and [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md)
-4. **Deep Dive:** Read the [Roadmap](../roadmap.md) and keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) as a source of truth
+4. **Deep Dive:** Read the [Roadmap](../roadmap.md) for current status and use [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) only as historical context

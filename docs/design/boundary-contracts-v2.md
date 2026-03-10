@@ -1,5 +1,10 @@
 # Specgate Boundary Contracts — Spec V2
 
+> **Design-history note:** This document captures the original design and phased
+> implementation intent for boundary contracts. It is useful for rationale, but
+> the current operator-facing truth now lives in `docs/reference/spec-language.md`,
+> `docs/reference/envelope-guide.md`, and `docs/roadmap.md`.
+
 *2026-02-27. Updated 2026-03-02 with dogfooding learnings from Hearth integration.*
 *Synthesized from V1 draft + Vulcan xhigh (implementation review) + Athena (architecture review) + Paul Bohm's framing.*
 

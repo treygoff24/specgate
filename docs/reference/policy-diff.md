@@ -22,6 +22,10 @@ specgate policy-diff --base <base-ref> [--head <head-ref>] [--project-root <path
 
 ## Examples
 
+Examples below use `origin/main` as shorthand for the consumer repo's default
+branch ref. Substitute your actual default branch ref when it differs (for
+example `origin/master`).
+
 Compare the current branch against `origin/main`.
 
 ```bash

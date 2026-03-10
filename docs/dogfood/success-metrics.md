@@ -2,6 +2,9 @@
 
 ## Primary gate health
 
+Examples below use `origin/main` as shorthand for the consumer repo's default
+branch ref. Substitute your actual default branch ref when it differs.
+
 - Merge gate pass rate on required commands: **>= 98%** target.
 - `specgate check` deterministic success on PR paths: **>= 99%** target.
 - `specgate check --output-mode deterministic` mean runtime in CI:

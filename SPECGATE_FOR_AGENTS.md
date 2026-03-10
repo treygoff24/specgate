@@ -77,6 +77,10 @@ Use in-band widening enforcement instead of a separate policy-diff step:
 specgate check --since origin/main --deny-widenings
 ```
 
+In consumer-repo examples, `origin/main` is shorthand for the target repo's
+default branch ref. Replace it with the real base ref when needed (for example
+`origin/master`).
+
 Inspect ownership coverage:
 
 ```bash

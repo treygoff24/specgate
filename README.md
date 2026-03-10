@@ -14,7 +14,7 @@ specgate init
 
 # 2. Create your first spec file
 cat > modules/my-module.spec.yml << 'EOF'
-version: "2.2"
+version: "2.3"
 module: my-module
 description: "My first guarded module"
 boundaries:
@@ -106,6 +106,10 @@ Deterministic JSON output with pass/fail status, violations, and policy metadata
 See [CI Gate Understanding](docs/design/ci-gate-understanding.md) for complete CI patterns.
 
 ### Policy diff
+
+Examples below use `origin/main` as shorthand for the consumer repo's default
+branch ref. Substitute your actual default branch ref when it differs (for
+example `origin/master`).
 
 Use `specgate policy-diff --base origin/main` to compare `.spec.yml` policy between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs and `--format json` or `--format ndjson` for machine readable output. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
 

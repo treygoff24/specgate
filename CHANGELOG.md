@@ -4,7 +4,12 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
-### Added
+No unreleased changes yet.
+
+## [0.3.0] - 2026-03-10
+
+### Boundary Contracts + Governance + Diagnostics
+
 - **Envelope AST static check (Phase 5):** When a contract declares `envelope: required`, specgate performs a targeted AST analysis on matched source files to verify they import the envelope package and call the validation function with the correct contract ID. Violations are warnings. Configurable via `envelope` section in `specgate.config.yml`.
 - `specgate policy-diff` for comparing `.spec.yml` policy between git refs with `human`, `json`, and `ndjson` output, exit codes `0/1/2`, shallow clone diagnostics with `fetch-depth: 0` guidance, fail-closed widening treatment for policy deletions, and semantic rename/copy pairing with fail-closed fallback
 - `specgate check --deny-widenings` for in-band governance enforcement when used with `--since <base-ref>` (widenings exit `1`; governance/runtime failures exit `2`)
@@ -14,13 +19,20 @@ All notable changes to Specgate are documented in this file.
 - Adversarial test fixture suite with 14 scenarios covering boundary evasion, re-export chains, and edge cases
 - `--format sarif` flag for SARIF 2.1.0 output (GitHub Code Scanning integration)
 - `specgate doctor ownership` for ownership diagnostics with human/json output, strict CI gating, and reporting for unclaimed files, overlaps, orphaned specs, duplicate module ids, and invalid globs
-
-### Changed
 - `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error
 - `check_match_patterns()` returns resolved file paths for reuse by envelope checker
 - `policy-diff` exit-2 output is now explicitly non-authoritative: on runtime or parse failures, classification output is suppressed (empty `diffs`, zeroed summary counters), while structured `errors` remain present; `ndjson` adds `type: "error"` events before summary.
-- Operator note: config governance diffing for `specgate.config.yml` is deferred-by-decision for this release; `policy-diff` remains scoped to `.spec.yml` snapshots.
-- Operator docs now align upgrade guidance around governance gate selection (choose either `policy-diff` or `check --deny-widenings`), plus SARIF and ownership diagnostics in release/CI workflows.
+- Operator docs align upgrade guidance around governance gate selection (choose either `policy-diff` or `check --deny-widenings`), plus SARIF and ownership diagnostics in release/CI workflows.
+
+### Full Monorepo Support (P3.1)
+
+- **Nearest-tsconfig multi-context resolver** — files in monorepo packages with their own `tsconfig.json` now automatically resolve path aliases using their owning tsconfig, not the root.
+- **`tsconfig_filename` config** — new `specgate.config.yml` field to override the tsconfig filename (default: `"tsconfig.json"`), for repos using `tsconfig.base.json` or `tsconfig.build.json`.
+- **Workspace package discovery in check** — `specgate check` detects workspace packages (pnpm/npm) and includes them in verdict JSON (`workspace_packages` field).
+- **Doctor workspace summary** — `specgate doctor` prints discovered workspace packages with their tsconfig paths, and surfaces `tsconfig_filename` overrides.
+- **npm snapshot batch mode** — `specgate-resolution-snapshot --workspace` generates resolution snapshots for all workspace packages in one invocation. Supports `--tsconfig-filename` for custom tsconfig names.
+- **Monorepo integration test suite** — new fixture and 6 tests validating cross-package alias resolution, boundary enforcement, workspace package discovery in verdicts, and deterministic output.
+- **Perf benchmarks** — tsconfig cache efficiency tests and single-root regression benchmark to guard against performance regressions.
 
 ### npm Wrapper Hardening (P3.2)
 
@@ -38,18 +50,6 @@ All notable changes to Specgate are documented in this file.
 - **Performance budget** — openclaw-scale fixture perf test with configurable budget (default 5s, override via `SPECGATE_OPENCLAW_PERF_BUDGET_MS`).
 - **Module map construction budget** — isolated perf test for `ModuleResolver` initialization (glob matching + file-to-module mapping), separate from full check pipeline (default 2s, override via `SPECGATE_MODULE_MAP_BUDGET_MS`).
 - **CI gate coverage** — merge gate runs the full TS/JS parity suite (parser, resolver, rules) on every PR unconditionally — stricter than path-filtered triggering.
-
-## [0.3.0] - 2026-03-04
-
-### Full Monorepo Support (P3.1)
-
-- **Nearest-tsconfig multi-context resolver** — files in monorepo packages with their own `tsconfig.json` now automatically resolve path aliases using their owning tsconfig, not the root.
-- **`tsconfig_filename` config** — new `specgate.config.yml` field to override the tsconfig filename (default: `"tsconfig.json"`), for repos using `tsconfig.base.json` or `tsconfig.build.json`.
-- **Workspace package discovery in check** — `specgate check` detects workspace packages (pnpm/npm) and includes them in verdict JSON (`workspace_packages` field).
-- **Doctor workspace summary** — `specgate doctor` prints discovered workspace packages with their tsconfig paths, and surfaces `tsconfig_filename` overrides.
-- **npm snapshot batch mode** — `specgate-resolution-snapshot --workspace` generates resolution snapshots for all workspace packages in one invocation. Supports `--tsconfig-filename` for custom tsconfig names.
-- **Monorepo integration test suite** — new fixture and 6 tests validating cross-package alias resolution, boundary enforcement, workspace package discovery in verdicts, and deterministic output.
-- **Perf benchmarks** — tsconfig cache efficiency tests and single-root regression benchmark to guard against performance regressions.
 
 ## [0.2.0] - 2026-03-03
 

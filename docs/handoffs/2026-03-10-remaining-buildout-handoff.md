@@ -2,14 +2,19 @@
 
 Last updated: 2026-03-10
 
+> **Historical note:** This handoff was written before `v0.3.0` release
+> publication completed. Current repo truth now lives in `docs/roadmap.md`,
+> `docs/project-status.md`, `README.md`, and `SPECGATE_FOR_AGENTS.md`.
+
 ## Purpose
 
-Use this file to start a fresh session on the work that is still left after the release-closeout docs alignment on `master`.
+Use this file as historical context for what remained before the `v0.3.0`
+release was cut from `master`.
 
 This handoff is intentionally split into:
 
-1. Current release-closeout work that is still open.
-2. Explicitly deferred product backlog that is not built yet.
+1. Release-publication work that was open at the time.
+2. Explicitly deferred product backlog that was not built yet.
 3. Historical backlog ideas that should only be revived deliberately.
 
 ## Already Shipped
@@ -28,22 +33,23 @@ Do not spend a fresh session rebuilding these unless you find a concrete regress
 
 Primary evidence:
 
-- [docs/roadmap.md](/Users/treygoff/Code/specgate/docs/roadmap.md)
-- [docs/project-status.md](/Users/treygoff/Code/specgate/docs/project-status.md)
-- [README.md](/Users/treygoff/Code/specgate/README.md)
+- [docs/roadmap.md](../roadmap.md)
+- [docs/project-status.md](../project-status.md)
+- [README.md](../../README.md)
 
-## Remaining For This Release
+## Release Work That Was Open At The Time
 
-These are the only items still open in the active roadmap:
+At the time this handoff was written, these were the only release-publication
+items still open in the active roadmap.
 
 ### 1. Release publication
 
-Status: not a product-build task, but still required to call the release complete.
+Status at handoff time: not a product-build task, but still required to call the release complete.
 
 Source:
 
-- [docs/roadmap.md](/Users/treygoff/Code/specgate/docs/roadmap.md)
-- [RELEASING.md](/Users/treygoff/Code/specgate/RELEASING.md)
+- [docs/roadmap.md](../roadmap.md)
+- [RELEASING.md](../../RELEASING.md)
 
 What remains:
 
@@ -54,14 +60,14 @@ What remains:
 - Cut the release tag.
 - Push the tag and publish release notes/artifacts.
 
+Current state:
+- Completed on 2026-03-10 as `v0.3.0`.
+
 Suggested commands:
 
 ```bash
 ./scripts/ci/mvp_gate.sh
-specgate policy-diff --base origin/main
-# or: specgate check --since origin/main --deny-widenings
-specgate check --format sarif > specgate.sarif
-specgate doctor ownership --project-root . --format json
+specgate policy-diff --base origin/master
 cargo build --release --locked
 ./target/release/specgate --version
 shasum -a 256 ./target/release/specgate
@@ -71,7 +77,7 @@ git push origin master --tags
 
 Important:
 
-- If ownership findings must block release, enable `strict_ownership: true` in `specgate.config.yml` before treating `doctor ownership` as a gate.
+- Do not treat repo-root `specgate check` or `doctor ownership` runs as release blockers for the Specgate repo itself; `tests/fixtures/` intentionally contains invalid and duplicate specs for contract coverage.
 - Use exactly one governance gate in release/CI: `policy-diff` or `check --deny-widenings`.
 
 ## Explicitly Deferred Product Backlog
@@ -84,8 +90,8 @@ Status: explicitly deferred beyond this release.
 
 Source:
 
-- [docs/roadmap.md](/Users/treygoff/Code/specgate/docs/roadmap.md)
-- [docs/reference/policy-diff.md](/Users/treygoff/Code/specgate/docs/reference/policy-diff.md)
+- [docs/roadmap.md](../roadmap.md)
+- [docs/reference/policy-diff.md](../reference/policy-diff.md)
 
 Problem:
 
@@ -119,8 +125,8 @@ Status: explicitly deferred beyond this release.
 
 Source:
 
-- [docs/roadmap.md](/Users/treygoff/Code/specgate/docs/roadmap.md)
-- [docs/reference/policy-diff.md](/Users/treygoff/Code/specgate/docs/reference/policy-diff.md)
+- [docs/roadmap.md](../roadmap.md)
+- [docs/reference/policy-diff.md](../reference/policy-diff.md)
 
 Problem:
 
@@ -191,7 +197,7 @@ These came from older hardening planning and should not be treated as active rel
 
 Source:
 
-- [docs/plans/hardening-phase.md](/Users/treygoff/Code/specgate/docs/plans/hardening-phase.md)
+- [docs/plans/hardening-phase.md](../plans/hardening-phase.md)
 
 Potential candidates:
 

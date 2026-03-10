@@ -17,11 +17,13 @@ Use `Cargo.toml` as the single source of truth for the release version and tag.
 1. Ensure the working tree is clean and pinned to the intended release branch/tag commit.
 2. Run merge/release readiness gates:
    - `./scripts/ci/mvp_gate.sh`
-   - Governance gate (choose one):
-     - `specgate policy-diff --base origin/main`
-     - `specgate check --since origin/main --deny-widenings`
-   - `specgate check --format sarif > specgate.sarif`
-   - `specgate doctor ownership --project-root . --format json` with `strict_ownership: true` enabled when findings must block release
+   - Governance gate for the Specgate repo release commit:
+     - `cargo run --quiet -- policy-diff --base origin/master --format json`
+   - Confirm the consumer-facing workflow/docs remain aligned:
+     - `README.md`
+     - `docs/examples/specgate-consumer-github-actions.yml`
+     - `docs/reference/sarif-github-actions.md`
+     - `docs/reference/operator-guide.md`
 3. Confirm release notes and upgrade guidance are aligned for the release:
    - `CHANGELOG.md`
    - `README.md`
@@ -36,6 +38,18 @@ Use `Cargo.toml` as the single source of truth for the release version and tag.
 7. Create an annotated tag for the release (for example `vX.Y.Z-rc1`):
    - `git tag -a vX.Y.Z-rc1 -m "Specgate vX.Y.Z-rc1"`
 8. Push branch + tag and publish release artifacts/notes in CI.
+
+## Repo-specific note
+
+When releasing Specgate itself, do not treat repo-root `specgate check` or
+`specgate doctor ownership` runs as release blockers. This repository contains
+intentionally invalid and duplicate fixture specs under `tests/fixtures/` for
+contract coverage, so those commands can fail validation even when the product
+and release commit are healthy.
+
+Use `./scripts/ci/mvp_gate.sh`, the governance diff against `origin/master`,
+the locked release build, and the binary smoke check as the authoritative
+release gates for this repo.
 
 ## Reproducibility
 

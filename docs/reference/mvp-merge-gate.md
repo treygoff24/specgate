@@ -85,9 +85,9 @@ Failures are reported as one of:
 
 - [Operator Guide](operator-guide.md)
 - [CI Gate Understanding](../design/ci-gate-understanding.md)
-- [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md)
+- [Historical Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md)
 - [Tier A Fixture Design](../design/tier-a-fixture-design.md)
-- [Roadmap](../roadmap.md#remaining-to-call-this-release-complete)
+- [Roadmap](../roadmap.md#current-status)
 - [Baseline Policy](../design/baseline-policy.md)
 - [Dogfood Rollout Checklist](../dogfood/rollout-checklist.md)
 - [Releasing Guide](../../RELEASING.md)

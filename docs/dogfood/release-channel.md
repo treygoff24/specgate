@@ -2,7 +2,7 @@
 
 This document defines release-channel behavior for the TypeScript/JavaScript v1 distribution surface (GitHub binaries + npm wrapper package).
 
-For authoritative channel semantics, tier definitions, and downgrade behavior, see [support-matrix-v1](support-matrix-v1.md). This document focuses on semver policy and promotion gates.
+For authoritative channel semantics, tier definitions, and downgrade behavior, see [support-matrix-v1](../reference/support-matrix-v1.md). This document focuses on semver policy and promotion gates.
 
 ## Semver Upgrade Policy
 
