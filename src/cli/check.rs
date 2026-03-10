@@ -20,6 +20,7 @@ use super::*;
 use clap::Args;
 
 use crate::baseline::DEFAULT_BASELINE_PATH;
+use crate::policy::{self, ChangeClassification, PolicyDiffReport};
 
 // Used for expiry-aware classification (current_date)
 use chrono::Local;
@@ -98,6 +99,10 @@ pub struct CheckArgs {
     #[arg(long, value_name = "GIT_REF")]
     pub since: Option<String>,
 
+    /// Fail check when policy widening is detected between `--since` and `HEAD`.
+    #[arg(long)]
+    pub deny_widenings: bool,
+
     // Deprecated aliases (kept for backwards compatibility)
     /// Deprecated: Use --baseline-diff instead.
     #[arg(long, hide = true)]
@@ -166,6 +171,77 @@ impl From<&CheckArgs> for DiffMode {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct DenyWideningsResult {
+    has_widening: bool,
+    widening_details: Vec<String>,
+}
+
+fn evaluate_deny_widenings(args: &CheckArgs) -> Result<DenyWideningsResult, CliRunResult> {
+    if !args.deny_widenings {
+        return Ok(DenyWideningsResult::default());
+    }
+
+    let Some(base_ref) = args.since.as_deref() else {
+        return Err(runtime_error_json(
+            "governance",
+            "--deny-widenings requires --since <git-ref>",
+            vec!["provide --since <base-ref> (for example origin/main or HEAD~1)".to_string()],
+        ));
+    };
+
+    let report = match policy::build_policy_diff_report(&args.project_root, base_ref, "HEAD") {
+        Ok(report) => report,
+        Err(error) => {
+            return Err(runtime_error_json(
+                "governance",
+                "failed to evaluate policy widenings",
+                vec![format!("{}: {}", error.code(), error.message())],
+            ));
+        }
+    };
+
+    if !report.errors.is_empty() {
+        return Err(runtime_error_json(
+            "governance",
+            "failed to evaluate policy widenings",
+            report
+                .errors
+                .iter()
+                .map(|error| {
+                    if let Some(spec_path) = &error.spec_path {
+                        format!("{} [{}]: {}", error.code, spec_path, error.message)
+                    } else {
+                        format!("{}: {}", error.code, error.message)
+                    }
+                })
+                .collect(),
+        ));
+    }
+
+    Ok(DenyWideningsResult {
+        has_widening: report.summary.has_widening,
+        widening_details: collect_widening_details(&report),
+    })
+}
+
+fn collect_widening_details(report: &PolicyDiffReport) -> Vec<String> {
+    let mut details = Vec::new();
+
+    for diff in &report.diffs {
+        for change in &diff.changes {
+            if change.classification == ChangeClassification::Widening {
+                details.push(format!(
+                    "module={} field={} detail={}",
+                    diff.module, change.field, change.detail
+                ));
+            }
+        }
+    }
+
+    details
+}
+
 pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     // Emit deprecation warning if using deprecated flags
     let deprecation_warning = args.deprecation_warning();
@@ -207,6 +283,11 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
             details,
         );
     }
+
+    let deny_widenings = match evaluate_deny_widenings(&args) {
+        Ok(result) => result,
+        Err(error_result) => return error_result,
+    };
 
     let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
         Ok(edge_pairs) => edge_pairs,
@@ -360,6 +441,12 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         VerdictStatus::Pass
     };
 
+    let telemetry_status = if deny_widenings.has_widening {
+        VerdictStatus::Fail
+    } else {
+        telemetry_status
+    };
+
     let telemetry_event = if telemetry_enabled {
         Some(AnonymizedTelemetryEvent {
             schema_version: "1".to_string(),
@@ -386,20 +473,24 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
             spec_hash: governance.spec_hash,
             output_mode,
             spec_files_changed,
-            rule_deltas: Vec::new(),
-            policy_change_detected: false,
+            rule_deltas: deny_widenings.widening_details.clone(),
+            policy_change_detected: deny_widenings.has_widening,
         },
         GovernanceContext {
             stale_baseline_entries,
             expired_baseline_entries,
-            rule_deltas: Vec::new(),
-            policy_change_detected: false,
+            rule_deltas: deny_widenings.widening_details.clone(),
+            policy_change_detected: deny_widenings.has_widening,
         },
         VerdictBuildOptions {
             stale_baseline_policy: loaded.config.stale_baseline,
             telemetry: telemetry_event,
         },
     );
+
+    if deny_widenings.has_widening {
+        verdict.status = VerdictStatus::Fail;
+    }
 
     // Wire workspace discovery into verdict (non-fatal — empty means None)
     verdict.workspace_packages =
@@ -438,6 +529,19 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     if let Some(warning) = deprecation_warning {
         result.stderr = format!("{warning}\n");
     }
+
+    if deny_widenings.has_widening && !deny_widenings.widening_details.is_empty() {
+        let details = deny_widenings
+            .widening_details
+            .iter()
+            .map(|detail| format!("  - {detail}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        result
+            .stderr
+            .push_str(&format!("policy widenings detected:\n{details}\n"));
+    }
+
     result
 }
 
@@ -468,6 +572,11 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
             details,
         );
     }
+
+    let deny_widenings = match evaluate_deny_widenings(&args) {
+        Ok(result) => result,
+        Err(error_result) => return error_result,
+    };
 
     let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
         Ok(edge_pairs) => edge_pairs,
@@ -620,8 +729,20 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
         ));
     }
 
+    if deny_widenings.has_widening && !deny_widenings.widening_details.is_empty() {
+        lines.push(String::new());
+        lines.push("Policy widenings detected:".to_string());
+        for detail in &deny_widenings.widening_details {
+            lines.push(format!("  - {detail}"));
+        }
+    }
+
     CliRunResult {
-        exit_code,
+        exit_code: if deny_widenings.has_widening {
+            EXIT_CODE_POLICY_VIOLATIONS
+        } else {
+            exit_code
+        },
         stdout: lines.join("\n") + "\n",
         stderr: String::new(),
     }
@@ -645,6 +766,7 @@ mod tests {
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
+            deny_widenings: false,
             diff: false,
             diff_new_only: false,
         };
@@ -668,6 +790,7 @@ mod tests {
             baseline_diff: true,
             baseline_new_only: false,
             since: None,
+            deny_widenings: false,
             diff: false,
             diff_new_only: false,
         };
@@ -690,6 +813,7 @@ mod tests {
             baseline_diff: true,
             baseline_new_only: true,
             since: None,
+            deny_widenings: false,
             diff: false,
             diff_new_only: false,
         };
@@ -711,6 +835,7 @@ mod tests {
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
+            deny_widenings: false,
             diff: true,
             diff_new_only: false,
         };
@@ -736,6 +861,7 @@ mod tests {
             baseline_diff: false,
             baseline_new_only: false,
             since: None,
+            deny_widenings: false,
             diff: true,
             diff_new_only: true,
         };
@@ -761,6 +887,7 @@ mod tests {
             baseline_diff: false,
             baseline_new_only: false,
             since: Some("HEAD~1".to_string()),
+            deny_widenings: false,
             diff: false,
             diff_new_only: false,
         };

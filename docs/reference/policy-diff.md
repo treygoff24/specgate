@@ -114,6 +114,21 @@ git fetch --deepen=200 origin <base-ref>
 specgate policy-diff --base <base-ref>
 ```
 
+## `check --deny-widenings` integration
+
+`specgate check` can enforce the same widening gate directly:
+
+```bash
+specgate check --since origin/main --deny-widenings
+```
+
+Behavior with the flag enabled:
+
+- It reuses the same policy-diff classification pipeline that powers `specgate policy-diff`.
+- If widening changes are detected, `check` exits `1` and includes widening details in output metadata.
+- If governance evaluation fails (for example missing git refs or parse/runtime issues), `check` exits `2`.
+- If no widening is detected, `check` follows normal `check` pass/fail behavior.
+
 ## What the command classifies today
 
 For modified `.spec.yml` files, `policy-diff` classifies changes over parsed policy fields rather than raw text. That includes boundaries, constraints, and contracts. Examples include import allowlists, import denylists, visibility, contract envelope requirements, and other policy fields.
@@ -127,7 +142,7 @@ Some changes remain intentionally conservative in the MVP. Constraint additions 
 | Semantic rename pairing | Not implemented. Rename and copy remain fail closed widenings. |
 | Cross file compensation | Not implemented. A widening in one file is not offset by a narrowing in another file. |
 | Config level governance | Not implemented here. `specgate.config.yml` diffing is out of scope for `policy-diff`. |
-| Future gate integration | `specgate check --deny-widenings` is deferred. Use `specgate policy-diff` directly in CI today. |
+| Future gate integration | Implemented for `check` via `--deny-widenings` (requires `--since <base-ref>`). |
 
 ## Related docs
 

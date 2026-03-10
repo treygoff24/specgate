@@ -106,6 +106,14 @@ See [CI Gate Understanding](docs/design/ci-gate-understanding.md) for complete C
 
 Use `specgate policy-diff --base origin/main` to compare `.spec.yml` policy between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs and `--format json` or `--format ndjson` for machine readable output. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
 
+You can also enforce this in `check` directly with `--deny-widenings` when `--since` is provided:
+
+```bash
+specgate check --since origin/main --deny-widenings
+```
+
+With this flag, widening changes force exit `1`, governance/runtime failures force exit `2`, and non-widening diffs keep normal `check` behavior.
+
 For exit code `2`, `policy-diff` keeps structured entries in `errors` but clears authoritative classification payload fields (`diffs` and non-zero summary counters) so consumers do not treat partial output as a gate signal.
 
 In the MVP, deleting a `.spec.yml` file is always a widening, and renaming or copying a `.spec.yml` file is also treated as a widening risk. In CI, fetch full history before diffing against remote refs.

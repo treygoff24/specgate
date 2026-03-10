@@ -719,3 +719,157 @@ fn policy_diff_parse_errors_return_runtime_exit_code() {
     assert!(!errors.is_empty());
     assert_eq!(errors[0]["code"], "policy.spec_parse_error");
 }
+
+#[test]
+fn check_rejects_policy_widenings_when_flag_is_enabled() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        "version: \"2.3\"\nmodule: core\nboundaries:\n  path: src/core/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\n  allow_imports_from:\n    - core\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/core/index.ts", "export const core = 1;\n");
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    commit_all(temp.path(), "head widening");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "fail");
+    assert_eq!(output["policy_change_detected"], true);
+    assert!(
+        output["rule_deltas"]
+            .as_array()
+            .expect("rule deltas array")
+            .iter()
+            .any(|delta| delta
+                .as_str()
+                .expect("rule delta string")
+                .contains("boundaries.allow_imports_from"))
+    );
+}
+
+#[test]
+fn check_deny_widenings_runtime_errors_are_exit_code_two() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "missing-ref",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "error");
+    assert_eq!(output["code"], "governance");
+    assert!(
+        output["details"]
+            .as_array()
+            .expect("details array")
+            .iter()
+            .any(|detail| detail
+                .as_str()
+                .expect("detail string")
+                .contains("missing-ref"))
+    );
+}
+
+#[test]
+fn check_deny_widenings_preserves_clean_check_behavior() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    write_file(temp.path(), "src/app/main.ts", "export const app = 2;\n");
+    commit_all(temp.path(), "head source only");
+
+    let baseline = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+    ]);
+    let gated = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(baseline.exit_code, EXIT_CODE_PASS);
+    assert_eq!(gated.exit_code, EXIT_CODE_PASS);
+    assert_eq!(baseline.stdout, gated.stdout);
+}
