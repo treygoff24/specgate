@@ -305,7 +305,7 @@ Current command surface summary:
 - `specgate policy-diff` is the implemented governance command for CI policy widening checks.
 - `specgate check --format sarif` is available and produces SARIF output.
 - `specgate doctor ownership` is available, and `strict_ownership: true` enables CI gating on ownership findings.
-- `check --deny-widenings` is not implemented yet; use `policy-diff` in CI for this scenario.
+- `check --deny-widenings` is implemented for in-band governance checks when `--since <base-ref>` is provided.
 - Roadmap source: [docs/roadmap.md](../roadmap.md).
 
 ### Completed ✅
@@ -323,7 +323,7 @@ Current command surface summary:
 1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
 2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.
 3. **Dogfood rollout alignment** — Keep CI guidance aligned with the current example workflow and policy-diff+SARIF checks.
-4. **Governance follow-through** — Decide when (or if) `check --deny-widenings` should be introduced.
+4. **Governance follow-through** — Keep CI governance singular (`policy-diff` or `check --deny-widenings`) and aligned across rollout docs.
 
 ### Dogfood Docs
 
@@ -331,7 +331,7 @@ Current command surface summary:
 - [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md) — Rollout readiness.
 - [DOGFOOD_SUCCESS_METRICS](../dogfood/success-metrics.md) — Adoption and reliability targets.
 - [DOGFOOD_RELEASE_CHANNEL](../dogfood/release-channel.md) — Stable/beta channel rules.
-- [Consumer GitHub Actions workflow](docs/examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
+- [Consumer GitHub Actions workflow](../examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
 - [Releasing Guide](../../RELEASING.md) — How to ship and promote releases.
 
 See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.

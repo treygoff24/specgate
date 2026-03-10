@@ -8,6 +8,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 
 use tempfile::TempDir;
 
@@ -25,6 +27,42 @@ fn write_file(root: &std::path::Path, relative: &str, content: &str) {
 
 fn parse_json(stdout: &str) -> serde_json::Value {
     serde_json::from_str(stdout).expect("cli output json")
+}
+
+fn run_git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("execute git");
+
+    if !output.status.success() {
+        panic!(
+            "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    String::from_utf8(output.stdout)
+        .expect("utf8 git stdout")
+        .trim()
+        .to_string()
+}
+
+fn init_git_repo(root: &Path) {
+    run_git(root, &["init", "--initial-branch=main"]);
+    run_git(root, &["config", "user.name", "Specgate Tests"]);
+    run_git(
+        root,
+        &["config", "user.email", "specgate-tests@example.com"],
+    );
+}
+
+fn commit_all(root: &Path, message: &str) {
+    run_git(root, &["add", "-A"]);
+    run_git(root, &["commit", "-m", message]);
 }
 
 // =============================================================================
@@ -713,6 +751,102 @@ fn blast_radius_handles_cycles() {
     assert!(result.contains("a"));
     assert!(result.contains("b"));
     assert_eq!(result.len(), 2, "should have exactly a and b");
+}
+
+// =============================================================================
+// Contract Test 4: `check --deny-widenings` Governance Behavior
+// =============================================================================
+
+#[test]
+fn check_deny_widenings_fails_with_contract_fields_when_policy_widens() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: core
+boundaries:
+  path: src/core/**/*
+constraints: []
+"#,
+        ),
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from:
+    - core
+constraints: []
+"#,
+        ),
+    );
+    write_file(temp.path(), "src/core/index.ts", "export const core = 1;\n");
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core } from '../core/index';\nexport const app = core;\n",
+    );
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+constraints: []
+"#,
+        ),
+    );
+    commit_all(temp.path(), "head widening");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "widening should fail check with deny_widenings"
+    );
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "fail");
+    assert_eq!(output["policy_change_detected"], true);
+    assert!(
+        output["rule_deltas"]
+            .as_array()
+            .expect("rule_deltas array")
+            .iter()
+            .any(|delta| delta
+                .as_str()
+                .map(|value| value.contains("boundaries.allow_imports_from"))
+                .unwrap_or(false)),
+        "rule_deltas should include widened field"
+    );
 }
 
 // =============================================================================

@@ -358,7 +358,11 @@ fn discover_spec_file_changes_classifies_diff_operations_from_git() {
     write_file(
         temp.path(),
         "modules/new.spec.yml",
-        "version: \"2.3\"\nmodule: new\nboundaries:\n  path: src/new/**/*\nconstraints: []\n",
+        "module: unique-new-spec\nnotes: alpha beta gamma delta epsilon zeta\nallow: false\ncustom:
+  matrix:
+    - 1
+    - 2
+",
     );
     write_file(temp.path(), "src/ignore.ts", "export const two = 2;\n");
     commit_all(temp.path(), "head");

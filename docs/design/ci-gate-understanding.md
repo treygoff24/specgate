@@ -349,11 +349,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Required for --since / --base governance checks
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
       
       - name: Install Specgate
         run: |
-          # Use the install flow from docs/examples/specgate-consumer-github-actions.yml
-          true
+          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3 --root "$RUNNER_TEMP/specgate" --force
+          echo "$RUNNER_TEMP/specgate/bin" >> "$GITHUB_PATH"
+          # Canonical release-binary + checksum flow:
+          # ../examples/specgate-consumer-github-actions.yml
 
       - name: Run Specgate check
         run: |

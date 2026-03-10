@@ -11,7 +11,7 @@ This is the single operator-facing roadmap for release-closeout tracking. Histor
 - `specgate check --format sarif` is shipped for SARIF 2.1.0 output in CI scanning workflows.
 - `specgate doctor ownership` is shipped, including strict ownership gating for CI.
 - Monorepo support is shipped, including workspace discovery and nearest-tsconfig resolution behavior.
-- Verification baseline is green in `docs/project-status.md` for `cargo test`, `policy_diff_integration`, `contract_fixtures`, `tier_a_golden`, and `cargo fmt --check`.
+- Verification baseline is green in `docs/project-status.md` for `cargo test`, `policy_diff_integration`, `contract_fixtures`, `tier_a_golden`, `golden_corpus`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check`.
 
 ## In Progress
 

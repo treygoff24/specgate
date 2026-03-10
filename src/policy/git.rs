@@ -245,6 +245,8 @@ pub fn discover_spec_file_changes(
             "-z",
             "--name-status",
             "--find-renames",
+            "--find-copies",
+            "--find-copies-harder",
             "--diff-filter=ACDMRT",
             &diff_range,
             "--",
