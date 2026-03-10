@@ -4,6 +4,14 @@
 
 This command is for policy governance across git history. It looks only at `.spec.yml` files. It does not diff `specgate.config.yml`.
 
+## Config governance scope decision
+
+`specgate.config.yml` diffing is explicitly deferred-by-decision for this release.
+
+- `policy-diff` remains scoped to `.spec.yml` governance changes only.
+- Config changes still require normal code review and release controls.
+- This keeps widening classification deterministic while config-level governance semantics are designed separately.
+
 ## Usage
 
 ```bash
@@ -143,7 +151,7 @@ Rename/copy semantic pairing uses normalized `SpecFile` snapshots (trimmed scala
 |------|------------------|
 | Semantic rename pairing | Implemented for `R*`/`C*` when both sides can be normalized and compared; inconclusive pairings remain fail-closed widenings. |
 | Cross file compensation | Not implemented. A widening in one file is not offset by a narrowing in another file. |
-| Config level governance | Not implemented here. `specgate.config.yml` diffing is out of scope for `policy-diff`. |
+| Config level governance | Deferred by decision for this release. `specgate.config.yml` diffing remains out of scope for `policy-diff`. |
 | Future gate integration | Implemented for `check` via `--deny-widenings` (requires `--since <base-ref>`). |
 
 ## Related docs

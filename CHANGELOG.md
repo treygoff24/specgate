@@ -18,6 +18,7 @@ All notable changes to Specgate are documented in this file.
 - `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error
 - `check_match_patterns()` returns resolved file paths for reuse by envelope checker
 - `policy-diff` exit-2 output is now explicitly non-authoritative: on runtime or parse failures, classification output is suppressed (empty `diffs`, zeroed summary counters), while structured `errors` remain present; `ndjson` adds `type: "error"` events before summary.
+- Operator note: config governance diffing for `specgate.config.yml` is deferred-by-decision for this release; `policy-diff` remains scoped to `.spec.yml` snapshots.
 
 ### npm Wrapper Hardening (P3.2)
 

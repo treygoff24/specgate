@@ -8,4 +8,5 @@
 | `cargo test --test tier_a_golden` | done | `1 passed` (0 failed). Confirms deterministic tier A gate fixtures remain stable. |
 | `cargo fmt --check` | done | Command exited cleanly (no formatting diffs). |
 | `cargo test` | done | `372 passed` + integration suites: all green. No test failures across full suite. |
+| `specgate.config.yml` governance diffing scope | deferred-by-decision | Explicitly recorded as out of scope for `policy-diff` in this release; reference decision captured in `docs/reference/policy-diff.md` and roadmap status alignment. |
 | Closeout documentation artifact | done | Added this completion matrix to `docs/project-status.md` with status and evidence for each required validation item. |

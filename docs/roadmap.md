@@ -26,5 +26,5 @@ This is the single operator-facing roadmap for release-closeout tracking. Histor
 ## Explicitly Deferred Beyond This Release
 
 - Cross-file compensation in `policy-diff` remains deferred (a widening in one file is not offset by narrowing in another).
-- Config-level governance diffing for `specgate.config.yml` remains out of scope for `policy-diff` in this release.
+- Config-level governance diffing for `specgate.config.yml` is deferred-by-decision for this release and remains out of scope for `policy-diff`.
 - Deferred future rule-variant expansion in fixture coverage remains outside this release scope (for example, pattern-aware and category-level variants called out in operator docs).
