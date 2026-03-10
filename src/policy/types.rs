@@ -68,6 +68,14 @@ pub struct PolicyDiffReport {
     pub diffs: Vec<ModulePolicyDiff>,
     pub summary: PolicyDiffSummary,
     pub errors: Vec<PolicyDiffErrorEntry>,
+    /// Cross-file compensation candidates (populated when --cross-file-compensation is active).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compensations: Vec<CompensationCandidate>,
+    /// Net classification after compensation. Always populated (defaults to summary-derived).
+    pub net_classification: ChangeClassification,
+    /// Config-level governance changes (populated by config diffing — see Task 2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_changes: Vec<ConfigFieldChange>,
 }
 
 impl PolicyDiffReport {
@@ -78,6 +86,11 @@ impl PolicyDiffReport {
         summary: PolicyDiffSummary,
         errors: Vec<PolicyDiffErrorEntry>,
     ) -> Self {
+        let net_classification = if summary.has_widening {
+            ChangeClassification::Widening
+        } else {
+            ChangeClassification::Structural
+        };
         Self {
             schema_version: POLICY_DIFF_SCHEMA_VERSION.to_string(),
             base_ref,
@@ -85,6 +98,9 @@ impl PolicyDiffReport {
             diffs,
             summary,
             errors,
+            compensations: Vec::new(),
+            net_classification,
+            config_changes: Vec::new(),
         }
     }
 
@@ -99,6 +115,45 @@ pub struct PolicyDiffErrorEntry {
     pub code: String,
     pub message: String,
     pub spec_path: Option<String>,
+}
+
+/// A typed dependency edge between two modules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DependencyEdge {
+    /// Module that imports (has `allow_imports_from` listing the provider).
+    pub importer: String,
+    /// Module being imported from.
+    pub provider: String,
+}
+
+/// Result of attempting cross-file compensation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompensationResult {
+    /// Narrowing fully offsets the widening.
+    Offset,
+    /// Narrowing partially offsets (e.g., different cardinality).
+    Partial,
+    /// Multiple candidates — fail closed, no compensation applied.
+    Ambiguous,
+}
+
+/// A candidate pairing of a widening with a narrowing for cross-file compensation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompensationCandidate {
+    pub widening: FieldChange,
+    pub narrowing: FieldChange,
+    pub relationship: DependencyEdge,
+    pub result: CompensationResult,
+}
+
+/// Placeholder — fully defined in Task 2.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfigFieldChange {
+    pub field_path: String,
+    pub classification: ChangeClassification,
+    pub before: String,
+    pub after: String,
 }
 
 pub fn sort_field_changes_deterministic(changes: &mut [FieldChange]) {
