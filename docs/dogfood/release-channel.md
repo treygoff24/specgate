@@ -21,10 +21,15 @@ CI-gating tool consumers should expect this contract: any version bump follows t
 The "gate" refers to the merge gate and CI pipeline that must pass before beta can promote to stable:
 
 - All merge-required status checks (CI tests, linting, type checking)
+- Governance hygiene on `.spec.yml` changes:
+  - `specgate policy-diff --base origin/main`
+- Ownership diagnostics gate:
+  - `specgate doctor ownership --project-root .`
+  - enforce the output in CI either by `strict_ownership: true` or explicit release approval
 - Binary artifact build and verification
 - npm wrapper publish and dist-tag verification
 
-Promote beta to stable only after all gate checks are green, artifact verification succeeds, and wrapper publish/verify checks pass.
+Promote beta to stable only after all gate checks are green, `policy-diff`/ownership diagnostics are clean, and artifact and wrapper publish/verify checks pass.
 
 ## Tag and Automation Mapping
 

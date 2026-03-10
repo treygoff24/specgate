@@ -6,6 +6,8 @@
 - `specgate check` deterministic success on PR paths: **>= 99%** target.
 - `specgate check --output-mode deterministic` mean runtime in CI:
   - target: **<= 10% increase** over baseline repo test time.
+- `specgate policy-diff --base origin/main` should report clean governance behavior (no unexpected widening).
+- `specgate doctor ownership --project-root . --format json` should complete with no unclaimed, overlapping, or orphaned ownership findings before promotion.
 
 ## Baseline health
 
@@ -34,6 +36,6 @@
 Specgate moves from dogfood to broader release channel only when:
 
 1. All primary gate targets are met for two consecutive windows.
-2. Deferred rule families (`C02`, `C06`, `C07`) remain explicitly documented
-   and do not regress into accidental production behavior.
-3. No open unresolved blocker in [BASELINE_POLICY](BASELINE_POLICY.md).
+2. Governance remains clean: `policy-diff` output has no unexpected policy widening and deferred classes are handled by process.
+3. Ownership diagnostics are clean under the release policy: no open `unclaimed_files`, `overlapping_files`, or `orphaned_specs` findings.
+4. No open unresolved blocker in [baseline policy](../design/baseline-policy.md).
