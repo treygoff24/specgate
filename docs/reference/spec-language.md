@@ -132,6 +132,26 @@ telemetry:
 - `stale_baseline` follows canonical baseline policy (warn-by-default, opt-in fail via `stale_baseline: fail`, no auto-prune); see [BASELINE_POLICY.md](BASELINE_POLICY.md).
 - `release_channel: beta` enables beta-only doctor compare legacy trace fallback.
 - telemetry is opt-in by default and can be toggled per run with `--telemetry` / `--no-telemetry`.
+- `strict_ownership: true` makes `specgate doctor ownership` exit nonzero when it finds unclaimed files, overlaps, orphaned specs, duplicate module ids, or invalid ownership globs.
+
+### Doctor Ownership
+
+```bash
+# Human-readable ownership report
+specgate doctor ownership --project-root .
+
+# Structured ownership report
+specgate doctor ownership --project-root . --format json
+```
+
+`doctor ownership` reports:
+- `unclaimed_files`: tracked source files not matched by any spec ownership glob
+- `overlapping_files`: tracked source files claimed by multiple specs
+- `orphaned_specs`: specs whose `boundaries.path` matches zero tracked source files
+- `duplicate_module_ids`: duplicate module declarations across spec files
+- `invalid_globs`: ownership globs that failed to compile
+
+By default this command is diagnostic-only and exits `0`. With `strict_ownership: true`, findings promote the command to a nonzero exit for CI gating.
 
 ### Doctor Compare Parser Modes
 

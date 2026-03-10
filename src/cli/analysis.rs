@@ -67,7 +67,11 @@ pub(crate) fn build_edge_classification(
     }
 
     // Sort deterministically: by from, then specifier
-    unresolved_edges.sort_by(|a, b| a.from.cmp(&b.from).then_with(|| a.specifier.cmp(&b.specifier)));
+    unresolved_edges.sort_by(|a, b| {
+        a.from
+            .cmp(&b.from)
+            .then_with(|| a.specifier.cmp(&b.specifier))
+    });
 
     let classification = EdgeClassification {
         resolved,
@@ -440,8 +444,14 @@ mod tests {
         let (classification, edges) =
             build_edge_classification(temp.path(), &graph, UnresolvedEdgePolicy::Error);
 
-        assert_eq!(classification.unresolved_literal, 1, "one literal unresolved");
-        assert_eq!(classification.unresolved_dynamic, 1, "one dynamic unresolved");
+        assert_eq!(
+            classification.unresolved_literal, 1,
+            "one literal unresolved"
+        );
+        assert_eq!(
+            classification.unresolved_dynamic, 1,
+            "one dynamic unresolved"
+        );
 
         // Both kinds should appear in unresolved_edges when policy is Error
         assert_eq!(

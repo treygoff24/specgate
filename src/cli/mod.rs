@@ -44,9 +44,9 @@ use crate::spec::{
     self, Severity, ValidationLevel, workspace_discovery::discover_workspace_packages_with_config,
 };
 use crate::verdict::{
-    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, EdgeClassification, GovernanceContext,
-    PolicyViolation, TelemetryEventName, UnresolvedEdge, VerdictBuildOptions, VerdictIdentity,
-    VerdictMetrics, VerdictStatus, build_verdict_with_options,
+    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, EdgeClassification,
+    GovernanceContext, PolicyViolation, TelemetryEventName, UnresolvedEdge, VerdictBuildOptions,
+    VerdictIdentity, VerdictMetrics, VerdictStatus, build_verdict_with_options,
 };
 
 // Re-export from submodules for convenience

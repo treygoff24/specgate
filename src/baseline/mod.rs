@@ -583,11 +583,8 @@ pub fn classify_violations_with_options(
         }
     });
 
-    let (classified, stale) = classify_violations_with_stale(
-        project_root,
-        violations,
-        filtered_baseline.as_ref(),
-    );
+    let (classified, stale) =
+        classify_violations_with_stale(project_root, violations, filtered_baseline.as_ref());
 
     (classified, stale, expired_count)
 }

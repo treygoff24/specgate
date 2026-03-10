@@ -146,15 +146,15 @@ Add a **module registry validation pass** that runs before graph evaluation and 
 | Check | Status | Priority |
 |-------|--------|----------|
 | File-to-module ownership resolution | ✅ Exists | — |
-| Overlapping ownership (two specs claim same file) | ❌ Missing | High |
-| Unclaimed file detection (source file owned by no module) | ❌ Missing | High |
-| Duplicate module ID detection | ❌ Missing | Medium |
-| Orphaned spec detection (spec with no matching files) | ❌ Missing | Medium |
+| Overlapping ownership (two specs claim same file) | ✅ Exists (`doctor ownership`) | High |
+| Unclaimed file detection (source file owned by no module) | ✅ Exists (`doctor ownership`) | High |
+| Duplicate module ID detection | ✅ Exists (`doctor ownership`) | Medium |
+| Orphaned spec detection (spec with no matching files) | ✅ Exists (`doctor ownership`) | Medium |
 | Contradictory glob detection | ❌ Missing | Low |
 
-**New command:** `specgate doctor ownership` — explains ownership resolution for every file, independent of policy evaluation.
+**New command:** `specgate doctor ownership` — explains ownership resolution for every tracked source file, independent of policy evaluation.
 
-**Config option:** `strict_ownership: true` — makes overlap and unclaimed files errors instead of warnings.
+**Config option:** `strict_ownership: true` — makes ownership findings fail the command in CI instead of remaining informational-only.
 
 ---
 

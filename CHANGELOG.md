@@ -12,6 +12,7 @@ All notable changes to Specgate are documented in this file.
 - New module `src/rules/envelope.rs` for targeted AST analysis
 - Adversarial test fixture suite with 14 scenarios covering boundary evasion, re-export chains, and edge cases
 - `--format sarif` flag for SARIF 2.1.0 output (GitHub Code Scanning integration)
+- `specgate doctor ownership` for ownership diagnostics with human/json output, strict CI gating, and reporting for unclaimed files, overlaps, orphaned specs, duplicate module ids, and invalid globs
 
 ### Changed
 - `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error

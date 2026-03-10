@@ -3,12 +3,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde_json::Value;
-use tempfile::TempDir;
 
-use specgate::cli::{
-    EXIT_CODE_DOCTOR_MISMATCH, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS,
-    EXIT_CODE_RUNTIME_ERROR, run,
-};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 #[derive(Deserialize)]
 struct ExpectedBehavior {
@@ -145,40 +141,22 @@ fn assert_fixture_behavior(fixture_name: &str) {
                 "fixture {fixture_name} diagnostic check should not crash (exit 0/1 expected): stderr={stderr} stdout={stdout}"
             );
 
-            if fixture_name == "ownership-overlap" {
-                let temp = TempDir::new().expect("tempdir");
-                let snapshot_path = temp.path().join("structured-snapshot.json");
-
-                fs::write(
-                    &snapshot_path,
-                    r#"{
-  "schema_version": "1",
-  "edges": [
-    { "from": "src/shared/utils.ts", "to": "src/shared/utils.ts" }
-  ],
-  "resolutions": []
-}
-"#,
-                )
-                .expect("write structured snapshot");
-
+            if fixture_name == "ownership-overlap" || fixture_name == "orphan-module" {
                 let root = fixture_root(fixture_name);
                 let doctor_result = run([
                     "specgate",
                     "doctor",
-                    "compare",
+                    "ownership",
                     "--project-root",
                     root.to_str().expect("utf8"),
-                    "--structured-snapshot-in",
-                    snapshot_path.to_str().expect("utf8"),
-                    "--parser-mode",
-                    "structured",
+                    "--format",
+                    "json",
                 ]);
 
                 assert!(
                     doctor_result.exit_code == EXIT_CODE_PASS
-                        || doctor_result.exit_code == EXIT_CODE_DOCTOR_MISMATCH,
-                    "ownership-overlap doctor compare should return pass/mismatch: stderr={} stdout={}",
+                        || doctor_result.exit_code == EXIT_CODE_POLICY_VIOLATIONS,
+                    "{fixture_name} doctor ownership should return pass/policy-violation: stderr={} stdout={}",
                     doctor_result.stderr,
                     doctor_result.stdout
                 );
@@ -188,6 +166,32 @@ fn assert_fixture_behavior(fixture_name: &str) {
                     doctor_output.get("status").is_some(),
                     "doctor output should contain status field: {doctor_output:?}"
                 );
+
+                let report = &doctor_output["report"];
+                assert!(
+                    report.is_object(),
+                    "doctor ownership json should include report object: {doctor_output:?}"
+                );
+
+                if fixture_name == "ownership-overlap" {
+                    assert!(
+                        report["overlapping_files"]
+                            .as_array()
+                            .map(|v| !v.is_empty())
+                            .unwrap_or(false),
+                        "ownership-overlap should report at least one overlap: {doctor_output:?}"
+                    );
+                }
+
+                if fixture_name == "orphan-module" {
+                    assert!(
+                        report["orphaned_specs"]
+                            .as_array()
+                            .map(|v| !v.is_empty())
+                            .unwrap_or(false),
+                        "orphan-module should report at least one orphaned spec: {doctor_output:?}"
+                    );
+                }
             }
         }
         other => panic!("unsupported assertion type `{other}` in fixture {fixture_name}"),

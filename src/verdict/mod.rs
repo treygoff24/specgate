@@ -498,7 +498,8 @@ mod tests {
     #[test]
     fn test_verdict_with_edge_classification() {
         let entries: Vec<FingerprintedViolation> = vec![];
-        let mut verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        let mut verdict =
+            build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
         verdict.edge_classification = Some(EdgeClassification {
             resolved: 5,
             unresolved_literal: 1,
@@ -507,7 +508,10 @@ mod tests {
             type_only: 1,
         });
         let json = serde_json::to_string(&verdict).expect("serialize");
-        assert!(json.contains("\"edge_classification\""), "should include edge_classification: {json}");
+        assert!(
+            json.contains("\"edge_classification\""),
+            "should include edge_classification: {json}"
+        );
         assert!(json.contains("\"resolved\":5"));
     }
 
@@ -516,23 +520,28 @@ mod tests {
         let entries: Vec<FingerprintedViolation> = vec![];
         let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
         let json = serde_json::to_string(&verdict).expect("serialize");
-        assert!(!json.contains("\"edge_classification\""), "should omit edge_classification when None: {json}");
+        assert!(
+            !json.contains("\"edge_classification\""),
+            "should omit edge_classification when None: {json}"
+        );
     }
 
     #[test]
     fn test_verdict_with_unresolved_edges() {
         let entries: Vec<FingerprintedViolation> = vec![];
-        let mut verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
-        verdict.unresolved_edges = vec![
-            UnresolvedEdge {
-                from: "src/a.ts".to_string(),
-                specifier: "./missing".to_string(),
-                kind: "unresolved_literal".to_string(),
-                line: Some(5),
-            },
-        ];
+        let mut verdict =
+            build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
+        verdict.unresolved_edges = vec![UnresolvedEdge {
+            from: "src/a.ts".to_string(),
+            specifier: "./missing".to_string(),
+            kind: "unresolved_literal".to_string(),
+            line: Some(5),
+        }];
         let json = serde_json::to_string(&verdict).expect("serialize");
-        assert!(json.contains("\"unresolved_edges\""), "should include unresolved_edges: {json}");
+        assert!(
+            json.contains("\"unresolved_edges\""),
+            "should include unresolved_edges: {json}"
+        );
         assert!(json.contains("\"src/a.ts\""));
     }
 
@@ -541,7 +550,10 @@ mod tests {
         let entries: Vec<FingerprintedViolation> = vec![];
         let verdict = build_verdict(Path::new("."), &entries, 0, None, identity("deterministic"));
         let json = serde_json::to_string(&verdict).expect("serialize");
-        assert!(!json.contains("\"unresolved_edges\""), "should omit unresolved_edges when empty: {json}");
+        assert!(
+            !json.contains("\"unresolved_edges\""),
+            "should omit unresolved_edges when empty: {json}"
+        );
     }
 
     #[test]

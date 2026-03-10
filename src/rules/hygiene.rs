@@ -4,8 +4,8 @@ use std::path::Path;
 use globset::GlobSet;
 
 use crate::rules::{
-    GlobCompileError, RuleContext, RuleViolation, compile_optional_globset_strict, matches_test_file,
-    sort_violations_stable,
+    GlobCompileError, RuleContext, RuleViolation, compile_optional_globset_strict,
+    matches_test_file, sort_violations_stable,
 };
 
 pub const HYGIENE_DEEP_THIRD_PARTY_RULE_ID: &str = "hygiene.deep_third_party_import";
@@ -212,8 +212,8 @@ mod tests {
     use crate::graph::DependencyGraph;
     use crate::resolver::ModuleResolver;
     use crate::rules::write_test_file;
-    use crate::spec::{Boundaries, SpecConfig, SpecFile};
     use crate::spec::config::{ImportHygieneConfig, TestBoundaryConfig};
+    use crate::spec::{Boundaries, SpecConfig, SpecFile};
 
     use super::*;
 
@@ -575,11 +575,7 @@ import_hygiene:
     #[test]
     fn test_invalid_test_pattern_surfaces_config_error() {
         let temp = TempDir::new().expect("tempdir");
-        write_test_file(
-            temp.path(),
-            "src/app/main.ts",
-            "export const x = 1;\n",
-        );
+        write_test_file(temp.path(), "src/app/main.ts", "export const x = 1;\n");
 
         let specs = vec![spec_with_path("app", "src/app/**/*")];
         let config = SpecConfig {
@@ -605,7 +601,9 @@ import_hygiene:
             config_errors.len()
         );
         assert!(
-            config_errors[0].message.contains("invalid test pattern glob"),
+            config_errors[0]
+                .message
+                .contains("invalid test pattern glob"),
             "expected config error message, got: {}",
             config_errors[0].message
         );
@@ -632,7 +630,11 @@ import_hygiene:
         };
 
         let violations = run_hygiene(&temp, config, specs);
-        assert_eq!(violations.len(), 1, "expected 1 violation, got: {violations:?}");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected 1 violation, got: {violations:?}"
+        );
         assert_eq!(violations[0].rule, HYGIENE_DEEP_THIRD_PARTY_RULE_ID);
         assert!(
             violations[0].message.contains("express/lib/thing"),
@@ -660,7 +662,11 @@ import_hygiene:
         };
 
         let violations = run_hygiene(&temp, config, specs);
-        assert_eq!(violations.len(), 1, "expected 1 violation, got: {violations:?}");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected 1 violation, got: {violations:?}"
+        );
         assert_eq!(violations[0].rule, HYGIENE_DEEP_THIRD_PARTY_RULE_ID);
         assert!(
             violations[0].message.contains("express/lib/thing"),

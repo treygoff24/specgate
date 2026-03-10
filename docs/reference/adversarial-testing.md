@@ -12,7 +12,7 @@ This catalog summarizes behavior validated by `tests/fixtures/adversarial/*` and
 | `conditional-require` | `boundary.never_imports` | `require(...)` calls in conditionals are still represented in AST edges and therefore remain enforceable by boundary rules. |
 | `dynamic-import-evasion` | `boundary.never_imports` | `await import(...)` is parsed into a static module edge, so boundary checks still apply. |
 | `aliased-deep-import` | `boundary.never_imports` | `oxc_resolver` consumes `tsconfig` path aliases, allowing alias targets to be resolved correctly before boundary checks. |
-| `ownership-overlap` | Doctor diagnostic (`ownership` validation) | Spec overlaps are surfaced by `specgate doctor` when module ownership globs intersect. |
+| `ownership-overlap` | Doctor ownership diagnostic | Spec overlaps are surfaced by `specgate doctor ownership` when module ownership globs intersect. |
 
 ## What specgate cannot catch yet (known gaps)
 
@@ -49,6 +49,6 @@ For each known gap, this lists (1) why it is currently unhandled, (2) whether th
 - **Workaround:** Run TypeScript resolution/typecheck (`tsc --noEmit`) before or alongside Specgate in CI.
 
 ### `orphan-module`
-- **Why:** Modules whose spec globs match zero source files do not generate a policy violation in `specgate check`; they surface only as a doctor/diagnostic concern.
-- **Will this be fixed?** No active priority currently attached in fixtures; remains a known documentation+operations gap.
-- **Workaround:** Include `specgate doctor` checks in workflow to catch orphaned spec modules and keep fixture/module inventories explicit.
+- **Why:** Modules whose spec globs match zero source files do not generate a policy violation in `specgate check`; they surface through ownership diagnostics instead.
+- **Will this be fixed?** `specgate doctor ownership` reports orphaned specs today; `strict_ownership: true` lets teams gate on those findings in CI.
+- **Workaround:** Include `specgate doctor ownership` in workflow to catch orphaned spec modules and keep fixture/module inventories explicit.

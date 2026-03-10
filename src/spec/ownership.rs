@@ -79,7 +79,12 @@ pub fn validate_ownership(
                 builder.add(glob);
                 match builder.build() {
                     Ok(globset) => {
-                        spec_matchers.push((spec.module.clone(), spec_path, path_glob.clone(), globset));
+                        spec_matchers.push((
+                            spec.module.clone(),
+                            spec_path,
+                            path_glob.clone(),
+                            globset,
+                        ));
                     }
                     Err(e) => {
                         invalid_globs.push(InvalidGlob {
@@ -418,16 +423,8 @@ mod tests {
     #[test]
     fn test_duplicate_module_paths_are_normalized() {
         let specs = vec![
-            make_spec_with_path(
-                "api/core",
-                None,
-                Some("/project/specs/a/api-core.spec.yml"),
-            ),
-            make_spec_with_path(
-                "api/core",
-                None,
-                Some("/project/specs/b/api-core.spec.yml"),
-            ),
+            make_spec_with_path("api/core", None, Some("/project/specs/a/api-core.spec.yml")),
+            make_spec_with_path("api/core", None, Some("/project/specs/b/api-core.spec.yml")),
         ];
         let source = files(&[]);
 

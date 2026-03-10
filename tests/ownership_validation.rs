@@ -72,16 +72,20 @@ fn setup_mixed_fixture(root: &Path) {
 
     // Source files
     write_file(root, "src/api/index.ts", "export const x = 1;\n");
-    write_file(root, "src/ui/button.tsx", "export const Button = () => null;\n");
-    write_file(root, "src/shared/utils.ts", "export const util = () => {};\n");
+    write_file(
+        root,
+        "src/ui/button.tsx",
+        "export const Button = () => null;\n",
+    );
+    write_file(
+        root,
+        "src/shared/utils.ts",
+        "export const util = () => {};\n",
+    );
     write_file(root, "src/legacy/old.ts", "export const old = 1;\n");
 
     // Config pointing at specs dir
-    write_file(
-        root,
-        "specgate.config.yml",
-        "spec_dirs:\n  - specs\n",
-    );
+    write_file(root, "specgate.config.yml", "spec_dirs:\n  - specs\n");
 }
 
 #[test]
@@ -118,10 +122,13 @@ fn test_ownership_reports_overlapping_files() {
         !overlapping.is_empty(),
         "expected overlapping files for src/shared/utils.ts"
     );
-    let overlap = overlapping.iter().find(|e| {
-        e["file"].as_str().unwrap() == "src/shared/utils.ts"
-    });
-    assert!(overlap.is_some(), "expected src/shared/utils.ts in overlapping_files");
+    let overlap = overlapping
+        .iter()
+        .find(|e| e["file"].as_str().unwrap() == "src/shared/utils.ts");
+    assert!(
+        overlap.is_some(),
+        "expected src/shared/utils.ts in overlapping_files"
+    );
     let claimants = overlap.unwrap()["claimed_by"].as_array().unwrap();
     let claimant_ids: Vec<&str> = claimants.iter().map(|v| v.as_str().unwrap()).collect();
     assert!(claimant_ids.contains(&"shared/a"));
@@ -183,6 +190,37 @@ fn test_clean_ownership_exits_zero_with_strict() {
     let (exit_code, json) = run_ownership_json(temp.path());
     assert_eq!(exit_code, EXIT_CODE_PASS);
     assert_eq!(json["status"].as_str().unwrap(), "ok");
+}
+
+#[test]
+fn test_ownership_respects_excluded_source_files() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "specs/api.spec.yml",
+        "version: \"2.2\"\nmodule: api\nboundaries:\n  path: \"src/api/**\"\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/api/index.ts", "export const x = 1;\n");
+    write_file(
+        temp.path(),
+        "src/generated/client.ts",
+        "export const generated = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\nexclude:\n  - src/generated/**\n",
+    );
+
+    let (exit_code, json) = run_ownership_json(temp.path());
+
+    assert_eq!(exit_code, EXIT_CODE_PASS);
+    let unclaimed = json["report"]["unclaimed_files"].as_array().unwrap();
+    assert!(
+        unclaimed.is_empty(),
+        "excluded source files should not be reported as unclaimed: {json:?}"
+    );
 }
 
 #[test]

@@ -1,2 +1,4 @@
 spec_dirs:
   - modules
+exclude:
+  - "src/real/**/*"
