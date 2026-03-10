@@ -7,6 +7,10 @@
 3. Confirm consumer workflow exists in target repos:
    - copy `docs/examples/specgate-consumer-github-actions.yml`
    - `fetch-depth: 0` for blast-radius mode
+   - include a policy governance step using either:
+     - `specgate policy-diff --base origin/main`
+     - or `specgate check --since origin/main --deny-widenings`
+   - include SARIF upload guidance (`specgate ... --format sarif` + `github/codeql-action/upload-sarif@v3`)
 4. Confirm required docs are discoverable from `README.md`.
 
 ## Week 0 (pilot)
@@ -14,11 +18,13 @@
 - Run on one repo with existing TypeScript modules.
 - Enforce deterministic `--output-mode deterministic` in CI.
 - Track baseline creation and any drift in `summary.stale_baseline_entries`.
+- Verify spec violations flow to GitHub code scanning when SARIF is enabled.
 
 ## Week 1–2 (steady-state)
 
 1. Enable blast-radius mode for PR checks (`--since origin/main`).
 2. Require `baseline` updates only through PR-approved maintenance windows.
+   - the policy step can be `specgate policy-diff --base origin/main` or `specgate check --since origin/main --deny-widenings`.
    - The consumer workflow does not auto-commit baseline files.
    - Run `specgate baseline --output .specgate-baseline.json` in planned maintenance PRs and commit manually.
 3. Validate no new hard failures from `C02/C06/C07` deferred rule classes.

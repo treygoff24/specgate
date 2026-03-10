@@ -21,7 +21,8 @@ Specgate solves these with:
 ## Gate taxonomy
 
 - **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
-- **Informational checks:** local metrics-mode runs, optional `doctor compare` explorations, and additional non-gate fixture collections.
+- **Informational checks:** optional metrics-mode runs, `doctor compare` explorations, and additional non-gate fixture collections.
+- **Policy governance:** `specgate policy-diff` for explicit governance reporting, or `check --since <base-ref> --deny-widenings` for single-command enforcement.
 
 `golden_corpus` (`tests/golden_corpus.rs`) remains informational and is intentionally
 outside the merge gate as future-proxy coverage for deferred rule families.
@@ -65,10 +66,10 @@ specgate check --output-mode deterministic
 
 **Guarantees:**
 - Byte-identical output for same inputs
-- Excludes runtime `metrics` section and timing fields
 - Sorted violations for consistent diff
+- Stable behavior with explicit `--output-mode metrics` when telemetry is collected
 
-**Use in CI:** Always use deterministic mode for merge gates.
+**Use in CI:** Use deterministic mode for merge gates.
 
 ### Metrics Mode
 
@@ -81,7 +82,36 @@ specgate check --output-mode metrics
 - `metrics.total_ms` (total duration)
 - Performance counters
 
-**Use locally:** For debugging performance, not for CI gating.
+**Use in CI:** Acceptable when collecting telemetry. Exit code behavior is unchanged.
+
+## Policy Governance in CI
+
+### Recommended checks
+
+```bash
+specgate policy-diff --base origin/main --format json
+```
+
+```bash
+specgate check --since origin/main --deny-widenings
+```
+
+- `policy-diff` is explicit diff output for `.spec.yml` policy changes.
+- `check --deny-widenings` reuses the same policy diff engine and fails with code `1` when widening is detected.
+- `check --deny-widenings` requires `--since <base-ref>` and returns code `2` on governance runtime/parse failures.
+
+## SARIF in CI
+
+```bash
+specgate check --since origin/main --format sarif > specgate.sarif
+```
+
+```yaml
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: specgate.sarif
+```
 
 ---
 
@@ -155,9 +185,9 @@ module|rule|severity|file|line|import_source|resolved_target
 - name: Specgate Check
   run: |
     if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-      specgate check --output-mode metrics | tee .specgate-verdict.json
+      specgate check --output-mode deterministic | tee .specgate-verdict.json
     else
-      specgate check --since origin/main --output-mode metrics | tee .specgate-verdict.json
+      specgate check --since origin/main --output-mode deterministic | tee .specgate-verdict.json
     fi
 
 # Baseline maintenance is manual
@@ -304,43 +334,51 @@ on:
 
 jobs:
   specgate:
+    name: Specgate Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      security-events: write
+
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Required for blast-radius
+          fetch-depth: 0  # Required for --since / --base governance checks
       
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.88.0
-      
-      - name: Build Specgate
-        run: cargo build --release
-      
-      - name: Tier A Gate
-        run: cargo test tier_a_golden
-      
-      - name: Load Baseline
+      - name: Install Specgate
+        run: |
+          # Use the install flow from docs/examples/specgate-consumer-github-actions.yml
+          true
+
+      - name: Run Specgate check
         run: |
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            git checkout origin/main -- .specgate-baseline.json 2>/dev/null || true
-          fi
-      
-      - name: Specgate Check
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            ./target/release/specgate check --since origin/main --output-mode deterministic
+            specgate check --since origin/main --output-mode deterministic | tee .specgate-verdict.json
           else
-            ./target/release/specgate check --output-mode deterministic
+            specgate check --output-mode deterministic | tee .specgate-verdict.json
           fi
-      
-      - name: Contract Tests
-        run: cargo test contract_fixtures
-      
-      - name: Update Baseline
-        if: github.ref == 'refs/heads/main' && success()
+
+      - name: Detect policy widenings
+        if: github.event_name == 'pull_request'
         run: |
-          ./target/release/specgate baseline --output .specgate-baseline.json
-          echo "Manual baseline maintenance should be handled in dedicated PR windows."
+          specgate policy-diff --base origin/main --format json | tee .specgate-policy-diff.json
+
+      - name: Render SARIF
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            specgate check --since origin/main --format sarif > specgate.sarif
+          else
+            specgate check --format sarif > specgate.sarif
+          fi
+
+      - name: Upload SARIF
+        if: always() && hashFiles('specgate.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: specgate.sarif
 ```
 
 ---
@@ -359,7 +397,7 @@ Check:
 
 Ensure:
 - Using `--output-mode deterministic`
-- Not using `--output-mode metrics` in CI
+- If using `--output-mode metrics`, verify timing fields are optional and not used as pass/fail criteria
 - Baseline file is committed
 - Git history is available for `--since`
 
