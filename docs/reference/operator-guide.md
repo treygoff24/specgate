@@ -298,7 +298,14 @@ Mapping:
 
 ## MVP Status
 
-**Current (as of 2026-02-28): MVP is complete, validated, and gate-passing; active work is post-MVP hardening and adoption polish.**
+**Current (as of 2026-03-10): MVP is stable and gate-validating; adoption/rollout hardening is active.**
+
+Current command surface summary:
+
+- `specgate policy-diff` is the implemented governance command for CI policy widening checks.
+- `specgate check --format sarif` is available and produces SARIF output.
+- `specgate doctor ownership` is available, and `strict_ownership: true` enables CI gating on ownership findings.
+- `check --deny-widenings` is not implemented yet; use `policy-diff` in CI for this scenario.
 
 ### Completed ✅
 
@@ -314,8 +321,8 @@ Mapping:
 
 1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
 2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.
-3. **Doctor parity depth** — Extend `doctor compare` fixtures for monorepos/project references.
-4. **Governance UX polish** — Improve readability of `spec_files_changed` and `rule_deltas` in review flows.
+3. **Dogfood rollout alignment** — Keep CI guidance aligned with the current example workflow and policy-diff+SARIF checks.
+4. **Governance follow-through** — Decide when (or if) `check --deny-widenings` should be introduced.
 
 ### Dogfood Docs
 
@@ -323,7 +330,7 @@ Mapping:
 - [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md) — Rollout readiness.
 - [DOGFOOD_SUCCESS_METRICS](../dogfood/success-metrics.md) — Adoption and reliability targets.
 - [DOGFOOD_RELEASE_CHANNEL](../dogfood/release-channel.md) — Stable/beta channel rules.
-- [Consumer GitHub Actions workflow](examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
+- [Consumer GitHub Actions workflow](docs/examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
 - [Releasing Guide](../../RELEASING.md) — How to ship and promote releases.
 
 See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
@@ -345,6 +352,6 @@ From the implementation plan's "Learned During Build":
 ## Next Steps
 
 1. **Hands-on:** Complete the [First 15 Minutes](getting-started.md)
-2. **CI Setup:** Follow [CI Gate Understanding](../design/ci-gate-understanding.md)
-3. **Deep Dive:** Read the [Implementation Plan](specgate-implementation-plan-v1.1.md)
-4. **Contract Reference:** Keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) handy
+2. **Policy governance:** Add `policy-diff` to CI with the canonical example workflow
+3. **CI polish:** Verify SARIF and ownership checks in [CI Gate Understanding](../design/ci-gate-understanding.md) and [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md)
+4. **Deep Dive:** Read the [Implementation Plan](specgate-implementation-plan-v1.1.md) and keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) as a source of truth
