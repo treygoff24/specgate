@@ -122,21 +122,22 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 ## Project Status
 
-**Status (as of 2026-02-28): MVP implementation and merge gates are complete and passing on `master`; active work is post-MVP release/adoption follow-through.**
+**Status (as of 2026-03-10): Release-closeout scope is shipped, with Phase 5 envelope checks, policy-diff, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place.**
 
 ### Completed
-- ✅ Wave 0 contract lock (CLI semantics, version policy)
-- ✅ Golden corpus scaffold (top-5 fixtures)
-- ✅ Tier A P0 fixtures (deterministic CI gate)
-- ✅ Baseline fingerprinting and blast-radius mode
-- ✅ Merge gate command contract and operator runbook alignment
+- ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
+- ✅ `specgate policy-diff` for policy evolution checks, with multiple output formats and clear failure semantics.
+- ✅ SARIF reporting via `--format sarif` for CI security scanning workflows.
+- ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement.
+- ✅ Full monorepo support including workspace discovery, nearest-tsconfig resolution, and `workspace_packages` reporting.
+- ✅ Expanded adversarial and parity fixtures plus coverage in contract/golden/CI test sets.
+- ✅ CLI refactor work for modular command structure and stable command-level diagnostics.
 
-### Post-MVP Follow-Through
-- 📌 Explicitly deferred rule families (pattern-aware `C02`, governance-only `C06`, friend-surface `C07`) remain out-of-scope for MVP and are tracked as roadmap work.
-- 📌 Golden corpus expansion continues as non-blocking coverage growth.
-- 📌 Governance readability and review ergonomics remain active operator UX improvements.
+### Next Steps
+- 📌 Track remaining roadmap and hardening work (for example: remaining deferred rule variants and adoption polishing).
+- 📌 Keep the single source of truth updated in `CHANGELOG.md` and operator references as closeout completes.
 
-See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
+See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for planning context.
 
 ## Development
 
