@@ -13,7 +13,7 @@ pub mod types;
 pub mod validation;
 pub mod workspace_discovery;
 
-pub use config::{EscapeHatchConfig, JestMockMode, SpecConfig};
+pub use config::{BaselineConfig, EscapeHatchConfig, JestMockMode, SpecConfig};
 pub use types::{Boundaries, Constraint, Severity, SpecFile, Visibility};
 pub use validation::{ValidationIssue, ValidationLevel, ValidationReport, validate_specs};
 

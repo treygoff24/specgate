@@ -17,6 +17,15 @@ pub struct ImportHygieneConfig {
     pub test_boundary: TestBoundaryConfig,
 }
 
+/// Baseline-specific configuration.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+pub struct BaselineConfig {
+    /// When true, baseline metadata gaps should fail auditing and `baseline add`
+    /// requires `--owner` and `--reason`.
+    #[serde(default)]
+    pub require_metadata: bool,
+}
+
 /// Test-production boundary enforcement configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 pub struct TestBoundaryConfig {
@@ -47,6 +56,9 @@ pub struct SpecConfig {
     /// Escape hatch governance settings.
     #[serde(default)]
     pub escape_hatches: EscapeHatchConfig,
+    /// Baseline configuration and governance.
+    #[serde(default)]
+    pub baseline: BaselineConfig,
     /// `jest.mock` extraction mode.
     #[serde(default)]
     pub jest_mock_mode: JestMockMode,
@@ -295,6 +307,7 @@ impl Default for SpecConfig {
             test_patterns: default_test_patterns(),
             include_dirs: Vec::new(),
             escape_hatches: EscapeHatchConfig::default(),
+            baseline: BaselineConfig::default(),
             jest_mock_mode: JestMockMode::Warn,
             stale_baseline: StaleBaselinePolicy::Warn,
             release_channel: ReleaseChannel::Stable,
@@ -323,6 +336,7 @@ mod tests {
         assert!(!config.telemetry);
         assert!(!config.enforce_type_only_imports);
         assert!(config.include_dirs.is_empty());
+        assert!(!config.baseline.require_metadata);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
@@ -414,6 +428,8 @@ mod tests {
     fn config_parses_stale_policy_and_telemetry_overrides() {
         let parsed: SpecConfig = yaml_serde::from_str(
             r#"
+baseline:
+  require_metadata: true
 stale_baseline: fail
 release_channel: beta
 telemetry:
@@ -422,6 +438,7 @@ telemetry:
         )
         .expect("parse config");
 
+        assert!(parsed.baseline.require_metadata);
         assert_eq!(parsed.stale_baseline, StaleBaselinePolicy::Fail);
         assert_eq!(parsed.release_channel, ReleaseChannel::Beta);
         assert!(parsed.telemetry);
@@ -463,6 +480,7 @@ telemetry:
         assert!(rendered.contains("\"release_channel\":\"stable\""));
         assert!(rendered.contains("\"telemetry\":false"));
         assert!(rendered.contains("\"enforce_type_only_imports\":false"));
+        assert!(rendered.contains("\"baseline\":{\"require_metadata\":false}"));
         assert!(rendered.contains("\"include_dirs\":[]"));
         assert!(rendered.contains("\"tsconfig_filename\":\"tsconfig.json\""));
     }

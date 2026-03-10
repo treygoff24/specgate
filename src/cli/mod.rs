@@ -25,9 +25,8 @@ use std::time::Instant;
 use clap::{Args, Parser, Subcommand};
 
 use crate::baseline::{
-    BaselineGeneratedFrom, ClassifyOptions, DEFAULT_BASELINE_PATH, build_baseline_with_metadata,
-    classify_violations_with_options, load_optional_baseline, refresh_baseline_with_metadata,
-    write_baseline,
+    ClassifyOptions, DEFAULT_BASELINE_PATH, classify_violations_with_options,
+    load_optional_baseline,
 };
 use crate::build_info;
 use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};

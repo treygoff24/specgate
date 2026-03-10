@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use chrono::Local;
 use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,6 +13,8 @@ use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
 use crate::verdict::{
     FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
 };
+
+pub mod audit;
 
 pub const BASELINE_FILE_VERSION: &str = "1";
 pub const DEFAULT_BASELINE_PATH: &str = ".specgate-baseline.json";
@@ -74,6 +77,9 @@ pub struct BaselineEntry {
     /// Invalid date formats are treated as "never expires" (safe default).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>,
+    /// Auto-populated date when this baseline entry was created (YYYY-MM-DD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<String>,
 }
 
 impl Default for BaselineFile {
@@ -121,6 +127,7 @@ struct BaselineEntryMetadata {
     owner: Option<String>,
     reason: Option<String>,
     expires_at: Option<String>,
+    added_at: Option<String>,
 }
 
 /// Returns true if the string matches the `YYYY-MM-DD` date format.
@@ -215,31 +222,58 @@ pub fn build_baseline(project_root: &Path, violations: &[PolicyViolation]) -> Ba
     build_baseline_with_metadata(project_root, violations, BaselineGeneratedFrom::default())
 }
 
+fn current_added_at() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
+}
+
+fn baseline_entry_from_violation(
+    project_root: &Path,
+    violation: &PolicyViolation,
+    fingerprint: String,
+    positional_fingerprint: Option<String>,
+    metadata: BaselineEntryMetadata,
+) -> BaselineEntry {
+    BaselineEntry {
+        fingerprint,
+        positional_fingerprint,
+        rule: violation.rule.clone(),
+        severity: violation.severity,
+        message: violation.message.clone(),
+        from_file: normalize_repo_relative(project_root, &violation.from_file),
+        to_file: violation
+            .to_file
+            .as_ref()
+            .map(|path| normalize_repo_relative(project_root, path)),
+        from_module: violation.from_module.clone(),
+        to_module: violation.to_module.clone(),
+        line: violation.line,
+        column: violation.column,
+        owner: metadata.owner,
+        reason: metadata.reason,
+        expires_at: metadata.expires_at,
+        added_at: metadata.added_at,
+    }
+}
+
 pub fn build_baseline_with_metadata(
     project_root: &Path,
     violations: &[PolicyViolation],
     generated_from: BaselineGeneratedFrom,
 ) -> BaselineFile {
+    let added_at = current_added_at();
     let mut entries = violations
         .iter()
-        .map(|violation| BaselineEntry {
-            fingerprint: fingerprint_violation(project_root, violation),
-            positional_fingerprint: positional_fingerprint_for_violation(violation),
-            rule: violation.rule.clone(),
-            severity: violation.severity,
-            message: violation.message.clone(),
-            from_file: normalize_repo_relative(project_root, &violation.from_file),
-            to_file: violation
-                .to_file
-                .as_ref()
-                .map(|path| normalize_repo_relative(project_root, path)),
-            from_module: violation.from_module.clone(),
-            to_module: violation.to_module.clone(),
-            line: violation.line,
-            column: violation.column,
-            owner: None,
-            reason: None,
-            expires_at: None,
+        .map(|violation| {
+            baseline_entry_from_violation(
+                project_root,
+                violation,
+                fingerprint_violation(project_root, violation),
+                positional_fingerprint_for_violation(violation),
+                BaselineEntryMetadata {
+                    added_at: Some(added_at.clone()),
+                    ..BaselineEntryMetadata::default()
+                },
+            )
         })
         .collect::<Vec<_>>();
 
@@ -269,27 +303,20 @@ fn build_baseline_from_classified_with_metadata(
     classified: Vec<FingerprintedViolation>,
     generated_from: BaselineGeneratedFrom,
 ) -> BaselineFile {
+    let added_at = current_added_at();
     let mut entries = classified
         .into_iter()
-        .map(|f| BaselineEntry {
-            fingerprint: f.fingerprint,
-            positional_fingerprint: positional_fingerprint_for_violation(&f.violation),
-            rule: f.violation.rule.clone(),
-            severity: f.violation.severity,
-            message: f.violation.message.clone(),
-            from_file: normalize_repo_relative(project_root, &f.violation.from_file),
-            to_file: f
-                .violation
-                .to_file
-                .as_ref()
-                .map(|path| normalize_repo_relative(project_root, path)),
-            from_module: f.violation.from_module.clone(),
-            to_module: f.violation.to_module.clone(),
-            line: f.violation.line,
-            column: f.violation.column,
-            owner: None,
-            reason: None,
-            expires_at: None,
+        .map(|f| {
+            baseline_entry_from_violation(
+                project_root,
+                &f.violation,
+                f.fingerprint,
+                positional_fingerprint_for_violation(&f.violation),
+                BaselineEntryMetadata {
+                    added_at: Some(added_at.clone()),
+                    ..BaselineEntryMetadata::default()
+                },
+            )
         })
         .collect::<Vec<_>>();
 
@@ -337,6 +364,7 @@ pub fn refresh_baseline_with_metadata(
     baseline: Option<&BaselineFile>,
     generated_from: BaselineGeneratedFrom,
 ) -> BaselineRefreshResult {
+    let added_at = current_added_at();
     // Build baseline in a single walk (classify + transform)
     let mut ordered_violations = violations.to_vec();
     sort_policy_violations(&mut ordered_violations);
@@ -359,6 +387,7 @@ pub fn refresh_baseline_with_metadata(
                         owner: entry.owner.clone(),
                         reason: entry.reason.clone(),
                         expires_at: entry.expires_at.clone(),
+                        added_at: entry.added_at.clone(),
                     });
                 }
                 map
@@ -395,7 +424,7 @@ pub fn refresh_baseline_with_metadata(
             };
 
             // Preserve owner/reason/expires_at when a matching entry exists
-            let (owner, reason, expires_at) = if matched {
+            let (owner, reason, expires_at, preserved_added_at) = if matched {
                 let key = stable_content_fingerprint(
                     &violation.rule,
                     violation.severity,
@@ -412,37 +441,29 @@ pub fn refresh_baseline_with_metadata(
                 if let Some(meta_list) = remaining_metadata.get_mut(&key) {
                     if !meta_list.is_empty() {
                         let meta = meta_list.remove(0);
-                        (meta.owner, meta.reason, meta.expires_at)
+                        (meta.owner, meta.reason, meta.expires_at, meta.added_at)
                     } else {
-                        (None, None, None)
+                        (None, None, None, None)
                     }
                 } else {
-                    (None, None, None)
+                    (None, None, None, None)
                 }
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
 
-            // Directly build BaselineEntry instead of FingerprintedViolation
-            BaselineEntry {
+            baseline_entry_from_violation(
+                project_root,
+                violation,
                 fingerprint,
                 positional_fingerprint,
-                rule: violation.rule.clone(),
-                severity: violation.severity,
-                message: violation.message.clone(),
-                from_file: normalize_repo_relative(project_root, &violation.from_file),
-                to_file: violation
-                    .to_file
-                    .as_ref()
-                    .map(|path| normalize_repo_relative(project_root, path)),
-                from_module: violation.from_module.clone(),
-                to_module: violation.to_module.clone(),
-                line: violation.line,
-                column: violation.column,
-                owner,
-                reason,
-                expires_at,
-            }
+                BaselineEntryMetadata {
+                    owner,
+                    reason,
+                    expires_at,
+                    added_at: Some(preserved_added_at.unwrap_or_else(|| added_at.clone())),
+                },
+            )
         })
         .collect::<Vec<_>>();
 
@@ -615,6 +636,10 @@ pub fn fingerprint_violation(project_root: &Path, violation: &PolicyViolation) -
         violation.from_module.as_deref(),
         violation.to_module.as_deref(),
     )
+}
+
+pub fn fingerprint_entry(entry: &BaselineEntry) -> String {
+    stable_content_fingerprint_for_entry(entry)
 }
 
 fn build_baseline_match_index(baseline: &BaselineFile) -> BTreeMap<String, Vec<Option<String>>> {
@@ -863,6 +888,7 @@ mod tests {
                 owner: None,
                 reason: None,
                 expires_at: None,
+                added_at: None,
             }],
         };
 
@@ -896,6 +922,7 @@ mod tests {
                 owner: None,
                 reason: None,
                 expires_at: None,
+                added_at: None,
             }],
         };
 
@@ -1138,6 +1165,7 @@ mod tests {
             owner: Some("john@example.com".to_string()),
             reason: Some("Legacy code, tracked in JIRA-123".to_string()),
             expires_at: Some("2026-06-01".to_string()),
+            added_at: Some("2026-03-10".to_string()),
         };
 
         let serialized = serde_json::to_string(&entry).expect("serialize");
@@ -1166,6 +1194,7 @@ mod tests {
         assert_eq!(entry.owner, None);
         assert_eq!(entry.reason, None);
         assert_eq!(entry.expires_at, None);
+        assert_eq!(entry.added_at, None);
     }
 
     // --- Date format validation ---
@@ -1204,6 +1233,7 @@ mod tests {
             owner: None,
             reason: None,
             expires_at: Some("next-week".to_string()),
+            added_at: None,
         };
         // Invalid date format => not expired (safe default)
         assert!(!is_entry_expired(&entry, "2026-03-09"));
@@ -1226,6 +1256,7 @@ mod tests {
             owner: None,
             reason: None,
             expires_at: Some("2026-01-01".to_string()),
+            added_at: None,
         };
         assert!(is_entry_expired(&entry, "2026-03-09"));
     }
@@ -1247,6 +1278,7 @@ mod tests {
             owner: None,
             reason: None,
             expires_at: Some("2099-12-31".to_string()),
+            added_at: None,
         };
         assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
@@ -1268,6 +1300,7 @@ mod tests {
             owner: None,
             reason: None,
             expires_at: None,
+            added_at: None,
         };
         assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
@@ -1299,6 +1332,7 @@ mod tests {
                 owner: None,
                 reason: None,
                 expires_at: Some("2020-01-01".to_string()), // expired
+                added_at: None,
             }],
         };
 
@@ -1340,6 +1374,7 @@ mod tests {
                 owner: None,
                 reason: None,
                 expires_at: Some("2099-12-31".to_string()), // not expired
+                added_at: None,
             }],
         };
 
@@ -1382,6 +1417,7 @@ mod tests {
                 owner: Some("alice@example.com".to_string()),
                 reason: Some("Will fix in Q3".to_string()),
                 expires_at: Some("2026-09-01".to_string()),
+                added_at: Some("2026-03-01".to_string()),
             }],
         };
 
@@ -1393,10 +1429,11 @@ mod tests {
         assert_eq!(entry.owner, Some("alice@example.com".to_string()));
         assert_eq!(entry.reason, Some("Will fix in Q3".to_string()));
         assert_eq!(entry.expires_at, Some("2026-09-01".to_string()));
+        assert_eq!(entry.added_at, Some("2026-03-01".to_string()));
     }
 
     #[test]
-    fn test_build_baseline_sets_optional_fields_to_none() {
+    fn test_build_baseline_sets_added_at_for_new_entries() {
         let project_root = Path::new(".");
         let v = violation("A", "src/a.ts");
 
@@ -1406,5 +1443,6 @@ mod tests {
         assert_eq!(entry.owner, None);
         assert_eq!(entry.reason, None);
         assert_eq!(entry.expires_at, None);
+        assert!(entry.added_at.as_deref().is_some_and(is_valid_date_format));
     }
 }

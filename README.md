@@ -33,6 +33,21 @@ specgate check --baseline-diff
 
 See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes) for the full walkthrough.
 
+## Baseline Commands
+
+```bash
+# Generate or refresh a baseline
+specgate baseline generate --project-root .
+specgate baseline --project-root . --refresh    # backwards-compatible alias
+
+# Add matching live violations with metadata
+specgate baseline add --project-root . --rule boundary.never_imports --from-module app --owner team-app --reason "legacy migration"
+
+# Inspect baseline health
+specgate baseline list --project-root . --owner team-app --format json
+specgate baseline audit --project-root . --format json
+```
+
 ## Documentation
 
 ### Reference (start here)
