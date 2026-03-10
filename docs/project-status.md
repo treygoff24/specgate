@@ -13,5 +13,6 @@ Last verified on 2026-03-10.
 | `cargo check --all-targets` | Compile verification | pass | Completed successfully; no check errors. |
 | `cargo clippy --all-targets -- -D warnings` | Lint verification | pass | Completed successfully; no lint warnings or errors. |
 | `cargo fmt --check` | Formatting verification | pass | Completed successfully; formatting already compliant. |
+| Release publication (`v0.3.0`) | Tag + push verification | pass | Release commit `5fd3079` was tagged as `v0.3.0` and pushed to `origin`; locked release binary smoke-check passed and SHA-256 checksum was generated. |
 
-All release-closeout verification checks above were re-run and verified green.
+All release-closeout verification checks above were re-run and verified green, and the `v0.3.0` release was cut from the verified commit.

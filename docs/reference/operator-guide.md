@@ -61,7 +61,7 @@ boundaries:
 ```
 
 Key fields:
-- **`version`**: Must be exactly `"2.2"` (strict matching)
+- **`version`**: Supported values are `"2.2"` and `"2.3"`; use `"2.3"` when you need boundary contracts
 - **`module`**: Unique identifier for this module
 - **`public_api`**: Glob patterns for files other modules can import
 - **`allow_imports_from`**: Whitelist of importable modules
@@ -302,7 +302,7 @@ Mapping:
 
 ## Release Status
 
-**Current: release-closeout implementation is landed on `master`; remaining work is release publication/promotion plus deferred backlog beyond this release.**
+**Current: `v0.3.0` is released from `master`; release-closeout publication is complete, and the remaining items are deferred backlog beyond this release.**
 
 Current command surface summary:
 
@@ -322,7 +322,7 @@ Current command surface summary:
 | Reviewer hardening | `7a7fab8` | Near-miss contracts, null handling |
 | Merge-gate docs consolidation | `126bc38` / `502ad8a` | Merge-gate and operator docs aligned |
 
-### Release-Closeout Focus 🔄
+### Deferred Backlog Focus
 
 1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
 2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.

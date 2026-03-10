@@ -4,6 +4,8 @@
 
 Specgate enforces architecture boundaries, layer constraints, and dependency rules for TypeScript/JavaScript projects with byte-identical output for CI reliability.
 
+Agent entrypoint: [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md)
+
 ## Quick Start (First 15 Minutes)
 
 ```bash
@@ -37,6 +39,7 @@ See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes)
 
 | Document | Purpose |
 |----------|---------|
+| [**Specgate for Agents**](SPECGATE_FOR_AGENTS.md) | **Point agents here** — what Specgate is, how to install it, and which docs to read next |
 | [**Operator Guide**](docs/reference/operator-guide.md) | **Start here** — Complete onboarding path |
 | [First 15 Minutes](docs/reference/getting-started.md) | Quick hands-on tutorial |
 | [Spec Language Reference](docs/reference/spec-language.md) | YAML spec file format |
@@ -140,7 +143,7 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 ## Project Status
 
-**Status (as of 2026-03-10): release-closeout implementation is landed on `master`, with Phase 5 envelope checks, policy-diff, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place. The remaining work is the operational release publish step (tag + notes), tracked in the roadmap.**
+**Status (as of 2026-03-10): `v0.3.0` is released from `master`, with Phase 5 envelope checks, policy-diff, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all shipped. Current roadmap items are deferred backlog items beyond the `v0.3.0` release.**
 
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
@@ -153,8 +156,8 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 - ✅ CLI refactor work for modular command structure and stable command-level diagnostics.
 
 ### Next Steps
-- 📌 Revalidate release gates on the release commit and publish the next tag + release notes.
 - 📌 Keep deferred backlog items explicit in the roadmap and operator references.
+- 📌 Use [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md) as the stable handoff doc for agents helping users install or integrate Specgate.
 
 See [Roadmap](docs/roadmap.md) for current closeout status and [archived implementation plan](docs/archive/plans/implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for historical planning context.
 

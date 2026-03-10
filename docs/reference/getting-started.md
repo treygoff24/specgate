@@ -89,7 +89,7 @@ boundaries:
 ```
 
 Key concepts:
-- **`version: "2.2"`** — Must be exactly `"2.2"` (strict matching)
+- **`version`** — Supported values are `"2.2"` and `"2.3"`; use `"2.3"` when you need boundary contracts
 - **`module`** — Unique identifier (e.g., `layer/name`)
 - **`public_api`** — Files other modules can import (glob patterns)
 - **`allow_imports_from`** — Modules this module can import

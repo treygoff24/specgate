@@ -1,6 +1,6 @@
 # Specgate Roadmap
 
-This is the current operator-facing source of truth for release-closeout status. Historical plans stay in `docs/plans/` and `docs/archive/`, but active status belongs here.
+This is the current operator-facing source of truth for post-`v0.3.0` roadmap status. Historical plans stay in `docs/plans/` and `docs/archive/`, but active status belongs here.
 
 ## Landed
 
@@ -13,13 +13,14 @@ This is the current operator-facing source of truth for release-closeout status.
 - Monorepo support is shipped, including workspace discovery and nearest-tsconfig resolution behavior.
 - Verification baseline is green in `docs/project-status.md` for `cargo test`, `policy_diff_integration`, `contract_fixtures`, `tier_a_golden`, `golden_corpus`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check`.
 
-## In Progress
+## Released
 
-- Release publication remains: re-run gates on the release commit, cut the tag, and publish notes/artifacts.
+- `v0.3.0` was tagged and pushed on 2026-03-10 after re-running the merge gate, verifying policy-diff against `origin/master`, building with `--release --locked`, smoke-checking the binary, and generating a SHA-256 checksum.
 
-## Remaining to Call This Release Complete
+## Current Status
 
-- Re-run release gates on the release commit, cut the release tag, and publish release notes from the aligned docs.
+- The `v0.3.0` release-closeout work is complete.
+- Remaining items below are intentional deferred backlog, not unfinished release-publication work.
 
 ## Explicitly Deferred Beyond This Release
 
