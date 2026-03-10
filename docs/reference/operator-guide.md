@@ -286,7 +286,7 @@ Mapping:
 - `C09 → A02` (api-leakage)
 - `C08 → A03` (layer-reversal)
 - `C07 → A04` (registry-canonical)
-- `C06` — deferred to post-MVP; deterministic fixtures still missing
+- `C06` — deferred from current Tier A scope; deterministic fixtures still missing
 
 ### Explicit limitation note (future rule families)
 
@@ -298,7 +298,7 @@ Mapping:
 
 ## MVP Status
 
-**Current (as of 2026-03-10): MVP is stable and gate-validating; adoption/rollout hardening is active.**
+**Current: MVP is stable and gate-validating; adoption/rollout hardening is active.**
 
 Current command surface summary:
 
@@ -306,6 +306,7 @@ Current command surface summary:
 - `specgate check --format sarif` is available and produces SARIF output.
 - `specgate doctor ownership` is available, and `strict_ownership: true` enables CI gating on ownership findings.
 - `check --deny-widenings` is not implemented yet; use `policy-diff` in CI for this scenario.
+- Roadmap source: [docs/roadmap.md](../roadmap.md).
 
 ### Completed ✅
 

@@ -67,6 +67,7 @@ See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes)
 |----------|---------|
 | [Releasing Guide](RELEASING.md) | Release process and ownership |
 | [Changelog](CHANGELOG.md) | Versioned change log |
+| [Roadmap](docs/roadmap.md) | Single-source release closeout status |
 | [Archive Index](docs/archive/ARCHIVE_INDEX.md) | Superseded plans, reviews, and release artifacts |
 
 ## Install options
@@ -122,7 +123,7 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 ## Project Status
 
-**Status (as of 2026-03-10): Release-closeout scope is shipped, with Phase 5 envelope checks, policy-diff, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place.**
+**Status: Release-closeout scope is shipped, with Phase 5 envelope checks, policy-diff, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place.**
 
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
