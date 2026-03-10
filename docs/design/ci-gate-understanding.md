@@ -22,10 +22,11 @@ Specgate solves these with:
 
 - **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
 - **Informational checks:** optional metrics-mode runs, `doctor compare` explorations, and additional non-gate fixture collections.
-- **Policy governance:** `specgate policy-diff` for explicit governance reporting, or `check --since <base-ref> --deny-widenings` for single-command enforcement.
+- **Policy governance:** enforce exactly one PR path - `specgate policy-diff` (recommended for explicit governance artifacts) or `check --since <base-ref> --deny-widenings` (single-command enforcement).
 
 `golden_corpus` (`tests/golden_corpus.rs`) remains informational and is intentionally
 outside the merge gate as future-proxy coverage for deferred rule families.
+`golden_corpus_gate` remains part of `./scripts/ci/mvp_gate.sh` as the merge-gate contract check.
 
 ---
 
@@ -86,7 +87,9 @@ specgate check --output-mode metrics
 
 ## Policy Governance in CI
 
-### Recommended checks
+### Choose one enforcement path
+
+Use one of the following as the blocking governance check for PR CI.
 
 ```bash
 specgate policy-diff --base origin/main --format json
@@ -96,7 +99,7 @@ specgate policy-diff --base origin/main --format json
 specgate check --since origin/main --deny-widenings
 ```
 
-- `policy-diff` is explicit diff output for `.spec.yml` policy changes.
+- `policy-diff` is the recommended default when you want explicit diff output for `.spec.yml` policy changes.
 - `check --deny-widenings` reuses the same policy diff engine and fails with code `1` when widening is detected.
 - `check --deny-widenings` requires `--since <base-ref>` and returns code `2` on governance runtime/parse failures.
 
