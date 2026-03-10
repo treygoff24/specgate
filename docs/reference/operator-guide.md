@@ -270,7 +270,7 @@ Gating vs informational:
 | A04 | `boundary.canonical_import` | Registry canonical entrypoint |
 | A06 | `no-circular-deps` | External cycle detection |
 
-See [Tier A Fixture Design](tier-a-fixture-design-v1.md) for the full specification.
+See [Tier A Fixture Design](../design/tier-a-fixture-design.md) for the full specification.
 
 ### Golden Corpus (The Safety Net)
 
@@ -334,7 +334,7 @@ Current command surface summary:
 - [Consumer GitHub Actions workflow](../examples/specgate-consumer-github-actions.yml) — Copy-paste CI integration.
 - [Releasing Guide](../../RELEASING.md) — How to ship and promote releases.
 
-See [Implementation Plan](specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for details.
+See [Roadmap](../roadmap.md#remaining-to-call-this-release-complete) for details.
 
 ---
 
@@ -355,4 +355,4 @@ From the implementation plan's "Learned During Build":
 1. **Hands-on:** Complete the [First 15 Minutes](getting-started.md)
 2. **Policy governance:** Add `policy-diff` to CI with the canonical example workflow
 3. **CI polish:** Verify SARIF and ownership checks in [CI Gate Understanding](../design/ci-gate-understanding.md) and [DOGFOOD_ROLLOUT_CHECKLIST](../dogfood/rollout-checklist.md)
-4. **Deep Dive:** Read the [Implementation Plan](specgate-implementation-plan-v1.1.md) and keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) as a source of truth
+4. **Deep Dive:** Read the [Roadmap](../roadmap.md) and keep [WAVE0_CONTRACT.md](../archive/status/WAVE0_CONTRACT.md) as a source of truth

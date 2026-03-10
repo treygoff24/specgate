@@ -347,7 +347,7 @@ Runtime error — check:
 - [Operator Guide](operator-guide.md) — Complete onboarding
 - [Spec Language Reference](spec-language.md) — YAML format
 - [CI Gate Understanding](../design/ci-gate-understanding.md) — CI patterns
-- [Implementation Plan](specgate-implementation-plan-v1.1.md) — MVP status
+- [Roadmap](../roadmap.md) — MVP status
 - [Dogfood Rollout Checklist](../dogfood/rollout-checklist.md) — Dogfood rollout steps
-- [Baseline Policy](BASELINE_POLICY.md) — Baseline and stale-entry policy
-- [Releasing Guide](../RELEASING.md) — Dogfood and release workflow
+- [Baseline Policy](../design/baseline-policy.md) — Baseline and stale-entry policy
+- [Releasing Guide](../../RELEASING.md) — Dogfood and release workflow

@@ -849,6 +849,76 @@ constraints: []
     );
 }
 
+#[test]
+fn check_deny_widenings_surfaces_policy_diff_limitations_without_failing() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+constraints: []
+"#,
+        ),
+    );
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: ":(bad)"
+constraints: []
+"#,
+        ),
+    );
+    commit_all(temp.path(), "head ambiguous path change");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_PASS,
+        "limitations are informational and should not fail without widenings"
+    );
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "pass");
+    assert_eq!(output["policy_change_detected"], false);
+    assert_eq!(
+        output["rule_deltas"].as_array().expect("rule deltas").len(),
+        0
+    );
+    assert_eq!(
+        result.stderr,
+        "policy diff limitations detected:\n  - path_coverage_unbounded_mvp\n"
+    );
+}
+
 // =============================================================================
 // Contract Test: Deprecated Flags Emit Warnings
 // =============================================================================

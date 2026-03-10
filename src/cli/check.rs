@@ -175,6 +175,7 @@ impl From<&CheckArgs> for DiffMode {
 struct DenyWideningsResult {
     has_widening: bool,
     widening_details: Vec<String>,
+    limitations: Vec<String>,
 }
 
 fn evaluate_deny_widenings(args: &CheckArgs) -> Result<DenyWideningsResult, CliRunResult> {
@@ -219,9 +220,13 @@ fn evaluate_deny_widenings(args: &CheckArgs) -> Result<DenyWideningsResult, CliR
         ));
     }
 
+    let has_widening = report.summary.has_widening;
+    let limitations = report.summary.limitations.clone();
+
     Ok(DenyWideningsResult {
-        has_widening: report.summary.has_widening,
+        has_widening,
         widening_details: collect_widening_details(&report),
+        limitations,
     })
 }
 
@@ -542,6 +547,18 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
             .push_str(&format!("policy widenings detected:\n{details}\n"));
     }
 
+    if !deny_widenings.limitations.is_empty() {
+        let details = deny_widenings
+            .limitations
+            .iter()
+            .map(|detail| format!("  - {detail}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        result
+            .stderr
+            .push_str(&format!("policy diff limitations detected:\n{details}\n"));
+    }
+
     result
 }
 
@@ -737,6 +754,18 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
         }
     }
 
+    let stderr = if deny_widenings.limitations.is_empty() {
+        String::new()
+    } else {
+        let details = deny_widenings
+            .limitations
+            .iter()
+            .map(|detail| format!("  - {detail}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("policy diff limitations detected:\n{details}\n")
+    };
+
     CliRunResult {
         exit_code: if deny_widenings.has_widening {
             EXIT_CODE_POLICY_VIOLATIONS
@@ -744,7 +773,7 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
             exit_code
         },
         stdout: lines.join("\n") + "\n",
-        stderr: String::new(),
+        stderr,
     }
 }
 

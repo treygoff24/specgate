@@ -129,7 +129,7 @@ telemetry:
   enabled: false
 ```
 
-- `stale_baseline` follows canonical baseline policy (warn-by-default, opt-in fail via `stale_baseline: fail`, no auto-prune); see [BASELINE_POLICY.md](BASELINE_POLICY.md).
+- `stale_baseline` follows canonical baseline policy (warn-by-default, opt-in fail via `stale_baseline: fail`, no auto-prune); see [baseline-policy.md](../design/baseline-policy.md).
 - `release_channel: beta` enables beta-only doctor compare legacy trace fallback.
 - telemetry is opt-in by default and can be toggled per run with `--telemetry` / `--no-telemetry`.
 - `strict_ownership: true` makes `specgate doctor ownership` exit nonzero when it finds unclaimed files, overlaps, orphaned specs, duplicate module ids, or invalid ownership globs.

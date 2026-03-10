@@ -20,7 +20,7 @@ Specgate solves these with:
 
 ## Gate taxonomy
 
-- **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
+- **Gating checks (must pass to merge):** `./scripts/ci/mvp_gate.sh` as defined in `../reference/mvp-merge-gate.md` (contract fixtures, golden_corpus_gate, tier-A gate, baseline behavior).
 - **Informational checks:** optional metrics-mode runs, `doctor compare` explorations, and additional non-gate fixture collections.
 - **Policy governance:** enforce exactly one PR path - `specgate policy-diff` (recommended for explicit governance artifacts) or `check --since <base-ref> --deny-widenings` (single-command enforcement).
 
@@ -122,7 +122,7 @@ specgate check --since origin/main --format sarif > specgate.sarif
 
 ## Baseline policy reference
 
-Stale baseline entries are warn-by-default, opt-in fail via `stale_baseline: fail`, and never auto-pruned; see [BASELINE_POLICY.md](BASELINE_POLICY.md) for canonical policy and runbook.
+Stale baseline entries are warn-by-default, opt-in fail via `stale_baseline: fail`, and never auto-pruned; see [baseline-policy.md](baseline-policy.md) for canonical policy and runbook.
 
 ### What It Does
 
@@ -275,7 +275,7 @@ specgate check --since ${{ github.base_ref }}
 
 ### What Makes Tier A CI-Safe
 
-From [Tier A Fixture Design](tier-a-fixture-design-v1.md):
+From [Tier A Fixture Design](tier-a-fixture-design.md):
 
 1. **Intro fails now** — On implemented rule
 2. **Fix passes now** — Same config
@@ -434,11 +434,11 @@ Verify:
 
 ## See Also
 
-- [Operator Guide](OPERATOR_GUIDE.md) — Full onboarding
-- [MVP Merge Gate](mvp-merge-gate.md) — Single merge-ready checklist
-- [Wave 0 Contract](../WAVE0_CONTRACT.md) — Locked semantics
-- [Tier A Fixture Design](tier-a-fixture-design-v1.md) — Gate specification
-- [Implementation Plan](specgate-implementation-plan-v1.1.md) — MVP status
-- [Baseline policy](BASELINE_POLICY.md) — Baseline ownership and stale-entry guidance
-- [Releasing guide](../RELEASING.md) — Release mechanics
-- [Dogfood rollout checklist](DOGFOOD_ROLLOUT_CHECKLIST.md) — Pilot readiness
+- [Operator Guide](../reference/operator-guide.md) — Full onboarding
+- [MVP Merge Gate](../reference/mvp-merge-gate.md) — Single merge-ready checklist
+- [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) — Locked semantics
+- [Tier A Fixture Design](tier-a-fixture-design.md) — Gate specification
+- [Roadmap](../roadmap.md) — MVP and release status
+- [Baseline policy](baseline-policy.md) — Baseline ownership and stale-entry guidance
+- [Releasing guide](../../RELEASING.md) — Release mechanics
+- [Dogfood rollout checklist](../dogfood/rollout-checklist.md) — Pilot readiness

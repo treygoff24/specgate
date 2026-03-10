@@ -778,3 +778,54 @@ fn path_glob_narrowed_is_narrowing() {
             })
     );
 }
+
+#[test]
+fn path_glob_change_with_unbounded_prefix_reports_limitation_summary() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+    write_common_project_files(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: \":(bad)\"\nconstraints: []\n",
+    );
+    commit_all(temp.path(), "head unbounded path change");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let output = parse_json(&result.stdout);
+    assert!(!output["summary"]["has_widening"].as_bool().unwrap());
+    assert_eq!(
+        output["summary"]["limitations"]
+            .as_array()
+            .expect("limitations array")
+            .iter()
+            .map(|value| value.as_str().expect("string limitation"))
+            .collect::<Vec<_>>(),
+        vec!["path_coverage_unbounded_mvp"]
+    );
+    assert!(
+        output["diffs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|diff| diff["changes"].as_array().unwrap())
+            .any(|change| {
+                change["field"] == "boundaries.path"
+                    && change["classification"] == "structural"
+                    && change["detail"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("path_coverage_unbounded_mvp")
+            })
+    );
+}
