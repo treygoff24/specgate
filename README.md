@@ -106,7 +106,7 @@ See [CI Gate Understanding](docs/design/ci-gate-understanding.md) for complete C
 
 Use `specgate policy-diff --base origin/main` to compare `.spec.yml` policy between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs and `--format json` or `--format ndjson` for machine readable output. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
 
-You can also enforce this in `check` directly with `--deny-widenings` when `--since` is provided:
+You can enforce the same governance directly in `check` with `--deny-widenings` when `--since` is provided:
 
 ```bash
 specgate check --since origin/main --deny-widenings
@@ -114,9 +114,11 @@ specgate check --since origin/main --deny-widenings
 
 With this flag, widening changes force exit `1`, governance/runtime failures force exit `2`, and non-widening diffs keep normal `check` behavior.
 
+Use exactly one governance gate in CI (`policy-diff` or `check --deny-widenings`) so failures are not duplicated.
+
 For exit code `2`, `policy-diff` keeps structured entries in `errors` but clears authoritative classification payload fields (`diffs` and non-zero summary counters) so consumers do not treat partial output as a gate signal.
 
-In the MVP, deleting a `.spec.yml` file is always a widening, and renaming or copying a `.spec.yml` file is also treated as a widening risk. In CI, fetch full history before diffing against remote refs.
+In the MVP, deleting a `.spec.yml` file is always a widening. Renames/copies use semantic pairing: equivalent snapshots are `structural`, while inconclusive pairings stay fail-closed as widening risk. In CI, fetch full history before diffing against remote refs.
 
 ```yaml
 - uses: actions/checkout@v4
@@ -129,6 +131,13 @@ In the MVP, deleting a `.spec.yml` file is always a widening, and renaming or co
 
 See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, and current deferred items.
 
+### Upgrade guidance
+
+- Governance: pick one gate path for PRs - `specgate policy-diff --base <ref>` or `specgate check --since <ref> --deny-widenings`.
+- SARIF: add `specgate check --format sarif > specgate.sarif` when uploading results to code scanning platforms.
+- Ownership diagnostics: add `specgate doctor ownership --project-root .` as a CI readiness gate.
+- Fetch depth: when diffing against remote refs, use full history (`fetch-depth: 0`).
+
 ## Project Status
 
 **Status: Release-closeout scope is shipped, with Phase 5 envelope checks, policy-diff, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place.**
@@ -136,6 +145,7 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
 - ✅ `specgate policy-diff` for policy evolution checks, with multiple output formats and clear failure semantics.
+- ✅ `specgate check --deny-widenings` for single-command governance enforcement when using `--since`.
 - ✅ SARIF reporting via `--format sarif` for CI security scanning workflows.
 - ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement.
 - ✅ Full monorepo support including workspace discovery, nearest-tsconfig resolution, and `workspace_packages` reporting.

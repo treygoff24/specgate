@@ -6,6 +6,8 @@ This is the single operator-facing roadmap for release-closeout tracking. Histor
 
 - Phase 5 envelope checks are shipped, including envelope AST validation and `match.pattern` function scoping.
 - `specgate policy-diff` is shipped with deterministic `human`, `json`, and `ndjson` output plus `0/1/2` exit semantics.
+- `policy-diff` semantic rename/copy pairing is shipped; inconclusive pairings remain fail-closed widening risk.
+- `specgate check --deny-widenings` is shipped for in-band governance enforcement when `--since <base-ref>` is provided.
 - `specgate check --format sarif` is shipped for SARIF 2.1.0 output in CI scanning workflows.
 - `specgate doctor ownership` is shipped, including strict ownership gating for CI.
 - Monorepo support is shipped, including workspace discovery and nearest-tsconfig resolution behavior.
@@ -13,15 +15,11 @@ This is the single operator-facing roadmap for release-closeout tracking. Histor
 
 ## In Progress
 
-- Closeout narrative alignment across operator-facing docs is in progress so README, operator guide, and reference docs point to one roadmap source.
-- Adoption hardening is in progress for canonical CI examples and release-readiness documentation alignment.
-- Final quality-gate closeout is in progress (review and post-fix gates) before this release is declared complete.
+- Final release publication remains (tag + notes) after gates are revalidated on the release commit.
 
 ## Remaining to Call This Release Complete
 
-- Implement `specgate check --deny-widenings` so policy widening can be enforced directly in `check`.
-- Add semantic rename/copy pairing for `.spec.yml` in `policy-diff` so equivalent renames are no longer fail-closed widenings.
-- Publish final release closeout notes after full gate revalidation and doc reconciliation are complete.
+- Revalidate quality gates on the release commit and publish release notes from aligned docs.
 
 ## Explicitly Deferred Beyond This Release
 
