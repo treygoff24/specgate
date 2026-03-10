@@ -1,6 +1,6 @@
 # Specgate Roadmap
 
-This is the single operator-facing roadmap for release-closeout tracking. Historical plans stay in `docs/plans/` and `docs/archive/`, but active status belongs here.
+This is the current operator-facing source of truth for release-closeout status. Historical plans stay in `docs/plans/` and `docs/archive/`, but active status belongs here.
 
 ## Landed
 
@@ -15,11 +15,11 @@ This is the single operator-facing roadmap for release-closeout tracking. Histor
 
 ## In Progress
 
-- Final release publication remains (tag + notes) after gates are revalidated on the release commit.
+- Release publication remains: re-run gates on the release commit, cut the tag, and publish notes/artifacts.
 
 ## Remaining to Call This Release Complete
 
-- Revalidate quality gates on the release commit and publish release notes from aligned docs.
+- Re-run release gates on the release commit, cut the release tag, and publish release notes from the aligned docs.
 
 ## Explicitly Deferred Beyond This Release
 

@@ -2,16 +2,18 @@
 
 This matrix defines support commitments for the TypeScript/JavaScript v1 surface of Specgate across GitHub binary artifacts and the npm wrapper package.
 
-For channel semantics, see [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md).
+Here, `v1` refers to the TS/JS support-policy surface, not the `.spec.yml` schema version.
 
-> **Note:** This document is the authoritative source for tier definitions. For detailed promotion gates and semver policy, see [DOGFOOD_RELEASE_CHANNEL](DOGFOOD_RELEASE_CHANNEL.md).
+For channel semantics, see [DOGFOOD_RELEASE_CHANNEL](../dogfood/release-channel.md).
+
+> **Note:** This document is the authoritative source for tier definitions. For detailed promotion gates and semver policy, see [DOGFOOD_RELEASE_CHANNEL](../dogfood/release-channel.md).
 
 ## Tier Definitions
 
 | Tier | Targets | Channel Availability | Release Gating | Support Expectation |
 | --- | --- | --- | --- | --- |
-| Tier 1 | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`; npm wrapper on Node.js 20/22 LTS | Stable + Beta | Must pass release gate, binary asset verification, and npm wrapper publish/verify before promotion | Highest-priority support; Tier-1 regressions are release-blocking |
-| Tier 2 | `x86_64-apple-darwin`; npm wrapper on current Node.js (non-LTS) | Stable + Beta | Built and smoke-tested in release automation; can proceed only when Tier-1 remains green | Prioritized fixes; known issues must be documented at release time |
+| Tier 1 | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`; npm wrapper on Node.js 20/22 LTS | GitHub binaries: Stable + Beta; npm wrapper: Stable only | Must pass release gate, binary asset verification, and npm wrapper publish/verify before promotion | Highest-priority support; Tier-1 regressions are release-blocking |
+| Tier 2 | `x86_64-apple-darwin`; npm wrapper on current Node.js (non-LTS) | GitHub binaries: Stable + Beta; npm wrapper: Stable only | Built and smoke-tested in release automation; can proceed only when Tier-1 remains green | Prioritized fixes; known issues must be documented at release time |
 | Tier 3 | `aarch64-unknown-linux-gnu`, other OS/arch combinations, source-only installs, and unlisted runtime combinations | Beta-first, stable best-effort | Not part of release-blocking matrix | Best-effort support with documented workarounds |
 
 ## Downgrade Behavior

@@ -20,7 +20,7 @@ This guide walks you through installing, configuring, and running your first arc
 
 ```bash
 # Fast path (release asset + checksum)
-SPECGATE_TAG=v0.1.0-rc3
+SPECGATE_TAG=vX.Y.Z
 SPECGATE_ARCH="x86_64-unknown-linux-gnu"
 SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_ARCH}.tar.gz"
 SPECGATE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}/${SPECGATE_ARCHIVE}"
@@ -44,6 +44,8 @@ export PATH="$INSTALL_BIN_DIR:$PATH"
 
 specgate --help
 ```
+
+Replace `vX.Y.Z` with the published release tag you want to install.
 
 ### Minute 3-5: Initialize Your Project
 
@@ -171,17 +173,21 @@ Start with [MVP Merge Gate](mvp-merge-gate.md), then use [CI Gate Understanding]
 For a ready-to-use consumer workflow, copy `docs/examples/specgate-consumer-github-actions.yml`
 into your repository's `.github/workflows/specgate.yml`.
 
-Run the gate locally before pushing:
+Run the documented consumer checks locally before pushing:
 
 ```bash
-./scripts/ci/mvp_gate.sh
+specgate check --output-mode deterministic
+specgate policy-diff --base origin/main
+specgate doctor ownership --project-root . --format json
 ```
+
+If you want ownership findings to fail CI, set `strict_ownership: true` in `specgate.config.yml`.
 
 Quick CI snippet:
 
 ```yaml
 - name: Specgate Check
-  run: specgate check --output-mode metrics | tee .specgate-verdict.json
+  run: specgate check --output-mode deterministic | tee .specgate-verdict.json
 ```
 
 The consumer workflow template uploads `.specgate-verdict.json` as the `specgate-verdict`
@@ -199,7 +205,8 @@ specgate doctor compare \
   --tsc-trace trace.log
 ```
 
-`--tsc-trace` accepts JSON edge payloads or raw `tsc --traceResolution` text.
+`--tsc-trace` accepts JSON edge payloads on stable, and raw `tsc --traceResolution`
+text only when using the beta-channel legacy fallback modes.
 Look for:
 - `parity_verdict` (`MATCH`/`DIFF`)
 - `specgate_resolution` and `tsc_trace_resolution`
@@ -241,7 +248,7 @@ Version `2.3` specs can require handler-side validation for boundary contracts:
 boundaries:
   contracts:
     - id: create_user
-      file: contracts/create-user.json
+      contract: contracts/create-user.json
       envelope: required
       match:
         files:

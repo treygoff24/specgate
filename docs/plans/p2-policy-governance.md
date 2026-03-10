@@ -1,6 +1,8 @@
 # P2 Policy Governance (`specgate policy-diff`) Implementation Plan
 
 > **For Claude:** Spawn `task-builder` agent to implement this plan task-by-task.
+>
+> **Status note (2026-03-10):** This is the historical MVP implementation plan for `policy-diff`. Current behavior has moved beyond this snapshot: semantic rename/copy pairing and `check --deny-widenings` are now implemented. Use `docs/reference/policy-diff.md` and `docs/roadmap.md` for current operator-facing truth.
 
 **Goal:** Add a new `specgate policy-diff` command that compares `.spec.yml` policy between two git refs and deterministically classifies each change as **widening**, **narrowing**, or **structural**.
 

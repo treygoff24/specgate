@@ -4,18 +4,19 @@ This document captures the contract lock established in Wave 0, ensuring stabili
 
 ## Version Contract
 
-### Supported Version
+### Supported Versions
 
-- **Version**: `2.2` (exact)
-- **Constant**: `SUPPORTED_SPEC_VERSION` in `src/spec/types.rs`
+- **Versions**: `2.2`, `2.3` (exact match against supported versions)
+- **Constants**: `SUPPORTED_SPEC_VERSIONS` and `CURRENT_SPEC_VERSION` in `src/spec/types.rs`
 
 ### Compatibility Policy
 
 Specgate enforces **strict version matching**:
 
 1. Only `version: "2.2"` is accepted in spec files
-2. Versions `2` or `2.0` are rejected with a clear error message
-3. Version validation occurs during `specgate validate` and `specgate check`
+2. `version: "2.3"` is also accepted and is required when using `boundaries.contracts`
+3. Versions `2` or `2.0` are rejected with a clear error message
+4. Version validation occurs during `specgate validate` and `specgate check`
 
 ### Rationale
 

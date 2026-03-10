@@ -1,6 +1,8 @@
-# Specgate Complete Closeout Implementation Plan
+# Historical Closeout Plan: 2026-03-10
 
 > **For Claude:** Spawn `task-builder` agent to implement this plan task-by-task.
+>
+> **Status note (2026-03-10):** This is the historical execution plan for release closeout. Current repo truth lives in `docs/roadmap.md`, `docs/project-status.md`, and the operator-facing references. Items that were open when this plan was drafted, including semantic rename/copy pairing and `check --deny-widenings`, have since landed on `master`.
 
 **Goal:** Finish the remaining product, governance, adoption, documentation, and release work so Specgate reaches a coherent "done" state against its MVP vision, post-MVP hardening plan, and operator rollout goals.
 
@@ -17,7 +19,7 @@ Specgate is "100% finished out" for this phase when all of the following are tru
 1. The codebase, README, operator guide, changelog, and plans all describe the same current product state.
 2. Remaining deferred governance gaps that block the product narrative are either implemented or explicitly moved into a named 1.0+ backlog document.
 3. Operator adoption docs match the real CI workflow and the real command surface.
-4. Required test gates pass: `cargo test`, `cargo test contract_fixtures`, `cargo test tier_a_golden`, `cargo test golden_corpus`.
+4. Required merge gates pass, and supplemental verification suites are green: `cargo test`, `cargo test contract_fixtures`, `cargo test tier_a_golden`, `cargo test golden_corpus`.
 5. Release docs, examples, and changelog are ready for the next tagged release without hidden manual steps.
 
 ---
@@ -157,7 +159,7 @@ Add/update bullets so the guide explicitly states:
 
 ```md
 - `policy-diff` is available today and is the current CI path for governance checks.
-- `check --deny-widenings` is not implemented yet; do not document it as available.
+- `check --deny-widenings` is implemented and can be used for in-band governance checks with `--since <base-ref>`.
 - SARIF output is available today via `specgate check --format sarif`.
 - `doctor ownership` is available today and can be CI-gated with `strict_ownership: true`.
 ```

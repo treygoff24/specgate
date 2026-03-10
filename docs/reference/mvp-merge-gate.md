@@ -2,7 +2,7 @@
 
 **One operator-facing definition of “safe to merge” for Specgate.**
 
-This repository defines a single MVP-ready gate for contract-sensitive changes.
+This repository defines a single merge-ready gate for contract-sensitive changes.
 
 - Workflow: `.github/workflows/mvp-merge-gate.yml`
 - Runner script: `scripts/ci/mvp_gate.sh`
@@ -24,7 +24,7 @@ A change is merge-ready only when all required checks pass and are categorized c
 
 ## Gate taxonomy (for this repo)
 
-- **Gating:** all commands in this document's sequence (`contract_fixtures`, `golden_corpus_gate`, `integration`, `wave2c_cli_integration`, `tier_a_golden`, `mvp_gate_baseline`) must pass for CI merge.
+- **Gating:** every command in the exact `scripts/ci/mvp_gate.sh` sequence below must pass for CI merge.
 - **Informational:** `golden_corpus` (`tests/golden_corpus.rs`) tracks future-proxy coverage and is not enforced by merge gate.
 - **Informational:** diagnostics (`doctor compare`), metrics-mode tuning, and non-gating fixture experiments.
 
@@ -36,13 +36,23 @@ The gate runs this exact sequence:
 
 ```bash
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --test contract_fixtures
-cargo test --test golden_corpus_gate
-cargo test --test tier_a_golden
-cargo test --test integration
-cargo test --test wave2c_cli_integration
-cargo test --test mvp_gate_baseline
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --lib
+cargo test --locked --test contract_fixtures
+cargo test --locked --test contract_validation_fixtures
+cargo test --locked --test contracts_rules_contract_refs
+cargo test --locked --test structured_diagnostics_contracts
+cargo test --locked --test contract_e2e
+cargo test --locked --test contract_e2e_edge
+cargo test --locked --test golden_corpus_gate
+cargo test --locked --test tier_a_golden
+cargo test --locked --test integration
+cargo test --locked --test wave2c_cli_integration
+cargo test --locked --test mvp_gate_baseline
+cargo test --locked --test doctor_parity_fixtures
+cargo test --locked --test tsjs_barrel_fixtures
+cargo test --locked --test tsjs_openclaw_regression
+cargo test --locked --test monorepo_integration
 ```
 
 ---
@@ -56,7 +66,7 @@ Failures are reported as one of:
 - **Runtime/setup failure**
   - Formatting, linting, toolchain, or command execution failures.
 - **Contract drift**
-  - Any failure in `contract_fixtures`, `golden_corpus_gate`, `integration`, `wave2c_cli_integration`, or `tier_a_golden`.
+  - Any failure in the library tests, contract fixture/regression suites, `golden_corpus_gate`, `tier_a_golden`, `integration`, `wave2c_cli_integration`, `doctor_parity_fixtures`, `tsjs_barrel_fixtures`, `tsjs_openclaw_regression`, or `monorepo_integration`.
 - **Policy failure**
   - Baseline behavior checks fail in `mvp_gate_baseline`.
 

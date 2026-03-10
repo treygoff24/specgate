@@ -357,7 +357,7 @@ jobs:
       
       - name: Install Specgate
         run: |
-          cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3 --root "$RUNNER_TEMP/specgate" --force
+          cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z --root "$RUNNER_TEMP/specgate" --force
           echo "$RUNNER_TEMP/specgate/bin" >> "$GITHUB_PATH"
           # Canonical release-binary + checksum flow:
           # ../examples/specgate-consumer-github-actions.yml

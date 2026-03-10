@@ -29,7 +29,7 @@ jobs:
       - name: Install Specgate (prefer release binary with checksum, fallback to cargo install)
         run: |
           set -euo pipefail
-          SPECGATE_TAG="v0.1.0-rc3"
+          SPECGATE_TAG="vX.Y.Z"
           SPECGATE_TARGET="x86_64-unknown-linux-gnu"
           SPECGATE_ARCHIVE="specgate-${SPECGATE_TAG}-${SPECGATE_TARGET}.tar.gz"
           SPECGATE_BASE_URL="https://github.com/treygoff24/specgate/releases/download/${SPECGATE_TAG}"

@@ -1,14 +1,17 @@
-# Project Status: W4-T1 Closeout
+# Project Status: Release Closeout Verification
 
-| Command | Status | Result |
-| --- | --- | --- |
-| `cargo test` | pass | Completed successfully in the Phase4-Fixes closeout worktree; full suite green (0 failed). |
-| `cargo test --test policy_diff_integration` | pass | `17 passed` (0 failed), including copy semantic pairing and fail-closed widening checks. |
-| `cargo test --test contract_fixtures` | pass | `14 passed` (0 failed). |
-| `cargo test --test tier_a_golden` | pass | `1 passed` (0 failed). |
-| `cargo test --test golden_corpus` | pass | `10 passed` (0 failed). |
-| `cargo check --all-targets` | pass | Completed successfully; no check errors. |
-| `cargo clippy --all-targets -- -D warnings` | pass | Completed successfully; no lint warnings/errors. |
-| `cargo fmt --check` | pass | Completed successfully; formatting already compliant. |
+Last verified on 2026-03-10.
 
-All required W4-T1 quality gates were re-run and verified green.
+| Check | Role | Status | Result |
+| --- | --- | --- | --- |
+| `cargo test` | Full repo suite | pass | Full suite green with 377 unit tests plus integration and fixture suites (0 failed). |
+| `cargo test --test policy_diff_integration` | Governance contract verification | pass | `18 passed` (0 failed), including semantic rename/copy pairing and fail-closed widening checks. |
+| `cargo test --test contract_fixtures` | Contract fixture verification | pass | `15 passed` (0 failed), including `check --deny-widenings` behavior. |
+| `cargo test --test tier_a_golden` | Merge-gate fixture contract | pass | `1 passed` (0 failed). |
+| `cargo test --test golden_corpus` | Informational future-proxy coverage | pass | `10 passed` (0 failed); this suite is green but remains informational rather than merge-blocking. |
+| `./scripts/ci/mvp_gate.sh` | Enforced merge-gate sequence | pass | Passed the full 18-command merge gate, including locked clippy, library tests, contract regressions, Tier A, integration, and monorepo suites. |
+| `cargo check --all-targets` | Compile verification | pass | Completed successfully; no check errors. |
+| `cargo clippy --all-targets -- -D warnings` | Lint verification | pass | Completed successfully; no lint warnings or errors. |
+| `cargo fmt --check` | Formatting verification | pass | Completed successfully; formatting already compliant. |
+
+All release-closeout verification checks above were re-run and verified green.

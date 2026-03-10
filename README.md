@@ -72,8 +72,8 @@ See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes)
 
 ## Install options
 
-- Preferred path: download the release tarball + `.sha256` for your tag (example `v0.1.0-rc3`) and run the checksum check before using `specgate`.
-- Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3`.
+- Preferred path: download the release tarball + `.sha256` for your tag (for example `vX.Y.Z`) and run the checksum check before using `specgate`.
+- Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z`.
 - See the full copy-paste command flow in [Getting Started](docs/reference/getting-started.md#minute-0-2-build-and-install).
 
 ## Key Concepts
@@ -135,12 +135,12 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 - Governance: pick one gate path for PRs - `specgate policy-diff --base <ref>` or `specgate check --since <ref> --deny-widenings`.
 - SARIF: add `specgate check --format sarif > specgate.sarif` when uploading results to code scanning platforms.
-- Ownership diagnostics: add `specgate doctor ownership --project-root .` as a CI readiness gate.
+- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json` and enable `strict_ownership: true` when you want findings to fail CI.
 - Fetch depth: when diffing against remote refs, use full history (`fetch-depth: 0`).
 
 ## Project Status
 
-**Status: Release-closeout scope is shipped, with Phase 5 envelope checks, policy-diff, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place.**
+**Status (as of 2026-03-10): release-closeout implementation is landed on `master`, with Phase 5 envelope checks, policy-diff, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all in place. The remaining work is the operational release publish step (tag + notes), tracked in the roadmap.**
 
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
@@ -153,10 +153,10 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 - ✅ CLI refactor work for modular command structure and stable command-level diagnostics.
 
 ### Next Steps
-- 📌 Track remaining roadmap and hardening work (for example: remaining deferred rule variants and adoption polishing).
-- 📌 Keep the single source of truth updated in `CHANGELOG.md` and operator references as closeout completes.
+- 📌 Revalidate release gates on the release commit and publish the next tag + release notes.
+- 📌 Keep deferred backlog items explicit in the roadmap and operator references.
 
-See [Implementation Plan](docs/specgate-implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for planning context.
+See [Roadmap](docs/roadmap.md) for current closeout status and [archived implementation plan](docs/archive/plans/implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for historical planning context.
 
 ## Development
 

@@ -14,7 +14,7 @@ This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corp
 | Understand the contract | [Wave 0 Contract](#wave-0-contract) |
 | Set up CI | [CI Gate Understanding](#ci-gate-understanding) |
 | Understand fixtures | [Tier A vs Golden Corpus](#tier-a-vs-golden-corpus) |
-| See roadmap status | [MVP Status](#mvp-status) |
+| See roadmap status | [Release Status](#release-status) |
 | Prepare dogfood rollout | [Dogfood Docs](#dogfood-docs) |
 
 ---
@@ -24,11 +24,12 @@ This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corp
 ### Step 1: Install and Initialize (2 min)
 
 ```bash
-# Build from source
-cargo build --release
+# Preferred: install the published release artifact for your tag
+curl -fsSL -o /tmp/specgate-vX.Y.Z.tar.gz \
+  https://github.com/treygoff24/specgate/releases/download/vX.Y.Z/specgate-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
 
-# Install to a known command path (recommended for repeat runs)
-cargo install --path . --locked
+# Fallback: install the published tag from source
+cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
 
 # Initialize a project
 cd your-project
@@ -127,19 +128,22 @@ The [Wave 0 Contract](../archive/status/WAVE0_CONTRACT.md) defines locked semant
 
 ### Version Contract
 
-**Only `version: "2.2"` is accepted.** This ensures:
+**Supported versions are `2.2` and `2.3`.** This ensures:
 - Explicit version updates when specs change
 - Unambiguous compatibility
-- Foundation for future multi-version support (not currently enabled in MVP)
+- A stable upgrade path while `2.3` carries contract-boundary features
 
 ```yaml
 # ✅ Correct
 version: "2.2"
+version: "2.3"
 
 # ❌ Rejected with clear error
 version: "2"
 version: "2.0"
 ```
+
+Use `version: "2.3"` when you need `boundaries.contracts`; `2.2` remains valid for legacy specs without contracts.
 
 ### CLI Semantics
 
@@ -211,14 +215,14 @@ jobs:
           fetch-depth: 0  # Required for blast-radius
       
       - name: Install Specgate
-        run: cargo install --path .
+        run: cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
       
       - name: Check (Full on main, Blast-radius on PRs)
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            specgate check --output-mode metrics | tee .specgate-verdict.json
+            specgate check --output-mode deterministic | tee .specgate-verdict.json
           else
-            specgate check --since origin/main --output-mode metrics | tee .specgate-verdict.json
+            specgate check --since origin/main --output-mode deterministic | tee .specgate-verdict.json
           fi
       
       - name: Upload Specgate verdict artifact
@@ -257,8 +261,8 @@ Tier A fixtures are:
 - **CI-gating** — Must pass for merge
 
 Gating vs informational:
-- **Gating (current):** `golden_corpus_gate` merge-gating suite requires `cargo test --test contract_fixtures`, `cargo test --test golden_corpus_gate`, `cargo test --test tier_a_golden`, `cargo test --test integration`, `cargo test --test wave2c_cli_integration`, and `cargo test --test mvp_gate_baseline` via `mvp-merge-gate`.
-- **Informational:** Extra fixture runs and ad-hoc validation beyond this required sequence.
+- **Gating (current):** the enforced merge gate is the exact `scripts/ci/mvp_gate.sh` sequence documented in [MVP Merge Gate](mvp-merge-gate.md), including formatting, clippy, library tests, contract validation/regression suites, `golden_corpus_gate`, `tier_a_golden`, `integration`, `wave2c_cli_integration`, `mvp_gate_baseline`, `doctor_parity_fixtures`, `tsjs_barrel_fixtures`, `tsjs_openclaw_regression`, and `monorepo_integration`.
+- **Informational:** `golden_corpus` and ad-hoc fixture experiments remain coverage signals, not enforced merge blockers.
 
 **P0 Fixtures:**
 
@@ -291,14 +295,14 @@ Mapping:
 ### Explicit limitation note (future rule families)
 
 - `C02`: pattern-aware (`no-pattern`) variants are deferred.
-- `C06`: category-level governance variants are not in Tier A gate.
+- `C06`: category-level governance variants remain informational coverage and are not in the enforced merge gate.
 - `C07`: unique-export/visibility edge-case variants are deferred.
 
 ---
 
-## MVP Status
+## Release Status
 
-**Current: MVP is stable and gate-validating; adoption/rollout hardening is active.**
+**Current: release-closeout implementation is landed on `master`; remaining work is release publication/promotion plus deferred backlog beyond this release.**
 
 Current command surface summary:
 
@@ -318,7 +322,7 @@ Current command surface summary:
 | Reviewer hardening | `7a7fab8` | Near-miss contracts, null handling |
 | Merge-gate docs consolidation | `126bc38` / `502ad8a` | Merge-gate and operator docs aligned |
 
-### Post-MVP Priorities 🔄
+### Release-Closeout Focus 🔄
 
 1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
 2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.

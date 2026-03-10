@@ -21,7 +21,7 @@ Use `Cargo.toml` as the single source of truth for the release version and tag.
      - `specgate policy-diff --base origin/main`
      - `specgate check --since origin/main --deny-widenings`
    - `specgate check --format sarif > specgate.sarif`
-   - `specgate doctor ownership --project-root .`
+   - `specgate doctor ownership --project-root . --format json` with `strict_ownership: true` enabled when findings must block release
 3. Confirm release notes and upgrade guidance are aligned for the release:
    - `CHANGELOG.md`
    - `README.md`

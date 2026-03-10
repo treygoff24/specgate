@@ -31,7 +31,7 @@ Promote beta to stable only after all gate checks are green, `policy-diff`/owner
 
 ## Tag and Automation Mapping
 
-For tag/automation mapping details, see [support-matrix-v1.md](support-matrix-v1.md#tag-and-automation-mapping).
+For tag/automation mapping details, see [support-matrix-v1.md](../reference/support-matrix-v1.md#tag-and-automation-mapping).
 
 ## Install Preference
 
@@ -46,4 +46,4 @@ For tag/automation mapping details, see [support-matrix-v1.md](support-matrix-v1
 - Beta is the default dogfood channel for TS/JS v1 changes.
 - Promote beta to stable only after gate, artifact verification, and wrapper publish/verify checks are green.
 - If a Tier-1 regression appears, pause stable promotion and continue on beta until fixed.
-- Full downgrade policy and tier commitments live in [support-matrix-v1](support-matrix-v1.md).
+- Full downgrade policy and tier commitments live in [support-matrix-v1](../reference/support-matrix-v1.md).

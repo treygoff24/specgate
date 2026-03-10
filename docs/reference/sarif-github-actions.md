@@ -17,10 +17,15 @@ on: [push, pull_request]
 jobs:
   specgate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install specgate
-        run: cargo install specgate
+        run: cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z
       - name: Run specgate
         run: specgate check --format sarif > specgate.sarif
         continue-on-error: true
