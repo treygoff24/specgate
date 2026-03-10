@@ -90,9 +90,9 @@ The command first looks at git file status for changed `.spec.yml` files, then d
 | `A` | `structural` | A new policy file is reported as a new governed module, not as a widening. |
 | `M` / `T` | field level classification | Parsed `.spec.yml` content is compared field by field. |
 | `D` | `widening` | Deleting a policy file removes governance for that module, so this is fail closed. |
-| `R*` / `C*` | `widening` | Rename and copy are treated as widening risk in the MVP, so they are fail closed until semantic pairing exists. |
+| `R*` / `C*` | semantic pairing | Rename/copy is `structural` when old/new `.spec.yml` snapshots are semantically equivalent after normalization; otherwise it stays fail-closed `widening`. |
 
-Two consequences are intentional in the current implementation. First, deleting a `.spec.yml` file is always reported as a widening. Second, renaming or copying a `.spec.yml` file is also reported as a widening risk, even if the content looks similar. A clean run that contains either kind of change exits `1`.
+Two consequences are intentional in the current implementation. First, deleting a `.spec.yml` file is always reported as a widening. Second, rename/copy remains fail-closed when semantic pairing cannot prove equivalence (for example parse failures or ambiguous pairings). A run exits `1` whenever any widening remains.
 
 ## CI guidance
 
@@ -135,11 +135,13 @@ For modified `.spec.yml` files, `policy-diff` classifies changes over parsed pol
 
 Some changes remain intentionally conservative in the MVP. Constraint additions and removals are currently reported as `structural` unless a rule specific severity change is recognized. When `boundaries.path` coverage cannot be bounded safely, the command reports the change as `structural` and adds the `path_coverage_unbounded_mvp` limitation in the summary.
 
+Rename/copy semantic pairing uses normalized `SpecFile` snapshots (trimmed scalar strings, set-like list normalization, and canonicalized constraint/contract structures). If normalization cannot produce a trustworthy semantic comparison, classification stays fail-closed as widening-risk.
+
 ## Deferred follow up
 
 | Item | Current behavior |
 |------|------------------|
-| Semantic rename pairing | Not implemented. Rename and copy remain fail closed widenings. |
+| Semantic rename pairing | Implemented for `R*`/`C*` when both sides can be normalized and compared; inconclusive pairings remain fail-closed widenings. |
 | Cross file compensation | Not implemented. A widening in one file is not offset by a narrowing in another file. |
 | Config level governance | Not implemented here. `specgate.config.yml` diffing is out of scope for `policy-diff`. |
 | Future gate integration | Implemented for `check` via `--deny-widenings` (requires `--since <base-ref>`). |

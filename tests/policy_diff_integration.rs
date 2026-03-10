@@ -221,6 +221,54 @@ fn mixed_change_set_contains_widening_narrowing_and_structural() {
 }
 
 #[test]
+fn rename_only_semantically_equivalent_is_structural() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+    write_common_project_files(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\ndescription: \"App policy\"\nboundaries:\n  path: src/app/**/*\n  public_api:\n    - src/app/main.ts\n    - src/app/deep/util.ts\n  never_imports:\n    - core\nconstraints:\n  - rule: module-boundary\n    params: {}\n",
+    );
+    commit_all(temp.path(), "base");
+
+    run_git(
+        temp.path(),
+        &["mv", "modules/app.spec.yml", "modules/app-renamed.spec.yml"],
+    );
+    write_file(
+        temp.path(),
+        "modules/app-renamed.spec.yml",
+        "version: \"2.3\"\nmodule: app\ndescription: \"  App policy  \"\nboundaries:\n  path: src/app/**/*\n  public_api:\n    - src/app/deep/util.ts\n    - src/app/main.ts\n  never_imports:\n    - core\nconstraints:\n  - rule: module-boundary\n    params: {}\n",
+    );
+    commit_all(temp.path(), "rename only");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["summary"]["has_widening"], false);
+    assert_eq!(output["summary"]["widening_changes"], 0);
+    assert!(output["summary"]["structural_changes"].as_u64().unwrap() >= 1);
+    assert!(
+        output["diffs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|diff| diff["changes"].as_array().unwrap())
+            .any(|change| {
+                change["field"] == "spec_file"
+                    && change["classification"] == "structural"
+                    && change["detail"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("semantically equivalent")
+            })
+    );
+}
+
+#[test]
 fn rename_with_widening_attempt_is_fail_closed() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(temp.path());
@@ -263,6 +311,52 @@ fn rename_with_widening_attempt_is_fail_closed() {
                 .unwrap_or("")
                 .contains("widening-risk")
     }));
+}
+
+#[test]
+fn rename_with_unparseable_head_stays_fail_closed_widening() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+    write_common_project_files(temp.path());
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    commit_all(temp.path(), "base");
+
+    run_git(
+        temp.path(),
+        &["mv", "modules/app.spec.yml", "modules/app-renamed.spec.yml"],
+    );
+    write_file(
+        temp.path(),
+        "modules/app-renamed.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries: [\n  path: src/app/**/*\n",
+    );
+    commit_all(temp.path(), "rename malformed head");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["summary"]["has_widening"], true);
+    assert!(
+        output["diffs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|diff| diff["changes"].as_array().unwrap())
+            .any(|change| {
+                change["field"] == "spec_file"
+                    && change["classification"] == "widening"
+                    && change["detail"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("widening-risk")
+            })
+    );
 }
 
 #[test]

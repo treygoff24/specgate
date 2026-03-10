@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::classify::specs_semantically_equivalent_for_rename;
 use super::types::PolicyDiffErrorEntry;
 use crate::spec::SpecFile;
 
@@ -22,7 +23,17 @@ pub enum FailClosedSpecOperation {
         status: String,
         from_path: String,
         to_path: String,
+        semantic_pairing: RenameCopySemanticPairing,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenameCopySemanticPairing {
+    #[default]
+    Unassessed,
+    Equivalent,
+    Different,
+    Inconclusive,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +91,13 @@ pub fn discover_and_load_spec_snapshots(
     base_ref: &str,
     head_ref: &str,
 ) -> Result<DiscoveredAndLoadedSpecSnapshots, PolicyGitError> {
-    let discovered = discover_spec_file_changes(project_root, base_ref, head_ref)?;
+    let mut discovered = discover_spec_file_changes(project_root, base_ref, head_ref)?;
+    hydrate_rename_copy_semantics(
+        project_root,
+        base_ref,
+        head_ref,
+        &mut discovered.fail_closed_operations,
+    )?;
     let loaded = load_spec_snapshots_for_changed_paths(
         project_root,
         base_ref,
@@ -89,6 +106,89 @@ pub fn discover_and_load_spec_snapshots(
     )?;
 
     Ok(DiscoveredAndLoadedSpecSnapshots { discovered, loaded })
+}
+
+fn hydrate_rename_copy_semantics(
+    project_root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+    operations: &mut [FailClosedSpecOperation],
+) -> Result<(), PolicyGitError> {
+    let mut operation_indexes = Vec::new();
+    let mut base_paths = Vec::new();
+    let mut head_paths = Vec::new();
+
+    for (index, operation) in operations.iter_mut().enumerate() {
+        let FailClosedSpecOperation::RenameOrCopy {
+            from_path,
+            to_path,
+            semantic_pairing,
+            ..
+        } = operation
+        else {
+            continue;
+        };
+
+        if !from_path.ends_with(".spec.yml") || !to_path.ends_with(".spec.yml") {
+            *semantic_pairing = RenameCopySemanticPairing::Inconclusive;
+            continue;
+        }
+
+        operation_indexes.push(index);
+        base_paths.push(from_path.clone());
+        head_paths.push(to_path.clone());
+    }
+
+    if operation_indexes.is_empty() {
+        return Ok(());
+    }
+
+    let base_blobs = load_blob_batch_for_ref(project_root, base_ref, &base_paths)?;
+    let head_blobs = load_blob_batch_for_ref(project_root, head_ref, &head_paths)?;
+
+    for (batch_index, operation_index) in operation_indexes.into_iter().enumerate() {
+        let operation = operations
+            .get_mut(operation_index)
+            .expect("operation index from same vector must exist");
+
+        let FailClosedSpecOperation::RenameOrCopy {
+            from_path,
+            to_path,
+            semantic_pairing,
+            ..
+        } = operation
+        else {
+            continue;
+        };
+
+        let mut parse_errors = Vec::new();
+        let base_spec = parse_spec_blob(
+            base_ref,
+            from_path,
+            base_blobs[batch_index].as_deref(),
+            &mut parse_errors,
+        );
+        let head_spec = parse_spec_blob(
+            head_ref,
+            to_path,
+            head_blobs[batch_index].as_deref(),
+            &mut parse_errors,
+        );
+
+        *semantic_pairing = if !parse_errors.is_empty() {
+            RenameCopySemanticPairing::Inconclusive
+        } else if let (Some(base_spec), Some(head_spec)) = (base_spec, head_spec) {
+            if specs_semantically_equivalent_for_rename(&base_spec, &head_spec) {
+                RenameCopySemanticPairing::Equivalent
+            } else {
+                RenameCopySemanticPairing::Different
+            }
+        } else {
+            RenameCopySemanticPairing::Inconclusive
+        };
+    }
+
+    Ok(())
 }
 
 pub fn load_spec_snapshots_for_changed_paths(
@@ -553,6 +653,7 @@ pub fn parse_name_status_z(raw: &[u8]) -> Result<DiscoveredSpecFileChanges, Poli
                             status,
                             from_path,
                             to_path,
+                            semantic_pairing: RenameCopySemanticPairing::Unassessed,
                         });
                 }
             }

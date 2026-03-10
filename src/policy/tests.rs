@@ -6,7 +6,11 @@ use std::process::Command;
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::git::{FailClosedSpecOperation, discover_spec_file_changes, parse_name_status_z};
+use super::classify_fail_closed_operations;
+use super::git::{
+    FailClosedSpecOperation, RenameCopySemanticPairing, discover_spec_file_changes,
+    parse_name_status_z,
+};
 use super::types::{
     ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION,
     PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
@@ -210,11 +214,13 @@ fn parse_name_status_z_buckets_amt_and_fail_closed_operations() {
                 status: "R089".to_string(),
                 from_path: "modules/old policy.spec.yml".to_string(),
                 to_path: "modules/new policy name.spec.yml".to_string(),
+                semantic_pairing: RenameCopySemanticPairing::Unassessed,
             },
             FailClosedSpecOperation::RenameOrCopy {
                 status: "C100".to_string(),
                 from_path: "modules/original.spec.yml".to_string(),
                 to_path: "modules/copied.spec.yml".to_string(),
+                semantic_pairing: RenameCopySemanticPairing::Unassessed,
             },
         ]
     );
@@ -388,9 +394,50 @@ fn discover_spec_file_changes_classifies_diff_operations_from_git() {
                     status,
                     from_path,
                     to_path,
+                    ..
                 } if status.starts_with('R')
                     && from_path == "modules/rename-old.spec.yml"
                     && to_path == "modules/rename-new.spec.yml"
             ))
     );
+}
+
+#[test]
+fn classify_fail_closed_operations_downgrades_equivalent_rename_to_structural() {
+    let diffs = classify_fail_closed_operations(&[FailClosedSpecOperation::RenameOrCopy {
+        status: "R100".to_string(),
+        from_path: "modules/app.spec.yml".to_string(),
+        to_path: "modules/app-renamed.spec.yml".to_string(),
+        semantic_pairing: RenameCopySemanticPairing::Equivalent,
+    }]);
+
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(
+        diffs[0].changes[0].classification,
+        ChangeClassification::Structural
+    );
+    assert!(
+        diffs[0].changes[0]
+            .detail
+            .contains("semantically equivalent")
+    );
+}
+
+#[test]
+fn classify_fail_closed_operations_keeps_inconclusive_rename_fail_closed() {
+    let diffs = classify_fail_closed_operations(&[FailClosedSpecOperation::RenameOrCopy {
+        status: "R100".to_string(),
+        from_path: "modules/app.spec.yml".to_string(),
+        to_path: "modules/app-renamed.spec.yml".to_string(),
+        semantic_pairing: RenameCopySemanticPairing::Inconclusive,
+    }]);
+
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].changes.len(), 1);
+    assert_eq!(
+        diffs[0].changes[0].classification,
+        ChangeClassification::Widening
+    );
+    assert!(diffs[0].changes[0].detail.contains("widening-risk"));
 }

@@ -4,7 +4,9 @@ use std::path::Path;
 use globset::{GlobBuilder, GlobMatcher};
 use serde_json::{Value, json};
 
-use super::git::{FailClosedSpecOperation, SpecSnapshotPair, list_tracked_files_scoped};
+use super::git::{
+    FailClosedSpecOperation, RenameCopySemanticPairing, SpecSnapshotPair, list_tracked_files_scoped,
+};
 use super::types::{
     ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff,
     sort_field_changes_deterministic, sort_module_policy_diffs_deterministic,
@@ -38,6 +40,10 @@ pub fn classify_spec_snapshot_pairs_with_path_coverage(
             head_ref,
         }),
     )
+}
+
+pub fn specs_semantically_equivalent_for_rename(base: &SpecFile, head: &SpecFile) -> bool {
+    canonical_spec_for_rename_pairing(base) == canonical_spec_for_rename_pairing(head)
 }
 
 fn classify_spec_snapshot_pairs_inner(
@@ -85,7 +91,30 @@ pub fn classify_fail_closed_operations(ops: &[FailClosedSpecOperation]) -> Vec<M
                 status,
                 from_path,
                 to_path,
+                semantic_pairing,
             } => {
+                let (classification, detail) = match semantic_pairing {
+                    RenameCopySemanticPairing::Equivalent => (
+                        ChangeClassification::Structural,
+                        format!(
+                            "rename/copy of policy file {from_path} -> {to_path} ({status}) is semantically equivalent after normalization"
+                        ),
+                    ),
+                    RenameCopySemanticPairing::Different => (
+                        ChangeClassification::Widening,
+                        format!(
+                            "rename/copy of policy file {from_path} -> {to_path} ({status}) changed policy semantics and is treated as widening-risk"
+                        ),
+                    ),
+                    RenameCopySemanticPairing::Inconclusive
+                    | RenameCopySemanticPairing::Unassessed => (
+                        ChangeClassification::Widening,
+                        format!(
+                            "rename/copy of policy file {from_path} -> {to_path} ({status}) could not be semantically paired and is treated as widening-risk"
+                        ),
+                    ),
+                };
+
                 let module = module_hint_from_spec_path(to_path);
                 diffs.push(ModulePolicyDiff {
                     module: module.clone(),
@@ -95,12 +124,10 @@ pub fn classify_fail_closed_operations(ops: &[FailClosedSpecOperation]) -> Vec<M
                         spec_path: to_path.clone(),
                         scope: ChangeScope::SpecFile,
                         field: "spec_file".to_string(),
-                        classification: ChangeClassification::Widening,
+                        classification,
                         before: Some(json!(from_path)),
                         after: Some(json!(to_path)),
-                        detail: format!(
-                            "rename/copy of policy file {from_path} -> {to_path} ({status}) treated as widening-risk in MVP"
-                        ),
+                        detail,
                     }],
                 });
             }
@@ -948,6 +975,84 @@ fn canonicalize_json(value: &Value) -> Value {
         Value::Array(values) => Value::Array(values.iter().map(canonicalize_json).collect()),
         _ => value.clone(),
     }
+}
+
+fn canonical_spec_for_rename_pairing(spec: &SpecFile) -> Value {
+    let boundaries = spec.boundaries.clone().unwrap_or_default();
+
+    json!({
+        "version": spec.version.trim(),
+        "module": spec.module.trim(),
+        "package": trimmed_opt(&spec.package),
+        "import_id": trimmed_opt(&spec.import_id),
+        "import_ids": normalized_vec(&spec.import_ids),
+        "description": trimmed_opt(&spec.description),
+        "boundaries": {
+            "path": trimmed_opt(&boundaries.path),
+            "public_api": normalized_vec(&boundaries.public_api),
+            "allow_imports_from": normalized_opt_vec(&boundaries.allow_imports_from),
+            "never_imports": normalized_vec(&boundaries.never_imports),
+            "allow_type_imports_from": normalized_vec(&boundaries.allow_type_imports_from),
+            "visibility": boundaries.visibility.unwrap_or(Visibility::Public),
+            "allow_imported_by": normalized_vec(&boundaries.allow_imported_by),
+            "deny_imported_by": normalized_vec(&boundaries.deny_imported_by),
+            "friend_modules": normalized_vec(&boundaries.friend_modules),
+            "enforce_canonical_imports": boundaries.enforce_canonical_imports,
+            "allowed_dependencies": normalized_vec(&boundaries.allowed_dependencies),
+            "forbidden_dependencies": normalized_vec(&boundaries.forbidden_dependencies),
+            "enforce_in_tests": boundaries.enforce_in_tests,
+            "contracts": canonical_contracts_for_rename_pairing(&boundaries.contracts),
+        },
+        "constraints": canonical_constraints_for_rename_pairing(&spec.constraints),
+    })
+}
+
+fn canonical_constraints_for_rename_pairing(constraints: &[Constraint]) -> Vec<Value> {
+    let mut by_key: BTreeMap<String, Value> = BTreeMap::new();
+
+    for constraint in constraints {
+        by_key.insert(
+            constraint_key(constraint),
+            json!({
+                "rule": constraint.rule.trim(),
+                "params": canonicalize_json(&constraint.params),
+                "severity": constraint.severity,
+                "message": trimmed_opt(&constraint.message),
+            }),
+        );
+    }
+
+    by_key.into_values().collect()
+}
+
+fn canonical_contracts_for_rename_pairing(contracts: &[BoundaryContract]) -> Vec<Value> {
+    let mut by_id: BTreeMap<String, Value> = BTreeMap::new();
+
+    for contract in contracts {
+        let contract_id = contract.id.trim().to_string();
+        by_id.insert(
+            contract_id,
+            json!({
+                "id": contract.id.trim(),
+                "contract": contract.contract.trim(),
+                "files": normalized_vec(&contract.r#match.files),
+                "pattern": trimmed_opt(&contract.r#match.pattern),
+                "direction": contract.direction,
+                "envelope": contract.envelope,
+                "imports_contract": normalized_vec(&contract.imports_contract),
+            }),
+        );
+    }
+
+    by_id.into_values().collect()
+}
+
+fn normalized_opt_vec(values: &Option<Vec<String>>) -> Option<Vec<String>> {
+    values.as_ref().map(|values| normalized_vec(values))
+}
+
+fn normalized_vec(values: &[String]) -> Vec<String> {
+    normalized_set(values).into_iter().collect()
 }
 
 fn classify_contracts(
