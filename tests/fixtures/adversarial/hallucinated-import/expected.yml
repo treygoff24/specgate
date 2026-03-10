@@ -1,4 +1,5 @@
-assertion: clean_pass
-gap_reason: "Unresolved imports are currently silent — no warning or error"
-future_priority: "P6"
-notes: "Non-resolving relative import is ignored by current diagnostics pipeline."
+assertion: catch
+violations:
+  - rule: hygiene.unresolved_import
+    from_module: app
+notes: "Unresolved imports are now detected by default (warn policy). This gap has been filled."

@@ -1,4 +1,5 @@
-assertion: clean_pass
-gap_reason: "No deep-import rules yet"
-future_priority: "P9"
-notes: "Deep import into third-party internal package path is currently not modeled."
+assertion: catch
+violations:
+  - rule: hygiene.unresolved_import
+    from_module: app
+notes: "Unresolved imports are now detected. The specifier 'express/lib/router/index' cannot be resolved without node_modules. Deep third-party import hygiene (separate rule) remains a future gap."
