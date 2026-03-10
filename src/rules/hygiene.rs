@@ -11,6 +11,7 @@ use crate::rules::{
 pub const HYGIENE_DEEP_THIRD_PARTY_RULE_ID: &str = "hygiene.deep_third_party_import";
 pub const HYGIENE_TEST_IN_PRODUCTION_RULE_ID: &str = "hygiene.test_in_production";
 pub const HYGIENE_CONFIG_ERROR_RULE_ID: &str = "hygiene.config_error";
+pub const HYGIENE_UNRESOLVED_IMPORT_RULE_ID: &str = "hygiene.unresolved_import";
 
 /// Parse the package name from a specifier, returning (package_name, Option<subpath>).
 ///

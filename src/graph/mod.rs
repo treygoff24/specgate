@@ -7,6 +7,7 @@ use miette::Diagnostic;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::parser::{self, FileAnalysis};
@@ -33,6 +34,27 @@ pub enum EdgeKind {
     Require,
     DynamicImport,
     JestMock,
+}
+
+/// Classification of a dependency edge by resolution status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeType {
+    Resolved,
+    UnresolvedLiteral,
+    UnresolvedDynamic,
+    External,
+}
+
+impl EdgeType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::UnresolvedLiteral => "unresolved_literal",
+            Self::UnresolvedDynamic => "unresolved_dynamic",
+            Self::External => "external",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +148,18 @@ pub struct UnresolvedImportRecord {
     pub is_external: bool,
     /// Whether the import was suppressed by a @specgate-ignore comment.
     pub ignored_by_comment: bool,
+}
+
+impl UnresolvedImportRecord {
+    pub fn edge_type(&self) -> EdgeType {
+        if self.is_external {
+            EdgeType::External
+        } else if self.kind == EdgeKind::DynamicImport {
+            EdgeType::UnresolvedDynamic
+        } else {
+            EdgeType::UnresolvedLiteral
+        }
+    }
 }
 
 pub struct DependencyGraph {

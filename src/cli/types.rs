@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::resolver::ModuleMapOverlap;
 use crate::spec::{SpecConfig, SpecFile, ValidationReport};
-use crate::verdict::{EdgeClassification, PolicyViolation, UnresolvedEdge};
+use crate::verdict::{EdgeClassification, PolicyViolation, UnresolvedEdge, VerdictEdge};
 
 pub const EXIT_CODE_PASS: i32 = 0;
 pub const EXIT_CODE_POLICY_VIOLATIONS: i32 = 1;
@@ -63,6 +63,7 @@ pub(crate) struct AnalysisArtifacts {
     pub(crate) suppressed_violations: usize,
     pub(crate) edge_pairs: BTreeSet<(String, String)>,
     pub(crate) edge_classification: EdgeClassification,
+    pub(crate) verdict_edges: Vec<VerdictEdge>,
     pub(crate) unresolved_edges: Vec<UnresolvedEdge>,
 }
 

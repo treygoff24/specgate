@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::deterministic::normalize_repo_relative;
+use crate::graph::EdgeType;
 use crate::spec::Severity;
 use crate::spec::config::StaleBaselinePolicy;
 
@@ -41,6 +42,8 @@ pub struct PolicyViolation {
     pub remediation_hint: Option<String>,
     /// Contract ID for contract-related violations.
     pub contract_id: Option<String>,
+    /// Edge classification for unresolved import findings.
+    pub edge_type: Option<EdgeType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +122,21 @@ pub struct VerdictViolation {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Contract ID for contract-related violations.
     pub contract_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_type: Option<EdgeType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerdictEdge {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_module: Option<String>,
+    pub edge_type: EdgeType,
+    pub import_path: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -217,6 +235,8 @@ pub struct Verdict {
     pub workspace_packages: Option<Vec<WorkspacePackageInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edge_classification: Option<EdgeClassification>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edges: Vec<VerdictEdge>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_edges: Vec<UnresolvedEdge>,
 }
@@ -344,6 +364,7 @@ pub fn build_verdict_with_options(
         telemetry: options.telemetry,
         workspace_packages: None,
         edge_classification: None,
+        edges: Vec::new(),
         unresolved_edges: Vec::new(),
     }
 }
@@ -387,6 +408,7 @@ fn render_violation(project_root: &Path, entry: &FingerprintedViolation) -> Verd
         actual: entry.violation.actual.clone(),
         remediation_hint: entry.violation.remediation_hint.clone(),
         contract_id: entry.violation.contract_id.clone(),
+        edge_type: entry.violation.edge_type,
     }
 }
 
@@ -595,6 +617,7 @@ mod tests {
             actual: None,
             remediation_hint: None,
             contract_id: None,
+            edge_type: None,
         }
     }
 

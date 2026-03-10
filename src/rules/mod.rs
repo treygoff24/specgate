@@ -33,7 +33,8 @@ pub use dependencies::{
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,
 };
 pub use hygiene::{
-    HYGIENE_DEEP_THIRD_PARTY_RULE_ID, HYGIENE_TEST_IN_PRODUCTION_RULE_ID, evaluate_hygiene_rules,
+    HYGIENE_DEEP_THIRD_PARTY_RULE_ID, HYGIENE_TEST_IN_PRODUCTION_RULE_ID,
+    HYGIENE_UNRESOLVED_IMPORT_RULE_ID, evaluate_hygiene_rules,
 };
 pub use layers::{
     ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,

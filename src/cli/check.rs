@@ -503,6 +503,7 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
 
     // Wire edge classification into verdict
     verdict.edge_classification = Some(artifacts.edge_classification);
+    verdict.edges = artifacts.verdict_edges;
     verdict.unresolved_edges = artifacts.unresolved_edges;
 
     let exit_code = match verdict.status {

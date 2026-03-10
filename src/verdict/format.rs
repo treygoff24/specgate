@@ -423,6 +423,13 @@ struct SarifResult {
     message: SarifMessage,
     locations: Vec<SarifLocation>,
     fingerprints: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    properties: Option<SarifProperties>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SarifProperties {
+    edge_type: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -545,6 +552,9 @@ pub fn format_verdict_sarif(verdict: &Verdict) -> String {
                     },
                 }],
                 fingerprints,
+                properties: violation.edge_type.map(|edge_type| SarifProperties {
+                    edge_type: edge_type.as_str(),
+                }),
             }
         })
         .collect();
@@ -593,6 +603,7 @@ mod tests {
             actual: None,
             remediation_hint: None,
             contract_id: None,
+            edge_type: None,
         }
     }
 
@@ -632,6 +643,7 @@ mod tests {
             actual: Some("actual_value".to_string()),
             remediation_hint: Some("Fix this issue".to_string()),
             contract_id: None,
+            edge_type: None,
         }
     }
 
@@ -668,6 +680,7 @@ mod tests {
             telemetry: None,
             workspace_packages: None,
             edge_classification: None,
+            edges: Vec::new(),
             unresolved_edges: Vec::new(),
         }
     }
@@ -719,6 +732,7 @@ mod tests {
             telemetry: None,
             workspace_packages: None,
             edge_classification: None,
+            edges: Vec::new(),
             unresolved_edges: Vec::new(),
         }
     }

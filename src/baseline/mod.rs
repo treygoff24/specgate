@@ -8,12 +8,14 @@ use thiserror::Error;
 
 use crate::build_info;
 use crate::deterministic::{normalize_repo_relative, stable_fingerprint};
+use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
 use crate::verdict::{
     FingerprintedViolation, PolicyViolation, ViolationDisposition, sort_policy_violations,
 };
 
 pub const BASELINE_FILE_VERSION: &str = "1";
 pub const DEFAULT_BASELINE_PATH: &str = ".specgate-baseline.json";
+const LEGACY_EDGE_UNRESOLVED_RULE_ID: &str = "edge.unresolved";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaselineGeneratedFrom {
@@ -184,6 +186,10 @@ pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
             path: path.to_path_buf(),
             source,
         })?;
+
+    for entry in &mut parsed.entries {
+        entry.rule = normalize_baseline_rule_id(&entry.rule).to_string();
+    }
 
     sort_baseline_entries(&mut parsed.entries);
     dedup_entries_by_identity(&mut parsed.entries);
@@ -639,7 +645,7 @@ fn build_legacy_fingerprint_counts(baseline: &BaselineFile) -> BTreeMap<String, 
 
 fn stable_content_fingerprint_for_entry(entry: &BaselineEntry) -> String {
     stable_content_fingerprint(
-        &entry.rule,
+        normalize_baseline_rule_id(&entry.rule),
         entry.severity,
         &entry.message,
         &entry.from_file,
@@ -647,6 +653,14 @@ fn stable_content_fingerprint_for_entry(entry: &BaselineEntry) -> String {
         entry.from_module.as_deref(),
         entry.to_module.as_deref(),
     )
+}
+
+fn normalize_baseline_rule_id(rule: &str) -> &str {
+    if rule == LEGACY_EDGE_UNRESOLVED_RULE_ID {
+        HYGIENE_UNRESOLVED_IMPORT_RULE_ID
+    } else {
+        rule
+    }
 }
 
 fn stable_content_fingerprint(
@@ -813,6 +827,7 @@ mod tests {
             actual: None,
             remediation_hint: None,
             contract_id: None,
+            edge_type: None,
         }
     }
 

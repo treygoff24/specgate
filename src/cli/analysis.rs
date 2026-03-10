@@ -1,4 +1,6 @@
-use crate::graph::{DependencyGraph, EdgeKind};
+use crate::graph::{DependencyGraph, EdgeKind, EdgeType};
+use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
+use crate::verdict::VerdictEdge;
 
 use super::*;
 
@@ -46,12 +48,19 @@ pub(crate) fn build_edge_classification(
             continue;
         }
 
-        let kind_str = if record.kind == EdgeKind::DynamicImport {
-            unresolved_dynamic += 1;
-            "unresolved_dynamic"
-        } else {
-            unresolved_literal += 1;
-            "unresolved_literal"
+        let edge_type = record.edge_type();
+        let kind_str = match edge_type {
+            EdgeType::UnresolvedDynamic => {
+                unresolved_dynamic += 1;
+                edge_type.as_str()
+            }
+            EdgeType::UnresolvedLiteral => {
+                unresolved_literal += 1;
+                edge_type.as_str()
+            }
+            EdgeType::Resolved | EdgeType::External => {
+                unreachable!("unresolved import records should not resolve to {edge_type:?}")
+            }
         };
 
         if matches!(policy, UnresolvedEdgePolicy::Ignore) {
@@ -82,6 +91,62 @@ pub(crate) fn build_edge_classification(
     };
 
     (classification, unresolved_edges)
+}
+
+pub(crate) fn build_verdict_edges(
+    project_root: &std::path::Path,
+    graph: &DependencyGraph,
+) -> Vec<VerdictEdge> {
+    let mut verdict_edges = graph
+        .dependency_edges()
+        .into_iter()
+        .filter(|edge| edge.kind != EdgeKind::TypeOnlyImport)
+        .map(|edge| VerdictEdge {
+            from_module: graph.module_of_file(&edge.from).map(str::to_string),
+            to_module: graph.module_of_file(&edge.to).map(str::to_string),
+            edge_type: EdgeType::Resolved,
+            import_path: edge.specifier,
+            file: normalize_repo_relative(project_root, &edge.from),
+            line: edge.line,
+        })
+        .collect::<Vec<_>>();
+
+    verdict_edges.extend(
+        graph
+            .unresolved_imports()
+            .iter()
+            .filter(|record| !record.ignored_by_comment)
+            .map(|record| VerdictEdge {
+                from_module: graph.module_of_file(&record.from).map(str::to_string),
+                to_module: None,
+                edge_type: record.edge_type(),
+                import_path: record.specifier.clone(),
+                file: normalize_repo_relative(project_root, &record.from),
+                line: record.line,
+            }),
+    );
+
+    verdict_edges.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.import_path.cmp(&b.import_path))
+            .then_with(|| a.edge_type.cmp(&b.edge_type))
+            .then_with(|| a.from_module.cmp(&b.from_module))
+            .then_with(|| a.to_module.cmp(&b.to_module))
+    });
+
+    verdict_edges
+}
+
+fn unresolved_edge_severity(
+    policy: crate::spec::config::UnresolvedEdgePolicy,
+) -> Option<crate::spec::Severity> {
+    match policy {
+        crate::spec::config::UnresolvedEdgePolicy::Warn => Some(crate::spec::Severity::Warning),
+        crate::spec::config::UnresolvedEdgePolicy::Error => Some(crate::spec::Severity::Error),
+        crate::spec::config::UnresolvedEdgePolicy::Ignore => None,
+    }
 }
 
 pub(crate) fn analyze_project(
@@ -158,6 +223,7 @@ pub(crate) fn analyze_project(
                 actual: None,
                 remediation_hint: None,
                 contract_id: None,
+                edge_type: None,
             }
         })
         .collect::<Vec<_>>();
@@ -184,6 +250,7 @@ pub(crate) fn analyze_project(
                 actual: None,
                 remediation_hint: None,
                 contract_id: None,
+                edge_type: None,
             }
         })
         .collect::<Vec<_>>();
@@ -212,6 +279,7 @@ pub(crate) fn analyze_project(
                 actual: None,
                 remediation_hint: None,
                 contract_id: None,
+                edge_type: None,
             }
         })
         .collect::<Vec<_>>();
@@ -235,6 +303,7 @@ pub(crate) fn analyze_project(
             actual: None,
             remediation_hint: Some(violation.fix_hint),
             contract_id: None,
+            edge_type: None,
         })
         .collect::<Vec<_>>();
     policy_violations.extend(layer_violations);
@@ -256,6 +325,7 @@ pub(crate) fn analyze_project(
             actual: None,
             remediation_hint: Some(contract_violation.remediation_hint),
             contract_id: Some(contract_violation.contract_id),
+            edge_type: None,
         })
         .collect::<Vec<_>>();
     policy_violations.extend(contract_violations);
@@ -276,6 +346,7 @@ pub(crate) fn analyze_project(
             actual: None,
             remediation_hint: None,
             contract_id: None,
+            edge_type: None,
         })
         .collect::<Vec<_>>();
     policy_violations.extend(hygiene_violations);
@@ -293,18 +364,19 @@ pub(crate) fn analyze_project(
         &graph,
         loaded.config.unresolved_edge_policy,
     );
+    let verdict_edges = build_verdict_edges(&loaded.project_root, &graph);
 
-    // If policy is Error, generate PolicyViolation entries for all unresolved imports
-    // (both unresolved_literal and unresolved_dynamic are escalated).
-    if loaded.config.unresolved_edge_policy == crate::spec::config::UnresolvedEdgePolicy::Error {
+    if let Some(severity) = unresolved_edge_severity(loaded.config.unresolved_edge_policy) {
         for edge in &unresolved_edges {
             policy_violations.push(PolicyViolation {
-                rule: "edge.unresolved".to_string(),
-                severity: Severity::Error,
+                rule: HYGIENE_UNRESOLVED_IMPORT_RULE_ID.to_string(),
+                severity,
                 message: format!("unresolved import: '{}'", edge.specifier),
-                from_file: std::path::PathBuf::from(&edge.from),
+                from_file: loaded.project_root.join(&edge.from),
                 to_file: None,
-                from_module: None,
+                from_module: graph
+                    .module_of_file(&loaded.project_root.join(&edge.from))
+                    .map(str::to_string),
                 to_module: None,
                 line: edge.line,
                 column: None,
@@ -315,6 +387,11 @@ pub(crate) fn analyze_project(
                         .to_string(),
                 ),
                 contract_id: None,
+                edge_type: match edge.kind.as_str() {
+                    "unresolved_dynamic" => Some(EdgeType::UnresolvedDynamic),
+                    "unresolved_literal" => Some(EdgeType::UnresolvedLiteral),
+                    _ => None,
+                },
             });
         }
         verdict::sort_policy_violations(&mut policy_violations);
@@ -330,6 +407,7 @@ pub(crate) fn analyze_project(
         suppressed_violations,
         edge_pairs,
         edge_classification,
+        verdict_edges,
         unresolved_edges,
     })
 }
