@@ -69,8 +69,8 @@ jobs:
           node bin/specgate.js init \
             --project-root "../../tests/fixtures/openclaw-scale/seed"
 
-          # Run check — should exit 0 (pass) with deterministic JSON output
+          # Run check — should exit 0 (pass) with deterministic output
           node bin/specgate.js check \
             --project-root "../../tests/fixtures/openclaw-scale/seed" \
             --no-baseline \
-            --output-mode json
+            --output-mode deterministic

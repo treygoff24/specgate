@@ -58,7 +58,7 @@ specgate baseline audit --project-root . --format json
 | [**Operator Guide**](docs/reference/operator-guide.md) | **Start here** — Complete onboarding path |
 | [First 15 Minutes](docs/reference/getting-started.md) | Quick hands-on tutorial |
 | [Spec Language Reference](docs/reference/spec-language.md) | YAML spec file format |
-| [Policy diff reference](docs/reference/policy-diff.md) | Compare `.spec.yml` policy across git refs and detect widenings |
+| [Policy diff reference](docs/reference/policy-diff.md) | Compare policy/config snapshots across git refs and detect widenings |
 | [MVP Merge Gate](docs/reference/mvp-merge-gate.md) | Single merge-ready gate definition |
 | [TS/JS v1 Support Matrix](docs/reference/support-matrix-v1.md) | Tier 1/2/3 commitments, downgrade rules, stable/beta semantics |
 
@@ -126,7 +126,7 @@ Examples below use `origin/main` as shorthand for the consumer repo's default
 branch ref. Substitute your actual default branch ref when it differs (for
 example `origin/master`).
 
-Use `specgate policy-diff --base origin/main` to compare `.spec.yml` policy between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs and `--format json` or `--format ndjson` for machine readable output. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
+Use `specgate policy-diff --base origin/main` to compare module specs plus `specgate.config.yml` between refs and classify the result as widening, narrowing, or structural. Add `--head <ref>` to compare explicit refs, `--format json` or `--format ndjson` for machine-readable output, and `--cross-file-compensation` when you want opt-in offset analysis for directly connected modules. Exit `0` means no widenings were detected, exit `1` means one or more widenings were detected, and exit `2` means the command could not complete because of a git or parse error.
 
 You can enforce the same governance directly in `check` with `--deny-widenings` when `--since` is provided:
 
@@ -138,7 +138,7 @@ With this flag, widening changes force exit `1`, governance/runtime failures for
 
 Use exactly one governance gate in CI (`policy-diff` or `check --deny-widenings`) so failures are not duplicated.
 
-For exit code `2`, `policy-diff` keeps structured entries in `errors` but clears authoritative classification payload fields (`diffs` and non-zero summary counters) so consumers do not treat partial output as a gate signal.
+For exit code `2`, `policy-diff` keeps structured entries in `errors` but clears authoritative classification payload fields (`diffs`, non-zero summary counters, and top-level `net_classification`) so consumers do not treat partial output as a gate signal.
 
 In the MVP, deleting a `.spec.yml` file is always a widening. Renames/copies use semantic pairing: equivalent snapshots are `structural`, while inconclusive pairings stay fail-closed as widening risk. In CI, fetch full history before diffing against remote refs.
 
@@ -151,13 +151,13 @@ In the MVP, deleting a `.spec.yml` file is always a widening. Renames/copies use
   run: specgate policy-diff --base origin/main
 ```
 
-See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, and current deferred items.
+See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, config-governance behavior, and compensation limits.
 
 ### Upgrade guidance
 
 - Governance: pick one gate path for PRs - `specgate policy-diff --base <ref>` or `specgate check --since <ref> --deny-widenings`.
 - SARIF: add `specgate check --format sarif > specgate.sarif` when uploading results to code scanning platforms.
-- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json` and enable `strict_ownership: true` when you want findings to fail CI.
+- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json`; the canonical workflow now uploads ownership output, and `strict_ownership: true` makes findings fail the gate.
 - Fetch depth: when diffing against remote refs, use full history (`fetch-depth: 0`).
 
 ## Project Status

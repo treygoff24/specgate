@@ -1,11 +1,5 @@
 {
   "status": "pass",
-  "expected_count": 1,
-  "violations": [
-    {
-      "rule": "hygiene.unresolved_import",
-      "from_module": "consumer",
-      "to_module": null
-    }
-  ]
+  "expected_count": 0,
+  "violations": []
 }

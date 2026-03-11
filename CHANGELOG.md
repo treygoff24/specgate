@@ -4,14 +4,15 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+- Documentation/workflow parity fixes for governance, ownership diagnostics, install fallback, release checksum guidance, and baseline metadata commands.
+- Policy-diff/operator docs now reflect config-governance reporting, opt-in compensation, and narrowing `net_classification`.
 
 ## [0.3.0] - 2026-03-10
 
 ### Boundary Contracts + Governance + Diagnostics
 
 - **Envelope AST static check (Phase 5):** When a contract declares `envelope: required`, specgate performs a targeted AST analysis on matched source files to verify they import the envelope package and call the validation function with the correct contract ID. Violations are warnings. Configurable via `envelope` section in `specgate.config.yml`.
-- `specgate policy-diff` for comparing `.spec.yml` policy between git refs with `human`, `json`, and `ndjson` output, exit codes `0/1/2`, shallow clone diagnostics with `fetch-depth: 0` guidance, fail-closed widening treatment for policy deletions, and semantic rename/copy pairing with fail-closed fallback
+- `specgate policy-diff` for comparing spec/config governance between git refs with `human`, `json`, and `ndjson` output, exit codes `0/1/2`, shallow clone diagnostics with `fetch-depth: 0` guidance, fail-closed widening treatment for policy deletions, semantic rename/copy pairing, config-governance reporting, and opt-in cross-file compensation
 - `specgate check --deny-widenings` for in-band governance enforcement when used with `--since <base-ref>` (widenings exit `1`; governance/runtime failures exit `2`)
 - `match.pattern` function scoping: envelope checks can be scoped to a specific exported function
 - `EnvelopeConfig` in `specgate.config.yml`: `enabled`, `import_patterns`, `function_pattern`
@@ -21,7 +22,7 @@ No unreleased changes yet.
 - `specgate doctor ownership` for ownership diagnostics with human/json output, strict CI gating, and reporting for unclaimed files, overlaps, orphaned specs, duplicate module ids, and invalid globs
 - `ContractRuleViolation` now carries its own `severity` instead of being hardcoded to Error
 - `check_match_patterns()` returns resolved file paths for reuse by envelope checker
-- `policy-diff` exit-2 output is now explicitly non-authoritative: on runtime or parse failures, classification output is suppressed (empty `diffs`, zeroed summary counters), while structured `errors` remain present; `ndjson` adds `type: "error"` events before summary.
+- `policy-diff` exit-2 output is now explicitly non-authoritative: on runtime or parse failures, classification output is suppressed (empty `diffs`, zeroed summary counters, `net_classification: structural`), while structured `errors` remain present; `ndjson` adds `type: "error"` events before summary.
 - Operator docs align upgrade guidance around governance gate selection (choose either `policy-diff` or `check --deny-widenings`), plus SARIF and ownership diagnostics in release/CI workflows.
 
 ### Full Monorepo Support (P3.1)
@@ -40,8 +41,8 @@ No unreleased changes yet.
 - **Diagnostic error messages** — binary-not-found errors now show platform, arch, and searched candidate paths.
 - **Signal handling hardening** — extracted `signalExitCode()` helper, platform-safe signal mapping, removed dead code paths.
 - **Support matrix validation** — contract tests verifying release target parity between Rust cross-compile and npm wrapper platform mapping.
-- **CI smoke test** — new workflow runs npm wrapper tests on Node 18/20/22 across Ubuntu and macOS for every PR.
-- **End-to-end smoke test** — merge gate builds the Rust binary and runs `specgate check` on the openclaw-scale fixture via the npm wrapper, verifying the full binary-forwarding path in a fresh environment.
+- **CI smoke test** — new workflow runs npm wrapper tests on Node 18/20/22 across Ubuntu and macOS for PRs and pushes that touch `npm/specgate/**`.
+- **End-to-end smoke test** — merge gate builds the Rust binary and runs `specgate check --output-mode deterministic` on the openclaw-scale fixture via the npm wrapper, verifying the full binary-forwarding path in a fresh environment.
 
 ### OpenClaw-Scale Regression Gate (P3.3)
 

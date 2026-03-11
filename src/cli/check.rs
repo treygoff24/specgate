@@ -244,6 +244,15 @@ fn collect_widening_details(report: &PolicyDiffReport) -> Vec<String> {
         }
     }
 
+    for change in &report.config_changes {
+        if change.classification == ChangeClassification::Widening {
+            details.push(format!(
+                "config field={} before={} after={}",
+                change.field_path, change.before, change.after
+            ));
+        }
+    }
+
     details
 }
 

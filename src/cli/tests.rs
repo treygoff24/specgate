@@ -784,6 +784,65 @@ fn check_rejects_policy_widenings_when_flag_is_enabled() {
 }
 
 #[test]
+fn check_rejects_config_widenings_when_flag_is_enabled() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.3\"\nmodule: app\nboundaries:\n  path: src/app/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/app/main.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nunresolved_edge_policy: ignore\n",
+    );
+    commit_all(temp.path(), "head config widening");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+        "--since",
+        "HEAD~1",
+        "--deny-widenings",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "fail");
+    assert_eq!(output["policy_change_detected"], true);
+    assert!(
+        output["rule_deltas"]
+            .as_array()
+            .expect("rule deltas array")
+            .iter()
+            .any(|delta| delta
+                .as_str()
+                .expect("rule delta string")
+                .contains("config field=unresolved_edge_policy")),
+        "{output:#}"
+    );
+    assert!(
+        result.stderr.contains("config field=unresolved_edge_policy"),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
 fn check_deny_widenings_runtime_errors_are_exit_code_two() {
     let temp = TempDir::new().expect("tempdir");
     init_git_repo(temp.path());

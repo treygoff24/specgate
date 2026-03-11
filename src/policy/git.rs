@@ -136,7 +136,9 @@ pub fn discover_config_changes(
     let mut changes = classify_config_changes(&base_snapshot.config, &head_snapshot.config);
     if !base_snapshot.exists && head_snapshot.exists {
         for change in &mut changes {
-            change.classification = ChangeClassification::Structural;
+            if change.classification == ChangeClassification::Narrowing {
+                change.classification = ChangeClassification::Structural;
+            }
         }
     }
 

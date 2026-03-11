@@ -11,6 +11,7 @@ use super::*;
 pub(crate) fn build_edge_classification(
     project_root: &std::path::Path,
     graph: &DependencyGraph,
+    canonical_import_ids: &BTreeSet<String>,
     policy: crate::spec::config::UnresolvedEdgePolicy,
 ) -> (EdgeClassification, Vec<UnresolvedEdge>) {
     use crate::spec::config::UnresolvedEdgePolicy;
@@ -36,20 +37,18 @@ pub(crate) fn build_edge_classification(
     let mut unresolved_edges: Vec<UnresolvedEdge> = Vec::new();
 
     for record in graph.unresolved_imports() {
-        if record.is_external {
-            external += 1;
-            // External imports are not reported as unresolved edges
-            continue;
-        }
-
         // Imports suppressed by @specgate-ignore comments are excluded from
         // all counts and never reported as unresolved edges.
         if record.ignored_by_comment {
             continue;
         }
 
-        let edge_type = record.edge_type();
+        let edge_type = unresolved_record_edge_type(record, canonical_import_ids);
         let kind_str = match edge_type {
+            EdgeType::External => {
+                external += 1;
+                continue;
+            }
             EdgeType::UnresolvedDynamic => {
                 unresolved_dynamic += 1;
                 edge_type.as_str()
@@ -58,7 +57,7 @@ pub(crate) fn build_edge_classification(
                 unresolved_literal += 1;
                 edge_type.as_str()
             }
-            EdgeType::Resolved | EdgeType::External => {
+            EdgeType::Resolved => {
                 unreachable!("unresolved import records should not resolve to {edge_type:?}")
             }
         };
@@ -96,6 +95,7 @@ pub(crate) fn build_edge_classification(
 pub(crate) fn build_verdict_edges(
     project_root: &std::path::Path,
     graph: &DependencyGraph,
+    canonical_import_ids: &BTreeSet<String>,
 ) -> Vec<VerdictEdge> {
     let mut verdict_edges = graph
         .dependency_edges()
@@ -119,7 +119,7 @@ pub(crate) fn build_verdict_edges(
             .map(|record| VerdictEdge {
                 from_module: graph.module_of_file(&record.from).map(str::to_string),
                 to_module: None,
-                edge_type: record.edge_type(),
+                edge_type: unresolved_record_edge_type(record, canonical_import_ids),
                 import_path: record.specifier.clone(),
                 file: normalize_repo_relative(project_root, &record.from),
                 line: record.line,
@@ -147,6 +147,26 @@ fn unresolved_edge_severity(
         crate::spec::config::UnresolvedEdgePolicy::Error => Some(crate::spec::Severity::Error),
         crate::spec::config::UnresolvedEdgePolicy::Ignore => None,
     }
+}
+
+fn unresolved_record_edge_type(
+    record: &crate::graph::UnresolvedImportRecord,
+    canonical_import_ids: &BTreeSet<String>,
+) -> EdgeType {
+    if record.is_external
+        || canonical_import_ids.contains(&record.specifier)
+        || is_bare_specifier(&record.specifier)
+    {
+        EdgeType::External
+    } else if record.kind == EdgeKind::DynamicImport {
+        EdgeType::UnresolvedDynamic
+    } else {
+        EdgeType::UnresolvedLiteral
+    }
+}
+
+fn is_bare_specifier(specifier: &str) -> bool {
+    !(specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/'))
 }
 
 pub(crate) fn analyze_project(
@@ -361,12 +381,19 @@ pub(crate) fn analyze_project(
 
     verdict::sort_policy_violations(&mut policy_violations);
 
+    let canonical_import_ids = loaded
+        .specs
+        .iter()
+        .flat_map(|spec| spec.canonical_import_ids())
+        .collect::<BTreeSet<_>>();
+
     let (edge_classification, unresolved_edges) = build_edge_classification(
         &loaded.project_root,
         &graph,
+        &canonical_import_ids,
         loaded.config.unresolved_edge_policy,
     );
-    let verdict_edges = build_verdict_edges(&loaded.project_root, &graph);
+    let verdict_edges = build_verdict_edges(&loaded.project_root, &graph, &canonical_import_ids);
 
     if let Some(severity) = unresolved_edge_severity(loaded.config.unresolved_edge_policy) {
         for edge in &unresolved_edges {
@@ -428,6 +455,8 @@ mod tests {
         use std::fs;
         use tempfile::TempDir;
 
+        use std::collections::BTreeSet;
+
         use crate::graph::DependencyGraph;
         use crate::resolver::ModuleResolver;
         use crate::spec::{Boundaries, SpecConfig, SpecFile};
@@ -462,7 +491,12 @@ mod tests {
         let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
 
         let (classification, edges) =
-            build_edge_classification(temp.path(), &graph, UnresolvedEdgePolicy::Warn);
+            build_edge_classification(
+                temp.path(),
+                &graph,
+                &BTreeSet::new(),
+                UnresolvedEdgePolicy::Warn,
+            );
 
         // Only the non-ignored import should be counted
         assert_eq!(
@@ -487,6 +521,8 @@ mod tests {
         // should also appear in unresolved_edges (not only literal imports).
         use std::fs;
         use tempfile::TempDir;
+
+        use std::collections::BTreeSet;
 
         use crate::graph::DependencyGraph;
         use crate::resolver::ModuleResolver;
@@ -522,7 +558,12 @@ mod tests {
         let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
 
         let (classification, edges) =
-            build_edge_classification(temp.path(), &graph, UnresolvedEdgePolicy::Error);
+            build_edge_classification(
+                temp.path(),
+                &graph,
+                &BTreeSet::new(),
+                UnresolvedEdgePolicy::Error,
+            );
 
         assert_eq!(
             classification.unresolved_literal, 1,
@@ -548,5 +589,56 @@ mod tests {
             kinds.contains(&"unresolved_dynamic"),
             "dynamic should be in edges"
         );
+    }
+
+    #[test]
+    fn bare_and_canonical_unresolved_imports_count_as_external() {
+        use std::collections::BTreeSet;
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::graph::DependencyGraph;
+        use crate::resolver::ModuleResolver;
+        use crate::spec::{Boundaries, SpecConfig, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+        fs::write(
+            temp.path().join("src/main.ts"),
+            "import expressRouter from 'express/lib/router/index';\nimport { runAdapter } from '@app/registry';\nconsole.log(expressRouter, runAdapter);\n",
+        )
+        .expect("write main");
+
+        let spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "app".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("src/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: Vec::new(),
+            spec_path: None,
+        };
+
+        let mut resolver = ModuleResolver::new(temp.path(), &[spec]).expect("resolver");
+        let config = SpecConfig::default();
+        let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
+
+        let canonical_import_ids = BTreeSet::from(["@app/registry".to_string()]);
+        let (classification, edges) = build_edge_classification(
+            temp.path(),
+            &graph,
+            &canonical_import_ids,
+            UnresolvedEdgePolicy::Warn,
+        );
+
+        assert_eq!(classification.external, 2, "{classification:?}");
+        assert_eq!(classification.unresolved_literal, 0, "{classification:?}");
+        assert_eq!(classification.unresolved_dynamic, 0, "{classification:?}");
+        assert!(edges.is_empty(), "external-like unresolved imports should not emit hygiene edges");
     }
 }

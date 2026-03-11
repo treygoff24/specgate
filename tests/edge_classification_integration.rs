@@ -154,6 +154,13 @@ fn unresolved_edge_policy_matrix_emits_hygiene_findings() {
                     .all(|violation| violation["severity"] == expected_severity)
             );
         }
+
+        assert!(
+            unresolved
+                .iter()
+                .all(|violation| violation["actual"] != "node:fs"),
+            "external imports should not emit hygiene.unresolved_import findings"
+        );
     }
 }
 
@@ -292,4 +299,49 @@ boundaries:
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0]["rule"], "hygiene.unresolved_import");
     assert_eq!(violations[0]["disposition"], "baseline");
+}
+
+#[test]
+fn ignored_unresolved_imports_stay_out_of_verdict_counts_and_findings() {
+    let temp = TempDir::new().expect("tempdir");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_version: \"2.3\"\nunresolved_edge_policy: error\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app/app.spec.yml",
+        r#"version: "2.3"
+module: app
+boundaries:
+  path: src/app/**
+"#,
+    );
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "// @specgate-ignore: tracked elsewhere\nimport ignored from './ignored-missing';\nimport reported from './reported-missing';\n\nexport const values = [ignored, reported];\n",
+    );
+
+    let (result, verdict) = run_check_json(temp.path(), &["--no-baseline"]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+    assert_eq!(verdict["edge_classification"]["unresolved_literal"], 1);
+    assert_eq!(verdict["edge_classification"]["unresolved_dynamic"], 0);
+
+    let violations = verdict["violations"].as_array().expect("violations array");
+    let unresolved = violations
+        .iter()
+        .filter(|violation| violation["rule"] == "hygiene.unresolved_import")
+        .collect::<Vec<_>>();
+    assert_eq!(unresolved.len(), 1, "{verdict:#}");
+    assert_eq!(unresolved[0]["actual"], "./reported-missing");
+
+    let edges = verdict["edges"].as_array().expect("edges array");
+    assert!(
+        edges.iter()
+            .all(|edge| edge["import_path"] != "./ignored-missing"),
+        "ignored unresolved import should stay out of edge detail"
+    );
 }

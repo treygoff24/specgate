@@ -5,6 +5,7 @@ use specgate::policy::types::{
     ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult, DependencyEdge,
     FieldChange, ModulePolicyDiff, PolicyDiffReport, PolicyDiffSummary,
 };
+use serde_json::json;
 use specgate::spec::{Boundaries, SpecFile};
 
 #[test]
@@ -64,15 +65,19 @@ fn report_has_compensations_and_net_classification() {
 
 #[test]
 fn same_field_connected_modules_produce_offset() {
-    let widenings = vec![make_field_change(
+    let widenings = vec![make_set_change(
         "auth",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Widening,
+        &["core", "shared"],
+        &["core", "shared", "shared/db"],
     )];
-    let narrowings = vec![make_field_change(
+    let narrowings = vec![make_set_change(
         "api",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Narrowing,
+        &["shared/db", "feature"],
+        &["feature"],
     )];
     let edges = vec![DependencyEdge {
         importer: "api".into(),
@@ -124,13 +129,27 @@ fn unconnected_modules_do_not_compensate() {
 #[test]
 fn ambiguous_compensation_fails_closed() {
     let widenings = vec![
-        make_field_change("auth", "public_api", ChangeClassification::Widening),
-        make_field_change("core", "public_api", ChangeClassification::Widening),
+        make_set_change(
+            "auth",
+            "boundaries.public_api",
+            ChangeClassification::Widening,
+            &["shared"],
+            &["shared", "shared/db"],
+        ),
+        make_set_change(
+            "core",
+            "boundaries.public_api",
+            ChangeClassification::Widening,
+            &["legacy"],
+            &["legacy", "shared/db"],
+        ),
     ];
-    let narrowings = vec![make_field_change(
+    let narrowings = vec![make_set_change(
         "api",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Narrowing,
+        &["shared/db", "feature"],
+        &["feature"],
     )];
     let edges = vec![
         DependencyEdge {
@@ -143,22 +162,28 @@ fn ambiguous_compensation_fails_closed() {
         },
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    assert!(candidates
-        .iter()
-        .all(|c| c.result == CompensationResult::Ambiguous));
+    assert!(
+        candidates
+            .iter()
+            .all(|c| c.result == CompensationResult::Ambiguous)
+    );
 }
 
 #[test]
 fn reverse_edge_direction_still_compensates() {
-    let widenings = vec![make_field_change(
+    let widenings = vec![make_set_change(
         "api",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Widening,
+        &["core"],
+        &["core", "shared/db"],
     )];
-    let narrowings = vec![make_field_change(
+    let narrowings = vec![make_set_change(
         "auth",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Narrowing,
+        &["shared/db", "private"],
+        &["private"],
     )];
     let edges = vec![DependencyEdge {
         importer: "auth".into(),
@@ -194,14 +219,28 @@ fn same_module_change_does_not_compensate() {
 
 #[test]
 fn multiple_narrowings_same_widening_marked_ambiguous() {
-    let widenings = vec![make_field_change(
+    let widenings = vec![make_set_change(
         "core",
-        "public_api",
+        "boundaries.public_api",
         ChangeClassification::Widening,
+        &["base"],
+        &["base", "shared/db"],
     )];
     let narrowings = vec![
-        make_field_change("auth", "public_api", ChangeClassification::Narrowing),
-        make_field_change("api", "public_api", ChangeClassification::Narrowing),
+        make_set_change(
+            "auth",
+            "boundaries.public_api",
+            ChangeClassification::Narrowing,
+            &["shared/db", "auth-only"],
+            &["auth-only"],
+        ),
+        make_set_change(
+            "api",
+            "boundaries.public_api",
+            ChangeClassification::Narrowing,
+            &["shared/db", "api-only"],
+            &["api-only"],
+        ),
     ];
     let edges = vec![
         DependencyEdge {
@@ -215,9 +254,63 @@ fn multiple_narrowings_same_widening_marked_ambiguous() {
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
     assert_eq!(candidates.len(), 2);
-    assert!(candidates
-        .iter()
-        .all(|c| c.result == CompensationResult::Ambiguous));
+    assert!(
+        candidates
+            .iter()
+            .all(|c| c.result == CompensationResult::Ambiguous)
+    );
+}
+
+#[test]
+fn same_field_but_different_set_delta_does_not_compensate() {
+    let widenings = vec![make_set_change(
+        "auth",
+        "boundaries.allow_imports_from",
+        ChangeClassification::Widening,
+        &["core", "api"],
+        &["core", "api", "legacy"],
+    )];
+    let narrowings = vec![make_set_change(
+        "app",
+        "boundaries.allow_imports_from",
+        ChangeClassification::Narrowing,
+        &["core", "auth"],
+        &["core"],
+    )];
+    let edges = vec![DependencyEdge {
+        importer: "app".into(),
+        provider: "auth".into(),
+    }];
+
+    let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
+    assert!(candidates.is_empty());
+}
+
+#[test]
+fn scalar_inverse_changes_require_matching_subject() {
+    let widenings = vec![make_scalar_change(
+        "auth",
+        "constraints.severity",
+        ChangeClassification::Widening,
+        json!("error"),
+        json!("warning"),
+        "constraint 'no-http::{}' severity changed",
+    )];
+    let narrowings = vec![make_scalar_change(
+        "app",
+        "constraints.severity",
+        ChangeClassification::Narrowing,
+        json!("warning"),
+        json!("error"),
+        "constraint 'no-eval::{}' severity changed",
+    )];
+    let edges = vec![DependencyEdge {
+        importer: "app".into(),
+        provider: "auth".into(),
+    }];
+
+    let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
+    assert!(candidates.is_empty());
 }
 
 #[test]
@@ -463,5 +556,65 @@ fn make_field_change(
         before: None,
         after: None,
         detail: format!("{classification:?} in {module}/{field}"),
+    }
+}
+
+fn make_set_change(
+    module: &str,
+    field: &str,
+    classification: ChangeClassification,
+    before: &[&str],
+    after: &[&str],
+) -> FieldChange {
+    let detail = match classification {
+        ChangeClassification::Widening => format!(
+            "added {}",
+            after.iter()
+                .filter(|value| !before.contains(value))
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ChangeClassification::Narrowing => format!(
+            "removed {}",
+            before
+                .iter()
+                .filter(|value| !after.contains(value))
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ChangeClassification::Structural => "set changed".to_string(),
+    };
+
+    FieldChange {
+        module: module.into(),
+        spec_path: format!("{module}/.spec.yml"),
+        scope: ChangeScope::Boundaries,
+        field: field.into(),
+        classification,
+        before: Some(json!(before)),
+        after: Some(json!(after)),
+        detail,
+    }
+}
+
+fn make_scalar_change(
+    module: &str,
+    field: &str,
+    classification: ChangeClassification,
+    before: serde_json::Value,
+    after: serde_json::Value,
+    detail: &str,
+) -> FieldChange {
+    FieldChange {
+        module: module.into(),
+        spec_path: format!("{module}/.spec.yml"),
+        scope: ChangeScope::Constraint,
+        field: field.into(),
+        classification,
+        before: Some(before),
+        after: Some(after),
+        detail: detail.to_string(),
     }
 }

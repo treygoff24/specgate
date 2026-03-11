@@ -2,4 +2,4 @@ assertion: catch
 violations:
   - rule: hygiene.unresolved_import
     from_module: app
-notes: "Unresolved imports are now detected by default (warn policy). This gap has been filled."
+notes: "Hallucinated relative imports should still be reported as hygiene.unresolved_import findings."

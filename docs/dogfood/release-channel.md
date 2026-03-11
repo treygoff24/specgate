@@ -27,7 +27,7 @@ The "gate" refers to the merge gate and CI pipeline that must pass before beta c
 - Binary artifact build and verification
 - npm wrapper publish and dist-tag verification
 
-Promote beta to stable only after all gate checks are green, `policy-diff`/ownership diagnostics are clean, and artifact and wrapper publish/verify checks pass.
+Promote beta to stable only after all gate checks are green, `policy-diff` is clean, ownership diagnostics have been reviewed, and artifact and wrapper publish/verify checks pass.
 
 ## Tag and Automation Mapping
 

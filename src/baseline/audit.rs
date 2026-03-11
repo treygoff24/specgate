@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chrono::{Duration, NaiveDate};
 use serde::Serialize;
 
-use super::BaselineFile;
+use super::{BaselineFile, parse_iso_date};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct OwnerStats {
@@ -43,7 +43,7 @@ enum ExpiryState {
 }
 
 pub fn audit_baseline(baseline: &BaselineFile, today: &str) -> AuditReport {
-    let today = NaiveDate::parse_from_str(today, "%Y-%m-%d").ok();
+    let today = parse_iso_date(today);
 
     let mut report = AuditReport {
         total_entries: baseline.entries.len(),
@@ -111,7 +111,7 @@ fn classify_expiry(expires_at: Option<&str>, today: Option<NaiveDate>) -> Expiry
         return ExpiryState::Active;
     };
 
-    let Ok(expires_at) = NaiveDate::parse_from_str(raw_date, "%Y-%m-%d") else {
+    let Some(expires_at) = parse_iso_date(raw_date) else {
         return ExpiryState::NoExpiry;
     };
 

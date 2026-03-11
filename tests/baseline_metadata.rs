@@ -197,6 +197,95 @@ fn baseline_add_requires_owner_and_reason_when_configured() {
 }
 
 #[test]
+fn baseline_add_rejects_blank_owner_and_reason_when_configured() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_violation(temp.path(), true);
+
+    let result = run([
+        "specgate",
+        "baseline",
+        "add",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--rule",
+        "boundary.never_imports",
+        "--from-module",
+        "app",
+        "--owner",
+        "   ",
+        "--reason",
+        "",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "error");
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("message")
+            .contains("--owner and --reason")
+    );
+}
+
+#[test]
+fn baseline_add_keeps_missing_duplicate_when_only_positional_identity_differs() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_violation(temp.path(), false);
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { core as coreA } from '../core/index';\nimport { core as coreB } from '../core/index';\nexport const app = coreA + coreB;\n",
+    );
+
+    let generated = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(generated.exit_code, EXIT_CODE_PASS);
+
+    let baseline_path = temp.path().join(".specgate-baseline.json");
+    let mut baseline =
+        parse_json(&fs::read_to_string(&baseline_path).expect("read generated baseline"));
+    let entries = baseline["entries"].as_array_mut().expect("entries array");
+    assert_eq!(entries.len(), 2);
+    entries.remove(1);
+    fs::write(
+        &baseline_path,
+        serde_json::to_string_pretty(&baseline).expect("serialize trimmed baseline"),
+    )
+    .expect("write trimmed baseline");
+
+    let add_result = run([
+        "specgate",
+        "baseline",
+        "add",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--rule",
+        "boundary.never_imports",
+        "--from-module",
+        "app",
+        "--owner",
+        "team-app",
+        "--reason",
+        "backfill duplicate",
+    ]);
+    assert_eq!(add_result.exit_code, EXIT_CODE_PASS);
+
+    let output = parse_json(&add_result.stdout);
+    assert_eq!(output["matched_violation_count"], 2);
+    assert_eq!(output["added_count"], 1);
+    assert_eq!(output["entry_count"], 2);
+
+    let rewritten = parse_json(&fs::read_to_string(&baseline_path).expect("read final baseline"));
+    let entries = rewritten["entries"].as_array().expect("entries array");
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
 fn audit_report_counts_metadata_and_expiry_gaps() {
     let baseline = BaselineFile {
         version: BASELINE_FILE_VERSION.to_string(),
@@ -236,6 +325,28 @@ fn audit_report_counts_metadata_and_expiry_gaps() {
     assert_eq!(report.has_reason_count, 2);
     assert_eq!(report.has_added_at_count, 2);
     assert!(report.has_metadata_gaps());
+}
+
+#[test]
+fn audit_treats_calendar_invalid_expiry_as_no_expiry() {
+    let baseline = BaselineFile {
+        version: BASELINE_FILE_VERSION.to_string(),
+        generated_from: BaselineGeneratedFrom::default(),
+        entries: vec![sample_entry(
+            "calendar-invalid",
+            Some("team-a"),
+            Some("cleanup"),
+            Some("2026-02-30"),
+            Some("2026-03-01"),
+        )],
+    };
+
+    let report = audit_baseline(&baseline, "2026-03-10");
+
+    assert_eq!(report.expired, 0);
+    assert_eq!(report.expiring_within_30d, 0);
+    assert_eq!(report.no_expiry, 1);
+    assert_eq!(report.active, 0);
 }
 
 #[test]

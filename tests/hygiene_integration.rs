@@ -437,3 +437,59 @@ fn doctor_reports_canonical_import_dangling() {
             .contains("src/core/internal.ts")
     );
 }
+
+#[test]
+fn canonical_import_id_does_not_emit_unresolved_hygiene_finding() {
+    let temp = TempDir::new().expect("tempdir");
+    write_base_config(temp.path(), "");
+    write_file(
+        temp.path(),
+        "modules/consumer.spec.yml",
+        "version: \"2.3\"\nmodule: consumer\nboundaries:\n  path: src/consumer/**/*\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/registry.spec.yml",
+        "version: \"2.3\"\nmodule: registry\nimport_id: \"@app/registry\"\nboundaries:\n  path: src/registry/**/*\n  public_api:\n    - src/registry/index.ts\n  enforce_canonical_imports: true\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "src/consumer/use_registry.ts",
+        "import { runAdapter } from '@app/registry';\n\nexport const execute = () => runAdapter();\n",
+    );
+    write_file(
+        temp.path(),
+        "src/registry/index.ts",
+        "export { runAdapter } from './internal/adapter';\n",
+    );
+    write_file(
+        temp.path(),
+        "src/registry/internal/adapter.ts",
+        "export const runAdapter = () => 'ok';\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS, "{}", result.stdout);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "pass");
+    assert!(
+        output["violations"]
+            .as_array()
+            .expect("violations")
+            .iter()
+            .all(|violation| violation["rule"] != "hygiene.unresolved_import"),
+        "{output:#}"
+    );
+    assert_eq!(output["edge_classification"]["external"], 1);
+    assert_eq!(output["edge_classification"]["unresolved_literal"], 0);
+    assert_eq!(output["edge_classification"]["unresolved_dynamic"], 0);
+}

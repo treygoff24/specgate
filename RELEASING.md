@@ -10,7 +10,7 @@ Specgate uses [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 - **MINOR**: backward-compatible feature additions.
 - **PATCH**: backward-compatible fixes and documentation-only corrections.
 
-Use `Cargo.toml` as the single source of truth for the release version and tag.
+Use `Cargo.toml` as the source of truth for the Rust crate version and tag, and keep `npm/specgate/package.json` aligned before stable npm wrapper releases.
 
 ## Release checklist
 
@@ -33,8 +33,9 @@ Use `Cargo.toml` as the single source of truth for the release version and tag.
    - `cargo build --release --locked`
 5. Run smoke checks on the built binary:
    - `./target/release/specgate --version`
-6. Generate SHA-256 checksums for distributable artifacts:
-   - `shasum -a 256 ./target/release/specgate`
+6. Generate SHA-256 checksums for distributable release archives:
+   - `tar -czf dist/specgate-${TAG}-${TARGET}.tar.gz -C ./target/release specgate`
+   - `shasum -a 256 dist/specgate-${TAG}-${TARGET}.tar.gz`
 7. Create an annotated tag for the release (for example `vX.Y.Z-rc1`):
    - `git tag -a vX.Y.Z-rc1 -m "Specgate vX.Y.Z-rc1"`
 8. Push branch + tag and publish release artifacts/notes in CI.
@@ -65,10 +66,13 @@ This ensures Cargo.lock-resolved dependencies are used exactly as tested in CI.
 
 For each produced release artifact, publish a SHA-256 checksum file or value.
 
-Example for local binary verification:
+Example for local archive verification:
 
 ```bash
-shasum -a 256 ./target/release/specgate
+TAG=vX.Y.Z
+TARGET=x86_64-unknown-linux-gnu
+tar -czf "dist/specgate-${TAG}-${TARGET}.tar.gz" -C ./target/release specgate
+shasum -a 256 "dist/specgate-${TAG}-${TARGET}.tar.gz"
 ```
 
 Store checksum outputs alongside release artifacts so consumers can verify integrity before execution.

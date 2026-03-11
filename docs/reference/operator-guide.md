@@ -35,14 +35,15 @@ mkdir -p "$INSTALL_BIN_DIR"
 if \
   curl -fsSL "$SPECGATE_URL" -o "/tmp/${SPECGATE_ARCHIVE}" && \
   curl -fsSL "${SPECGATE_URL}.sha256" -o "/tmp/${SPECGATE_ARCHIVE}.sha256" && \
-  (cd /tmp && sha256sum -c "${SPECGATE_ARCHIVE}.sha256"); then
+  (cd /tmp && if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "${SPECGATE_ARCHIVE}.sha256"; else shasum -a 256 -c "${SPECGATE_ARCHIVE}.sha256"; fi); then
   tar -xzf "/tmp/${SPECGATE_ARCHIVE}" -C /tmp
   mv /tmp/specgate "$INSTALL_BIN_DIR/specgate"
   chmod +x "$INSTALL_BIN_DIR/specgate"
   export PATH="$INSTALL_BIN_DIR:$PATH"
 else
   # Fallback: install the published tag from source
-  cargo install --locked --git https://github.com/treygoff24/specgate --tag "$SPECGATE_TAG"
+  cargo install --locked --git https://github.com/treygoff24/specgate --tag "$SPECGATE_TAG" --root "$HOME/.local"
+  export PATH="$INSTALL_BIN_DIR:$PATH"
 fi
 
 # Initialize a project
@@ -255,7 +256,10 @@ The workflow above does **not** auto-update baselines. Run baseline regeneration
 manual maintenance windows only:
 
 ```bash
-specgate baseline --output .specgate-baseline.json
+specgate baseline generate --project-root . --output .specgate-baseline.json
+specgate baseline add --project-root . --rule boundary.never_imports --from-module app --owner team-app --reason "legacy migration"
+specgate baseline list --project-root . --format json
+specgate baseline audit --project-root . --format json
 ```
 
 ### Exit Code Handling

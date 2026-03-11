@@ -2,9 +2,9 @@ use clap::{Args, ValueEnum};
 
 use super::*;
 use crate::policy::{
+    PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffOptions, PolicyDiffReport, PolicyDiffSummary,
     build_policy_diff_report_with_options, derive_policy_diff_exit, render_policy_diff_human,
-    render_policy_diff_ndjson, PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffOptions,
-    PolicyDiffReport, PolicyDiffSummary,
+    render_policy_diff_ndjson,
 };
 
 /// Compare `.spec.yml` policy files across git refs and classify changes as widening,

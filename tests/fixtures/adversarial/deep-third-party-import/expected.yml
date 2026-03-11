@@ -1,5 +1,3 @@
-assertion: catch
-violations:
-  - rule: hygiene.unresolved_import
-    from_module: app
-notes: "Unresolved imports are now detected. The specifier 'express/lib/router/index' cannot be resolved without node_modules. Deep third-party import hygiene (separate rule) remains a future gap."
+assertion: clean_pass
+violations: []
+notes: "Intentional external imports should not be reclassified as hygiene.unresolved_import findings. Deep third-party import hygiene remains a separate future gap."

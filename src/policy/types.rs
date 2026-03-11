@@ -88,6 +88,8 @@ impl PolicyDiffReport {
     ) -> Self {
         let net_classification = if summary.has_widening {
             ChangeClassification::Widening
+        } else if summary.narrowing_changes > 0 {
+            ChangeClassification::Narrowing
         } else {
             ChangeClassification::Structural
         };

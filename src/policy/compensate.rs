@@ -2,9 +2,12 @@
 //!
 //! Scoped compensation: a narrowing in module A can offset a widening in module B
 //! only if A and B share a direct dependency relationship, and the changes are in
-//! the same field family. Ambiguous cases fail closed.
+//! the same field family and target the same concrete policy payload. Ambiguous
+//! cases fail closed.
 
 use std::collections::BTreeSet;
+
+use serde_json::Value;
 
 use super::types::{
     ChangeClassification, CompensationCandidate, CompensationResult, DependencyEdge, FieldChange,
@@ -14,6 +17,55 @@ use super::types::{
 /// Same field name = same family.
 fn field_family(field: &str) -> &str {
     field
+}
+
+fn changed_string_set(change: &FieldChange) -> Option<BTreeSet<String>> {
+    let before = change.before.as_ref()?.as_array()?;
+    let after = change.after.as_ref()?.as_array()?;
+    let before = before
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<BTreeSet<_>>>()?;
+    let after = after
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<BTreeSet<_>>>()?;
+
+    Some(
+        before
+            .symmetric_difference(&after)
+            .map(|value| (*value).to_string())
+            .collect(),
+    )
+}
+
+fn normalized_detail_subject(detail: &str) -> Option<&str> {
+    detail
+        .strip_prefix("added ")
+        .or_else(|| detail.strip_prefix("removed "))
+        .or_else(|| detail.strip_prefix("constraint '"))
+}
+
+fn same_compensation_payload(widening: &FieldChange, narrowing: &FieldChange) -> bool {
+    match (changed_string_set(widening), changed_string_set(narrowing)) {
+        (Some(left), Some(right)) => !left.is_empty() && left == right,
+        _ => {
+            let inverse_values = matches!(
+                (
+                    widening.before.as_ref(),
+                    widening.after.as_ref(),
+                    narrowing.before.as_ref(),
+                    narrowing.after.as_ref(),
+                ),
+                (Some(w_before), Some(w_after), Some(n_before), Some(n_after))
+                    if w_before == n_after && w_after == n_before
+            );
+            let matching_detail = normalized_detail_subject(&widening.detail)
+                == normalized_detail_subject(&narrowing.detail);
+
+            inverse_values && matching_detail
+        }
+    }
 }
 
 /// Check if two modules share a direct dependency edge (either direction).
@@ -54,6 +106,9 @@ pub fn find_compensation_candidates(
                     return None;
                 }
                 if w.module == narrowing.module {
+                    return None;
+                }
+                if !same_compensation_payload(w, narrowing) {
                     return None;
                 }
                 find_edge(&w.module, &narrowing.module, edges).map(|e| (w, e))

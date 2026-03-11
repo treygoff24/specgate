@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -132,8 +132,8 @@ struct BaselineEntryMetadata {
 
 /// Returns true if the string matches the `YYYY-MM-DD` date format.
 ///
-/// This only checks structural validity (4 digits, dash, 2 digits, dash, 2 digits).
-/// Invalid formats are never treated as expired — they are silently treated as "never expires".
+/// This checks structural format only. For expiry semantics, use [`parse_iso_date`] so
+/// calendar-invalid dates like `2026-02-30` are treated consistently.
 pub fn is_valid_date_format(s: &str) -> bool {
     if s.len() != 10 {
         return false;
@@ -151,24 +151,31 @@ pub fn is_valid_date_format(s: &str) -> bool {
         && bytes[9].is_ascii_digit()
 }
 
+pub(crate) fn parse_iso_date(s: &str) -> Option<NaiveDate> {
+    if !is_valid_date_format(s) {
+        return None;
+    }
+
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+}
+
 /// Returns true if the baseline entry has expired relative to `current_date`.
 ///
 /// An entry is expired when:
 /// - It has an `expires_at` date
-/// - The date string is valid YYYY-MM-DD format
-/// - The date is strictly before `current_date` (lexicographic comparison is safe for ISO 8601)
+/// - The date string is a valid calendar date in YYYY-MM-DD format
+/// - The date is strictly before `current_date`
 ///
 /// If `expires_at` is absent or has an invalid format, returns false (safe default).
 pub fn is_entry_expired(entry: &BaselineEntry, current_date: &str) -> bool {
-    match &entry.expires_at {
-        None => false,
-        Some(expires_at) => {
-            if !is_valid_date_format(expires_at) {
-                return false;
-            }
-            expires_at.as_str() < current_date
-        }
-    }
+    let Some(expires_at) = entry.expires_at.as_deref().and_then(parse_iso_date) else {
+        return false;
+    };
+    let Some(current_date) = parse_iso_date(current_date) else {
+        return false;
+    };
+
+    expires_at < current_date
 }
 
 /// Options for expiry-aware violation classification.
@@ -642,6 +649,13 @@ pub fn fingerprint_entry(entry: &BaselineEntry) -> String {
     stable_content_fingerprint_for_entry(entry)
 }
 
+pub(crate) fn baseline_identity(entry: &BaselineEntry) -> (String, Option<String>) {
+    (
+        stable_content_fingerprint_for_entry(entry),
+        positional_fingerprint_for_entry(entry),
+    )
+}
+
 fn build_baseline_match_index(baseline: &BaselineFile) -> BTreeMap<String, Vec<Option<String>>> {
     let mut by_primary = BTreeMap::new();
 
@@ -821,10 +835,7 @@ fn dedup_entries_by_identity(entries: &mut Vec<BaselineEntry>) {
     // After stable sorting this is deterministic, and the field names clarify
     // which entry is retained vs discarded.
     entries.dedup_by(|retained_entry, duplicate_entry| {
-        stable_content_fingerprint_for_entry(retained_entry)
-            == stable_content_fingerprint_for_entry(duplicate_entry)
-            && positional_fingerprint_for_entry(retained_entry)
-                == positional_fingerprint_for_entry(duplicate_entry)
+        baseline_identity(retained_entry) == baseline_identity(duplicate_entry)
     });
 }
 
@@ -1302,6 +1313,29 @@ mod tests {
             expires_at: None,
             added_at: None,
         };
+        assert!(!is_entry_expired(&entry, "2026-03-09"));
+    }
+
+    #[test]
+    fn test_calendar_invalid_expires_at_is_not_expired() {
+        let entry = BaselineEntry {
+            fingerprint: "fp".to_string(),
+            positional_fingerprint: None,
+            rule: "boundary.never_imports".to_string(),
+            severity: crate::spec::Severity::Error,
+            message: "msg".to_string(),
+            from_file: "src/a.ts".to_string(),
+            to_file: None,
+            from_module: None,
+            to_module: None,
+            line: None,
+            column: None,
+            owner: None,
+            reason: None,
+            expires_at: Some("2026-02-30".to_string()),
+            added_at: None,
+        };
+
         assert!(!is_entry_expired(&entry, "2026-03-09"));
     }
 

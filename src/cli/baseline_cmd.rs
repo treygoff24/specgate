@@ -7,8 +7,8 @@ use serde::Serialize;
 use super::*;
 use crate::baseline::audit::{AuditReport, audit_baseline};
 use crate::baseline::{
-    BASELINE_FILE_VERSION, BaselineEntry, BaselineFile, BaselineGeneratedFrom,
-    build_baseline_with_metadata, fingerprint_entry, is_entry_expired, load_optional_baseline,
+    BASELINE_FILE_VERSION, BaselineEntry, BaselineFile, BaselineGeneratedFrom, baseline_identity,
+    build_baseline_with_metadata, is_entry_expired, load_optional_baseline,
     refresh_baseline_with_metadata, write_baseline,
 };
 use crate::verdict::sort_policy_violations;
@@ -274,7 +274,7 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     };
 
     if context.loaded.config.baseline.require_metadata
-        && (args.owner.is_none() || args.reason.is_none())
+        && (!has_non_blank_arg(args.owner.as_deref()) || !has_non_blank_arg(args.reason.as_deref()))
     {
         return runtime_error_json(
             "baseline",
@@ -330,12 +330,12 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     }
 
     let matched_violation_count = additions.len();
-    let existing_fingerprints = baseline
+    let existing_identities = baseline
         .entries
         .iter()
-        .map(fingerprint_entry)
+        .map(baseline_identity)
         .collect::<BTreeSet<_>>();
-    additions.retain(|entry| !existing_fingerprints.contains(&fingerprint_entry(entry)));
+    additions.retain(|entry| !existing_identities.contains(&baseline_identity(entry)));
     let added_count = additions.len();
 
     if added_count > 0 {
@@ -383,6 +383,10 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     };
 
     CliRunResult::json(EXIT_CODE_PASS, &output)
+}
+
+fn has_non_blank_arg(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn handle_baseline_list(args: BaselineListArgs) -> CliRunResult {

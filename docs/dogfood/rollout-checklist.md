@@ -13,7 +13,7 @@ branch ref. Substitute your actual default branch ref when it differs.
    - include a policy governance step (`specgate policy-diff --base origin/main`)
    - if you choose in-band enforcement, use `specgate check --since origin/main --deny-widenings` instead of a separate policy-diff gate
    - include SARIF upload guidance (`specgate ... --format sarif` + `github/codeql-action/upload-sarif@v3`)
-   - include an ownership diagnostics check for release-readiness windows (`specgate doctor ownership --project-root .`)
+   - include an ownership diagnostics step (`specgate doctor ownership --project-root . --format json`); `strict_ownership: true` controls whether findings block the gate
 4. Confirm required docs are discoverable from `README.md`.
 
 ## Week 0 (pilot)
@@ -29,7 +29,7 @@ branch ref. Substitute your actual default branch ref when it differs.
 2. Require `baseline` updates only through PR-approved maintenance windows.
    - keep governance enforcement singular: either `specgate policy-diff --base origin/main` or `specgate check --since origin/main --deny-widenings`.
    - The consumer workflow does not auto-commit baseline files.
-   - Run `specgate baseline --output .specgate-baseline.json` in planned maintenance PRs and commit manually.
+   - Run `specgate baseline generate --project-root . --output .specgate-baseline.json` in planned maintenance PRs and commit manually.
 3. Validate no new hard failures from `C02/C06/C07` deferred rule classes.
 4. File issues for explicit unsupported cases rather than local workarounds.
 

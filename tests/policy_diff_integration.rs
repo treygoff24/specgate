@@ -173,6 +173,7 @@ fn narrowing_change_reports_exit_zero() {
     assert!(!output["summary"]["has_widening"].as_bool().unwrap());
     assert!(output["summary"]["narrowing_changes"].as_u64().unwrap() >= 1);
     assert_eq!(output["summary"]["widening_changes"], 0);
+    assert_eq!(output["net_classification"], "narrowing");
 }
 
 #[test]
@@ -901,6 +902,41 @@ fn config_addition_is_structural_only_and_surfaces_all_formats() {
         human_result
             .stdout
             .contains("STRUCTURAL: jest_mock_mode: warn -> enforce")
+    );
+}
+
+#[test]
+fn config_addition_widening_keeps_widening_classification() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(temp.path(), "src/app.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "unresolved_edge_policy: ignore\n",
+    );
+    commit_all(temp.path(), "head config first-introduction widening");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["summary"]["has_widening"], true);
+    assert_eq!(output["summary"]["widening_changes"], 1);
+    assert_eq!(output["summary"]["structural_changes"], 0);
+    assert_eq!(output["net_classification"], "widening");
+    assert_eq!(output["diffs"].as_array().unwrap().len(), 0);
+    assert_eq!(output["config_changes"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        output["config_changes"][0]["field_path"],
+        "unresolved_edge_policy"
+    );
+    assert_eq!(
+        output["config_changes"][0]["classification"],
+        "widening"
     );
 }
 

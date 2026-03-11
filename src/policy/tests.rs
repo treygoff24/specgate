@@ -7,14 +7,17 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::classify_fail_closed_operations;
+use super::config_diff::classify_config_changes;
 use super::git::{
-    discover_spec_file_changes, parse_name_status_z, FailClosedSpecOperation,
-    RenameCopySemanticPairing,
+    FailClosedSpecOperation, RenameCopySemanticPairing, discover_spec_file_changes,
+    parse_name_status_z,
 };
 use super::types::{
-    ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, PolicyDiffErrorEntry,
-    PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary, POLICY_DIFF_SCHEMA_VERSION,
+    ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult, DependencyEdge,
+    FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION, PolicyDiffErrorEntry,
+    PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
 };
+use crate::spec::config::SpecConfig;
 
 fn change(
     module: &str,
@@ -145,6 +148,63 @@ fn policy_diff_exit_codes_are_stable() {
     assert_eq!(PolicyDiffExit::RuntimeError.code(), 2);
 }
 
+#[test]
+fn compensated_spec_widening_does_not_hide_config_widening() {
+    let spec_widening = change(
+        "auth",
+        "modules/auth.spec.yml",
+        ChangeClassification::Widening,
+        "boundaries.allow_imports_from",
+        "added legacy",
+    );
+    let spec_narrowing = change(
+        "api",
+        "modules/api.spec.yml",
+        ChangeClassification::Narrowing,
+        "boundaries.allow_imports_from",
+        "removed auth",
+    );
+    let compensation = CompensationCandidate {
+        widening: spec_widening.clone(),
+        narrowing: spec_narrowing,
+        relationship: DependencyEdge {
+            importer: "auth".to_string(),
+            provider: "api".to_string(),
+        },
+        result: CompensationResult::Offset,
+    };
+    let mut report = PolicyDiffReport {
+        schema_version: POLICY_DIFF_SCHEMA_VERSION.to_string(),
+        base_ref: "base".to_string(),
+        head_ref: "head".to_string(),
+        diffs: vec![ModulePolicyDiff {
+            module: "auth".to_string(),
+            spec_path: "modules/auth.spec.yml".to_string(),
+            changes: vec![spec_widening],
+        }],
+        summary: PolicyDiffSummary {
+            widening_changes: 2,
+            narrowing_changes: 1,
+            has_widening: true,
+            ..PolicyDiffSummary::default()
+        },
+        errors: Vec::new(),
+        compensations: vec![compensation],
+        net_classification: ChangeClassification::Structural,
+        config_changes: classify_config_changes(
+            &SpecConfig {
+                strict_ownership: true,
+                ..SpecConfig::default()
+            },
+            &SpecConfig::default(),
+        ),
+    };
+
+    report.net_classification = super::derive_net_classification_with_compensation(&report);
+
+    assert_eq!(report.net_classification, ChangeClassification::Widening);
+}
+
 fn run_git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
@@ -235,9 +295,11 @@ fn parse_name_status_z_preserves_unicode_and_special_paths() {
     let parsed = parse_name_status_z(&raw).expect("parse diff output");
 
     assert!(parsed.changed_spec_paths.contains("模块/支付.spec.yml"));
-    assert!(parsed
-        .changed_spec_paths
-        .contains("modules/@scope/payments v2.spec.yml"));
+    assert!(
+        parsed
+            .changed_spec_paths
+            .contains("modules/@scope/payments v2.spec.yml")
+    );
 }
 
 #[test]
@@ -377,27 +439,31 @@ fn discover_spec_file_changes_classifies_diff_operations_from_git() {
     );
 
     assert_eq!(discovered.fail_closed_operations.len(), 2);
-    assert!(discovered
-        .fail_closed_operations
-        .iter()
-        .any(|operation| matches!(
-            operation,
-            FailClosedSpecOperation::Deletion { path } if path == "modules/delete.spec.yml"
-        )));
-    assert!(discovered
-        .fail_closed_operations
-        .iter()
-        .any(|operation| matches!(
-            operation,
-            FailClosedSpecOperation::RenameOrCopy {
-                status,
-                from_path,
-                to_path,
-                ..
-            } if status.starts_with('R')
-                && from_path == "modules/rename-old.spec.yml"
-                && to_path == "modules/rename-new.spec.yml"
-        )));
+    assert!(
+        discovered
+            .fail_closed_operations
+            .iter()
+            .any(|operation| matches!(
+                operation,
+                FailClosedSpecOperation::Deletion { path } if path == "modules/delete.spec.yml"
+            ))
+    );
+    assert!(
+        discovered
+            .fail_closed_operations
+            .iter()
+            .any(|operation| matches!(
+                operation,
+                FailClosedSpecOperation::RenameOrCopy {
+                    status,
+                    from_path,
+                    to_path,
+                    ..
+                } if status.starts_with('R')
+                    && from_path == "modules/rename-old.spec.yml"
+                    && to_path == "modules/rename-new.spec.yml"
+            ))
+    );
 }
 
 #[test]
@@ -415,9 +481,11 @@ fn classify_fail_closed_operations_downgrades_equivalent_rename_to_structural() 
         diffs[0].changes[0].classification,
         ChangeClassification::Structural
     );
-    assert!(diffs[0].changes[0]
-        .detail
-        .contains("semantically equivalent"));
+    assert!(
+        diffs[0].changes[0]
+            .detail
+            .contains("semantically equivalent")
+    );
 }
 
 #[test]

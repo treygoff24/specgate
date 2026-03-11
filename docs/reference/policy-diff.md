@@ -1,24 +1,16 @@
 # Policy diff
 
-`specgate policy-diff` compares `.spec.yml` policy snapshots between two git refs and classifies each detected change as `widening`, `narrowing`, or `structural`.
+`specgate policy-diff` compares policy snapshots between two git refs and classifies each detected change as `widening`, `narrowing`, or `structural`.
 
-This command is for policy governance across git history. It looks only at `.spec.yml` files. It does not diff `specgate.config.yml`.
-
-## Config governance scope decision
-
-`specgate.config.yml` diffing is explicitly deferred-by-decision for this release.
-
-- `policy-diff` remains scoped to `.spec.yml` governance changes only.
-- Config changes still require normal code review and release controls.
-- This keeps widening classification deterministic while config-level governance semantics are designed separately.
+This command is for policy governance across git history. It diffs both module specs (`.spec.yml`) and the repo-root `specgate.config.yml`, then produces a deterministic report and exit code for CI gating.
 
 ## Usage
 
 ```bash
-specgate policy-diff --base <base-ref> [--head <head-ref>] [--project-root <path>] [--format human|json|ndjson]
+specgate policy-diff --base <base-ref> [--head <head-ref>] [--project-root <path>] [--format human|json|ndjson] [--cross-file-compensation]
 ```
 
-`--base` is required. `--head` defaults to `HEAD`. `--format` defaults to `human`.
+`--base` is required. `--head` defaults to `HEAD`. `--format` defaults to `human`. `--cross-file-compensation` is opt-in and adds scoped offset analysis between directly connected modules.
 
 ## Examples
 
@@ -50,6 +42,12 @@ Run against a different repository root.
 specgate policy-diff --project-root ../repo --base origin/main
 ```
 
+Include cross-file compensation analysis when you want to see whether a narrowing in one directly connected module offsets a widening in another.
+
+```bash
+specgate policy-diff --base origin/main --cross-file-compensation --format json
+```
+
 ## Exit codes
 
 | Code | Meaning |
@@ -64,6 +62,7 @@ When the command exits `2`, it reports runtime/parse failures in the `errors` li
 
 - `diffs` is empty.
 - `summary` counters are zeroed (`modules_changed`, `widening_changes`, `narrowing_changes`, `structural_changes`) and `has_widening` is `false`.
+- `net_classification` falls back to `structural`.
 - `errors` carries structured failure details.
 - NDJSON output emits structured error events (see below).
 
@@ -73,9 +72,9 @@ This lets CI and tooling treat any non-zero summary counters as a trustworthy ga
 
 | Format | Behavior |
 |--------|----------|
-| `human` | Grouped text output with `WIDENING`, `NARROWING`, and `STRUCTURAL` sections, followed by a summary. Errors and limitations are appended when present. |
-| `json` | One deterministic `PolicyDiffReport` object with `schema_version`, `base_ref`, `head_ref`, `diffs`, `summary`, and `errors`. |
-| `ndjson` | One JSON object per event with `type: "error"` for each structured error, then `type: "change"` entries, then a final `type: "summary"` record. |
+| `human` | Grouped text output with `WIDENING`, `NARROWING`, and `STRUCTURAL` sections, optional `Config changes` and `Compensations` sections, then a summary. Errors and limitations are appended when present. |
+| `json` | One deterministic `PolicyDiffReport` object with `schema_version`, `base_ref`, `head_ref`, `diffs`, `summary`, `errors`, `net_classification`, plus `config_changes` and optional `compensations`. |
+| `ndjson` | One JSON object per event: `type: "error"` records first, then `type: "change"`, `type: "config_change"`, optional `type: "compensation"`, and a final `type: "summary"` record. |
 
 Example human output:
 
@@ -145,17 +144,25 @@ Behavior with the flag enabled:
 
 For modified `.spec.yml` files, `policy-diff` classifies changes over parsed policy fields rather than raw text. That includes boundaries, constraints, and contracts. Examples include import allowlists, import denylists, visibility, contract envelope requirements, and other policy fields.
 
+For `specgate.config.yml`, `policy-diff` emits `config_changes` records for governance-relevant config fields and folds them into the same summary counters and exit semantics. A config widening still makes the run fail with exit `1`.
+
 Some changes remain intentionally conservative in the MVP. Constraint additions and removals are currently reported as `structural` unless a rule specific severity change is recognized. When `boundaries.path` coverage cannot be bounded safely, the command reports the change as `structural` and adds the `path_coverage_unbounded_mvp` limitation in the summary.
 
 Rename/copy semantic pairing uses normalized `SpecFile` snapshots (trimmed scalar strings, set-like list normalization, and canonicalized constraint/contract structures). If normalization cannot produce a trustworthy semantic comparison, classification stays fail-closed as widening-risk.
+
+`net_classification` is the authoritative top-level verdict for machine consumers:
+
+- `widening` if any uncompensated spec widening or any config widening remains.
+- `narrowing` if no widening remains and at least one narrowing is present.
+- `structural` if the report is otherwise clean or if exit `2` suppressed authoritative classification output.
 
 ## Deferred follow up
 
 | Item | Current behavior |
 |------|------------------|
 | Semantic rename pairing | Implemented for `R*`/`C*` when both sides can be normalized and compared; inconclusive pairings remain fail-closed widenings. |
-| Cross file compensation | Not implemented. A widening in one file is not offset by a narrowing in another file. |
-| Config level governance | Deferred by decision for this release. `specgate.config.yml` diffing remains out of scope for `policy-diff`. |
+| Cross file compensation | Implemented as an opt-in analysis behind `--cross-file-compensation`. It is scoped to directly connected modules and reports candidate pairings in `compensations`; ambiguous matches fail closed. |
+| Config level governance | Implemented for `specgate.config.yml`; config changes are reported in `config_changes` and folded into summary/net classification. |
 | Future gate integration | Implemented for `check` via `--deny-widenings` (requires `--since <base-ref>`). |
 
 ## Related docs
