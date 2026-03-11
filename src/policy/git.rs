@@ -787,3 +787,62 @@ fn parse_utf8_token(token: &[u8], label: &str) -> Result<String, PolicyGitError>
         )
     })
 }
+
+/// Load all spec files from a git reference.
+/// Used for compensation analysis to build dependency edges from HEAD specs.
+pub fn load_spec_snapshots_for_ref(
+    project_root: &Path,
+    reference: &str,
+) -> Result<Vec<SpecFile>, PolicyGitError> {
+    validate_git_worktree(project_root)?;
+    validate_ref_exists(project_root, reference)?;
+
+    // List all .spec.yml files tracked at this ref
+    let output = std::process::Command::new("git")
+        .args(["ls-tree", "-r", "-z", "--name-only", reference, "--"])
+        .arg("*.spec.yml")
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| {
+            PolicyGitError::new(
+                "git.command_failed",
+                format!("failed to execute git ls-tree: {error}"),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PolicyGitError::new(
+            "git.ls_tree_failed",
+            format!("git ls-tree failed: {}", stderr.trim()),
+        ));
+    }
+
+    let spec_paths: Vec<String> = output
+        .stdout
+        .split(|byte| *byte == b'\0')
+        .filter(|token| !token.is_empty())
+        .filter_map(|token| String::from_utf8(token.to_vec()).ok())
+        .filter(|path| path.ends_with(".spec.yml"))
+        .collect();
+
+    if spec_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Load blobs for all spec paths
+    let blobs = load_blob_batch_for_ref(project_root, reference, &spec_paths)?;
+
+    let mut specs = Vec::new();
+    let mut errors = Vec::new();
+
+    for (index, spec_path) in spec_paths.iter().enumerate() {
+        if let Some(blob) = &blobs[index] {
+            if let Some(spec) = parse_spec_blob(reference, spec_path, Some(blob), &mut errors) {
+                specs.push(spec);
+            }
+        }
+    }
+
+    Ok(specs)
+}

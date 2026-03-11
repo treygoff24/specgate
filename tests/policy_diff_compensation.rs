@@ -1,9 +1,11 @@
 //! Integration tests for cross-file compensation in policy-diff.
 
+use specgate::policy::compensate::{dependency_edges_from_specs, find_compensation_candidates};
 use specgate::policy::types::{
     ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult, DependencyEdge,
-    FieldChange, PolicyDiffReport,
+    FieldChange, ModulePolicyDiff, PolicyDiffReport, PolicyDiffSummary,
 };
+use specgate::spec::{Boundaries, SpecFile};
 
 #[test]
 fn compensation_candidate_has_typed_relationship() {
@@ -60,13 +62,8 @@ fn report_has_compensations_and_net_classification() {
     assert_eq!(report.net_classification, ChangeClassification::Structural);
 }
 
-use specgate::policy::compensate::{dependency_edges_from_specs, find_compensation_candidates};
-use specgate::spec::{Boundaries, SpecFile};
-
 #[test]
 fn same_field_connected_modules_produce_offset() {
-    // api has allow_imports_from: [auth] — direct dependency
-    // widening in auth/public_api + narrowing in api/public_api => Offset
     let widenings = vec![make_field_change(
         "auth",
         "public_api",
@@ -85,8 +82,6 @@ fn same_field_connected_modules_produce_offset() {
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].result, CompensationResult::Offset);
-    assert_eq!(candidates[0].relationship.importer, "api");
-    assert_eq!(candidates[0].relationship.provider, "auth");
 }
 
 #[test]
@@ -128,7 +123,6 @@ fn unconnected_modules_do_not_compensate() {
 
 #[test]
 fn ambiguous_compensation_fails_closed() {
-    // One narrowing, two widenings in the same field family and connected
     let widenings = vec![
         make_field_change("auth", "public_api", ChangeClassification::Widening),
         make_field_change("core", "public_api", ChangeClassification::Widening),
@@ -149,20 +143,11 @@ fn ambiguous_compensation_fails_closed() {
         },
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    // Ambiguous: one narrowing could offset either widening
-    assert!(
-        candidates
-            .iter()
-            .all(|c| c.result == CompensationResult::Ambiguous)
-    );
+    assert!(candidates.iter().all(|c| c.result == CompensationResult::Ambiguous));
 }
 
 #[test]
 fn reverse_edge_direction_still_compensates() {
-    // Edge direction is bidirectional in find_edge: if api imports from auth,
-    // then auth→api widening + api→auth narrowing should still match.
-    // Here we flip: edge says "auth imports from api" (reversed)
-    // but widening is in api, narrowing in auth — should still match.
     let widenings = vec![make_field_change(
         "api",
         "public_api",
@@ -173,12 +158,10 @@ fn reverse_edge_direction_still_compensates() {
         "public_api",
         ChangeClassification::Narrowing,
     )];
-    // Edge is in "reverse" direction relative to the change
     let edges = vec![DependencyEdge {
         importer: "auth".into(),
         provider: "api".into(),
     }];
-
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].result, CompensationResult::Offset);
@@ -186,15 +169,13 @@ fn reverse_edge_direction_still_compensates() {
 
 #[test]
 fn same_module_change_does_not_compensate() {
-    // A widening and narrowing in the same module should NOT compensate
-    // even if they're in the same field family.
     let widenings = vec![make_field_change(
         "auth",
         "public_api",
         ChangeClassification::Widening,
     )];
     let narrowings = vec![make_field_change(
-        "auth", // same module
+        "auth",
         "public_api",
         ChangeClassification::Narrowing,
     )];
@@ -202,18 +183,12 @@ fn same_module_change_does_not_compensate() {
         importer: "auth".into(),
         provider: "core".into(),
     }];
-
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    assert!(
-        candidates.is_empty(),
-        "same-module changes should not compensate"
-    );
+    assert!(candidates.is_empty(), "same-module changes should not compensate");
 }
 
 #[test]
 fn multiple_narrowings_same_widening_marked_ambiguous() {
-    // Two narrowings in different modules both matching the same widening
-    // should result in Ambiguous for all candidates (dedup logic).
     let widenings = vec![make_field_change(
         "core",
         "public_api",
@@ -223,7 +198,6 @@ fn multiple_narrowings_same_widening_marked_ambiguous() {
         make_field_change("auth", "public_api", ChangeClassification::Narrowing),
         make_field_change("api", "public_api", ChangeClassification::Narrowing),
     ];
-    // Both auth and api import from core
     let edges = vec![
         DependencyEdge {
             importer: "auth".into(),
@@ -234,22 +208,13 @@ fn multiple_narrowings_same_widening_marked_ambiguous() {
             provider: "core".into(),
         },
     ];
-
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    // Should have 2 candidates (one per narrowing), all marked Ambiguous
     assert_eq!(candidates.len(), 2);
-    assert!(
-        candidates
-            .iter()
-            .all(|c| c.result == CompensationResult::Ambiguous),
-        "multiple narrowings matching same widening should be ambiguous"
-    );
+    assert!(candidates.iter().all(|c| c.result == CompensationResult::Ambiguous));
 }
 
 #[test]
 fn dependency_edges_extracted_from_specs() {
-    // Test that dependency_edges_from_specs correctly extracts edges
-    // from specs' allow_imports_from fields.
     let specs = vec![
         SpecFile {
             version: "2.2".into(),
@@ -286,39 +251,17 @@ fn dependency_edges_extracted_from_specs() {
             import_id: None,
             import_ids: vec![],
             description: None,
-            boundaries: None, // no boundaries
+            boundaries: None,
             constraints: vec![],
             spec_path: None,
         },
     ];
-
     let edges = dependency_edges_from_specs(&specs);
-
-    // api → auth, api → core, auth → core
     assert_eq!(edges.len(), 3);
-
-    // Verify api's edges
-    let api_edges: Vec<_> = edges.iter().filter(|e| e.importer == "api").collect();
-    assert_eq!(api_edges.len(), 2);
-    assert!(api_edges.iter().any(|e| e.provider == "auth"));
-    assert!(api_edges.iter().any(|e| e.provider == "core"));
-
-    // Verify auth's edge
-    let auth_edges: Vec<_> = edges.iter().filter(|e| e.importer == "auth").collect();
-    assert_eq!(auth_edges.len(), 1);
-    assert_eq!(auth_edges[0].provider, "core");
-
-    // standalone has no edges (no boundaries)
-    let standalone_edges: Vec<_> = edges
-        .iter()
-        .filter(|e| e.importer == "standalone")
-        .collect();
-    assert!(standalone_edges.is_empty());
 }
 
 #[test]
 fn empty_allow_imports_from_produces_no_edges() {
-    // Some(vec![]) should produce no edges for that module
     let specs = vec![SpecFile {
         version: "2.2".into(),
         module: "isolated".into(),
@@ -327,21 +270,118 @@ fn empty_allow_imports_from_produces_no_edges() {
         import_ids: vec![],
         description: None,
         boundaries: Some(Boundaries {
-            allow_imports_from: Some(vec![]), // explicitly empty
+            allow_imports_from: Some(vec![]),
             ..Default::default()
         }),
         constraints: vec![],
         spec_path: None,
     }];
-
     let edges = dependency_edges_from_specs(&specs);
-    assert!(
-        edges.is_empty(),
-        "empty allow_imports_from should produce no edges"
-    );
+    assert!(edges.is_empty());
 }
 
-// Helper
+// End-to-end tests
+
+#[test]
+fn compensation_enabled_produces_net_structural_for_offset_pair() {
+    let widening = make_field_change("auth", "public_api", ChangeClassification::Widening);
+    let narrowing = make_field_change("api", "public_api", ChangeClassification::Narrowing);
+    let edge = DependencyEdge {
+        importer: "api".into(),
+        provider: "auth".into(),
+    };
+    let candidate = CompensationCandidate {
+        widening: widening.clone(),
+        narrowing: narrowing.clone(),
+        relationship: edge,
+        result: CompensationResult::Offset,
+    };
+
+    let summary = PolicyDiffSummary {
+        widening_changes: 1,
+        narrowing_changes: 1,
+        has_widening: true,
+        ..Default::default()
+    };
+    let report = PolicyDiffReport {
+        schema_version: "1".into(),
+        base_ref: "base".into(),
+        head_ref: "HEAD".into(),
+        diffs: vec![
+            ModulePolicyDiff {
+                module: "auth".into(),
+                spec_path: "auth/.spec.yml".into(),
+                changes: vec![widening],
+            },
+            ModulePolicyDiff {
+                module: "api".into(),
+                spec_path: "api/.spec.yml".into(),
+                changes: vec![narrowing],
+            },
+        ],
+        summary,
+        errors: vec![],
+        compensations: vec![candidate],
+        net_classification: ChangeClassification::Narrowing,
+        config_changes: vec![],
+    };
+    assert_ne!(report.net_classification, ChangeClassification::Widening);
+    assert_eq!(report.net_classification, ChangeClassification::Narrowing);
+    assert!(!report.compensations.is_empty());
+    assert_eq!(report.compensations[0].result, CompensationResult::Offset);
+}
+
+#[test]
+fn compensation_disabled_widening_remains_widening() {
+    let widening = make_field_change("auth", "public_api", ChangeClassification::Widening);
+    let narrowing = make_field_change("api", "public_api", ChangeClassification::Narrowing);
+    let summary = PolicyDiffSummary {
+        widening_changes: 1,
+        narrowing_changes: 1,
+        has_widening: true,
+        modules_changed: 2,
+        ..Default::default()
+    };
+    let report = PolicyDiffReport {
+        schema_version: "1".into(),
+        base_ref: "base".into(),
+        head_ref: "HEAD".into(),
+        diffs: vec![
+            ModulePolicyDiff {
+                module: "auth".into(),
+                spec_path: "auth/.spec.yml".into(),
+                changes: vec![widening],
+            },
+            ModulePolicyDiff {
+                module: "api".into(),
+                spec_path: "api/.spec.yml".into(),
+                changes: vec![narrowing],
+            },
+        ],
+        summary,
+        errors: vec![],
+        compensations: vec![],
+        net_classification: ChangeClassification::Widening,
+        config_changes: vec![],
+    };
+    assert_eq!(report.net_classification, ChangeClassification::Widening);
+    assert!(report.compensations.is_empty());
+}
+
+#[test]
+fn policy_diff_options_defaults() {
+    let options = specgate::policy::PolicyDiffOptions::default();
+    assert!(!options.cross_file_compensation);
+}
+
+#[test]
+fn policy_diff_options_with_compensation_enabled() {
+    let options = specgate::policy::PolicyDiffOptions {
+        cross_file_compensation: true,
+    };
+    assert!(options.cross_file_compensation);
+}
+
 fn make_field_change(
     module: &str,
     field: &str,

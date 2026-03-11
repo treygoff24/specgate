@@ -148,5 +148,90 @@ fn summarize_policy_diffs(diffs: &[ModulePolicyDiff]) -> PolicyDiffSummary {
     summary
 }
 
+/// Options for controlling policy diff behavior.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyDiffOptions {
+    /// Enable cross-file compensation analysis (scoped to directly-connected modules).
+    pub cross_file_compensation: bool,
+}
+
+/// Build a policy diff report with configurable options.
+pub fn build_policy_diff_report_with_options(
+    project_root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+    options: &PolicyDiffOptions,
+) -> Result<PolicyDiffReport, PolicyGitError> {
+    let mut report = build_policy_diff_report(project_root, base_ref, head_ref)?;
+
+    if options.cross_file_compensation {
+        apply_compensation(&mut report, project_root, head_ref)?;
+    }
+
+    Ok(report)
+}
+
+/// Apply cross-file compensation analysis to a policy diff report.
+fn apply_compensation(
+    report: &mut PolicyDiffReport,
+    project_root: &Path,
+    head_ref: &str,
+) -> Result<(), PolicyGitError> {
+    // Load HEAD specs to extract dependency edges
+    let head_specs = git::load_spec_snapshots_for_ref(project_root, head_ref)?;
+    let edges = compensate::dependency_edges_from_specs(&head_specs);
+
+    // Separate widenings and narrowings from all diffs
+    let mut widenings: Vec<FieldChange> = Vec::new();
+    let mut narrowings: Vec<FieldChange> = Vec::new();
+
+    for diff in &report.diffs {
+        for change in &diff.changes {
+            match change.classification {
+                ChangeClassification::Widening => widenings.push(change.clone()),
+                ChangeClassification::Narrowing => narrowings.push(change.clone()),
+                _ => {}
+            }
+        }
+    }
+
+    // Find compensation candidates
+    let candidates = compensate::find_compensation_candidates(&widenings, &narrowings, &edges);
+    report.compensations = candidates;
+
+    // Recompute net classification
+    report.net_classification = derive_net_classification_with_compensation(report);
+
+    Ok(())
+}
+
+/// Derive net classification accounting for compensation.
+fn derive_net_classification_with_compensation(report: &PolicyDiffReport) -> ChangeClassification {
+    // Count how many widenings are offset (compensated)
+    let offset_widenings: std::collections::BTreeSet<(String, String)> = report
+        .compensations
+        .iter()
+        .filter(|c| c.result == CompensationResult::Offset)
+        .map(|c| (c.widening.module.clone(), c.widening.field.clone()))
+        .collect();
+
+    // Count total widenings (including from config changes)
+    let total_widenings = report.summary.widening_changes;
+
+    // If all widenings are offset, classification is Structural (or Narrowing if there are narrowings)
+    // If any widening remains uncompensated, classification stays Widening
+    let uncompensated_count = total_widenings.saturating_sub(offset_widenings.len());
+
+    if uncompensated_count > 0 {
+        ChangeClassification::Widening
+    } else if report.summary.narrowing_changes > 0 {
+        // All widenings compensated, but there are narrowings
+        ChangeClassification::Narrowing
+    } else {
+        // No widenings, no narrowings
+        ChangeClassification::Structural
+    }
+}
+
 #[cfg(test)]
 mod tests;
