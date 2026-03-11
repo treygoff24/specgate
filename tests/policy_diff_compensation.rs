@@ -143,7 +143,9 @@ fn ambiguous_compensation_fails_closed() {
         },
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    assert!(candidates.iter().all(|c| c.result == CompensationResult::Ambiguous));
+    assert!(candidates
+        .iter()
+        .all(|c| c.result == CompensationResult::Ambiguous));
 }
 
 #[test]
@@ -184,7 +186,10 @@ fn same_module_change_does_not_compensate() {
         provider: "core".into(),
     }];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
-    assert!(candidates.is_empty(), "same-module changes should not compensate");
+    assert!(
+        candidates.is_empty(),
+        "same-module changes should not compensate"
+    );
 }
 
 #[test]
@@ -210,7 +215,9 @@ fn multiple_narrowings_same_widening_marked_ambiguous() {
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
     assert_eq!(candidates.len(), 2);
-    assert!(candidates.iter().all(|c| c.result == CompensationResult::Ambiguous));
+    assert!(candidates
+        .iter()
+        .all(|c| c.result == CompensationResult::Ambiguous));
 }
 
 #[test]
@@ -369,6 +376,65 @@ fn compensation_disabled_widening_remains_widening() {
 }
 
 #[test]
+fn partial_compensation_keeps_widening_if_any_remain() {
+    // Two widenings, only one compensated
+    let widening1 = make_field_change("auth", "public_api", ChangeClassification::Widening);
+    let widening2 = make_field_change("core", "public_api", ChangeClassification::Widening);
+    let narrowing = make_field_change("api", "public_api", ChangeClassification::Narrowing);
+
+    let edge = DependencyEdge {
+        importer: "api".into(),
+        provider: "auth".into(),
+    };
+
+    // Only auth widening is compensated
+    let candidate = CompensationCandidate {
+        widening: widening1.clone(),
+        narrowing: narrowing.clone(),
+        relationship: edge,
+        result: CompensationResult::Offset,
+    };
+    let summary = PolicyDiffSummary {
+        widening_changes: 1,
+        narrowing_changes: 1,
+        has_widening: true,
+        ..Default::default()
+    };
+    let report = PolicyDiffReport {
+        schema_version: "1".into(),
+        base_ref: "base".into(),
+        head_ref: "HEAD".into(),
+        diffs: vec![
+            ModulePolicyDiff {
+                module: "auth".into(),
+                spec_path: "auth/.spec.yml".into(),
+                changes: vec![widening1],
+            },
+            ModulePolicyDiff {
+                module: "core".into(),
+                spec_path: "core/.spec.yml".into(),
+                changes: vec![widening2],
+            },
+            ModulePolicyDiff {
+                module: "api".into(),
+                spec_path: "api/.spec.yml".into(),
+                changes: vec![narrowing],
+            },
+        ],
+        summary,
+        errors: vec![],
+        compensations: vec![candidate],
+        // One widening remains uncompensated, so net is still Widening
+        net_classification: ChangeClassification::Widening,
+        config_changes: vec![],
+    };
+
+    // Assert that partial compensation still results in Widening
+    assert_eq!(report.net_classification, ChangeClassification::Widening);
+    assert_eq!(report.compensations.len(), 1);
+}
+
+#[test]
 fn policy_diff_options_defaults() {
     let options = specgate::policy::PolicyDiffOptions::default();
     assert!(!options.cross_file_compensation);
@@ -382,6 +448,7 @@ fn policy_diff_options_with_compensation_enabled() {
     assert!(options.cross_file_compensation);
 }
 
+// Helper
 fn make_field_change(
     module: &str,
     field: &str,

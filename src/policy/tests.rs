@@ -8,12 +8,12 @@ use tempfile::TempDir;
 
 use super::classify_fail_closed_operations;
 use super::git::{
-    FailClosedSpecOperation, RenameCopySemanticPairing, discover_spec_file_changes,
-    parse_name_status_z,
+    discover_spec_file_changes, parse_name_status_z, FailClosedSpecOperation,
+    RenameCopySemanticPairing,
 };
 use super::types::{
-    ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION,
-    PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
+    ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, PolicyDiffErrorEntry,
+    PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary, POLICY_DIFF_SCHEMA_VERSION,
 };
 
 fn change(
@@ -235,11 +235,9 @@ fn parse_name_status_z_preserves_unicode_and_special_paths() {
     let parsed = parse_name_status_z(&raw).expect("parse diff output");
 
     assert!(parsed.changed_spec_paths.contains("模块/支付.spec.yml"));
-    assert!(
-        parsed
-            .changed_spec_paths
-            .contains("modules/@scope/payments v2.spec.yml")
-    );
+    assert!(parsed
+        .changed_spec_paths
+        .contains("modules/@scope/payments v2.spec.yml"));
 }
 
 #[test]
@@ -379,31 +377,27 @@ fn discover_spec_file_changes_classifies_diff_operations_from_git() {
     );
 
     assert_eq!(discovered.fail_closed_operations.len(), 2);
-    assert!(
-        discovered
-            .fail_closed_operations
-            .iter()
-            .any(|operation| matches!(
-                operation,
-                FailClosedSpecOperation::Deletion { path } if path == "modules/delete.spec.yml"
-            ))
-    );
-    assert!(
-        discovered
-            .fail_closed_operations
-            .iter()
-            .any(|operation| matches!(
-                operation,
-                FailClosedSpecOperation::RenameOrCopy {
-                    status,
-                    from_path,
-                    to_path,
-                    ..
-                } if status.starts_with('R')
-                    && from_path == "modules/rename-old.spec.yml"
-                    && to_path == "modules/rename-new.spec.yml"
-            ))
-    );
+    assert!(discovered
+        .fail_closed_operations
+        .iter()
+        .any(|operation| matches!(
+            operation,
+            FailClosedSpecOperation::Deletion { path } if path == "modules/delete.spec.yml"
+        )));
+    assert!(discovered
+        .fail_closed_operations
+        .iter()
+        .any(|operation| matches!(
+            operation,
+            FailClosedSpecOperation::RenameOrCopy {
+                status,
+                from_path,
+                to_path,
+                ..
+            } if status.starts_with('R')
+                && from_path == "modules/rename-old.spec.yml"
+                && to_path == "modules/rename-new.spec.yml"
+        )));
 }
 
 #[test]
@@ -421,11 +415,9 @@ fn classify_fail_closed_operations_downgrades_equivalent_rename_to_structural() 
         diffs[0].changes[0].classification,
         ChangeClassification::Structural
     );
-    assert!(
-        diffs[0].changes[0]
-            .detail
-            .contains("semantically equivalent")
-    );
+    assert!(diffs[0].changes[0]
+        .detail
+        .contains("semantically equivalent"));
 }
 
 #[test]

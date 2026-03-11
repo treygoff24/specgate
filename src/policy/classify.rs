@@ -2,14 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use globset::{GlobBuilder, GlobMatcher};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::git::{
-    FailClosedSpecOperation, RenameCopySemanticPairing, SpecSnapshotPair, list_tracked_files_scoped,
+    list_tracked_files_scoped, FailClosedSpecOperation, RenameCopySemanticPairing, SpecSnapshotPair,
 };
 use super::types::{
-    ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff,
-    sort_field_changes_deterministic, sort_module_policy_diffs_deterministic,
+    sort_field_changes_deterministic, sort_module_policy_diffs_deterministic, ChangeClassification,
+    ChangeScope, FieldChange, ModulePolicyDiff,
 };
 use crate::spec::types::{
     Boundaries, BoundaryContract, Constraint, EnvelopeRequirement, Severity, SpecFile, Visibility,

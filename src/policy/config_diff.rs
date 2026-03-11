@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::types::{
-    ChangeClassification, ConfigFieldChange, sort_config_field_changes_deterministic,
+    sort_config_field_changes_deterministic, ChangeClassification, ConfigFieldChange,
 };
 use crate::spec::Severity;
 use crate::spec::config::{

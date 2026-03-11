@@ -2,9 +2,9 @@ use clap::{Args, ValueEnum};
 
 use super::*;
 use crate::policy::{
-    PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
-    build_policy_diff_report, derive_policy_diff_exit, render_policy_diff_human,
-    render_policy_diff_ndjson,
+    build_policy_diff_report_with_options, derive_policy_diff_exit, render_policy_diff_human,
+    render_policy_diff_ndjson, PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffOptions,
+    PolicyDiffReport, PolicyDiffSummary,
 };
 
 /// Compare `.spec.yml` policy files across git refs and classify changes as widening,
@@ -26,6 +26,10 @@ pub(crate) struct PolicyDiffArgs {
     /// Output format (`human`, `json`, or `ndjson`).
     #[arg(long, value_enum, default_value_t = PolicyDiffFormat::Human)]
     pub format: PolicyDiffFormat,
+
+    /// Enable cross-file compensation analysis (scoped to directly-connected modules).
+    #[arg(long, default_value_t = false)]
+    pub cross_file_compensation: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -38,8 +42,16 @@ pub(crate) enum PolicyDiffFormat {
 
 pub(super) fn handle_policy_diff(args: PolicyDiffArgs) -> CliRunResult {
     let format = args.format;
+    let options = PolicyDiffOptions {
+        cross_file_compensation: args.cross_file_compensation,
+    };
 
-    let report = match build_policy_diff_report(&args.project_root, &args.base, &args.head) {
+    let report = match build_policy_diff_report_with_options(
+        &args.project_root,
+        &args.base,
+        &args.head,
+        &options,
+    ) {
         Ok(report) => report,
         Err(error) => PolicyDiffReport::new(
             args.base,

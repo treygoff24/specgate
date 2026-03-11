@@ -1,7 +1,8 @@
 use serde::Serialize;
 
 use super::types::{
-    ChangeClassification, ChangeScope, FieldChange, ModulePolicyDiff, PolicyDiffReport,
+    ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult, FieldChange,
+    ModulePolicyDiff, PolicyDiffReport,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,6 +50,19 @@ struct NdjsonConfigChangeRecord<'a> {
     after: &'a str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct NdjsonCompensationRecord<'a> {
+    #[serde(rename = "type")]
+    r#type: &'static str,
+    widening_module: &'a str,
+    widening_field: &'a str,
+    narrowing_module: &'a str,
+    narrowing_field: &'a str,
+    relationship_importer: &'a str,
+    relationship_provider: &'a str,
+    result: CompensationResult,
+}
+
 /// Render a full policy diff report as human-readable grouped output.
 pub fn render_policy_diff_human(report: &PolicyDiffReport) -> String {
     let report = sorted_copy(report);
@@ -84,6 +98,15 @@ pub fn render_policy_diff_human(report: &PolicyDiffReport) -> String {
         lines.push(String::new());
     }
 
+    // Render compensation candidates if any
+    if !report.compensations.is_empty() {
+        lines.push("Compensations:".to_string());
+        for candidate in &report.compensations {
+            lines.push(render_compensation_human(candidate));
+        }
+        lines.push(String::new());
+    }
+
     lines.push(format!(
         "Summary: modules_changed={} widening={} narrowing={} structural={} net={}",
         report.summary.modules_changed,
@@ -115,6 +138,24 @@ pub fn render_policy_diff_human(report: &PolicyDiffReport) -> String {
     }
 
     lines.join("\n")
+}
+
+fn render_compensation_human(candidate: &CompensationCandidate) -> String {
+    let result_str = match candidate.result {
+        CompensationResult::Offset => "offset",
+        CompensationResult::Partial => "partial",
+        CompensationResult::Ambiguous => "ambiguous",
+    };
+    format!(
+        "  COMPENSATED ({}): widening in {}/{} offset by narrowing in {}/{} ({} imports from {})",
+        result_str,
+        candidate.widening.module,
+        candidate.widening.field,
+        candidate.narrowing.module,
+        candidate.narrowing.field,
+        candidate.relationship.importer,
+        candidate.relationship.provider
+    )
 }
 
 /// Render a policy diff report as stable JSON.
@@ -171,6 +212,23 @@ pub fn render_policy_diff_ndjson(report: &PolicyDiffReport) -> Vec<String> {
                 after: &change.after,
             })
             .expect("policy diff config change event must serialize"),
+        );
+    }
+
+    // Add compensation records to NDJSON output
+    for candidate in &report.compensations {
+        lines.push(
+            serde_json::to_string(&NdjsonCompensationRecord {
+                r#type: "compensation",
+                widening_module: &candidate.widening.module,
+                widening_field: &candidate.widening.field,
+                narrowing_module: &candidate.narrowing.module,
+                narrowing_field: &candidate.narrowing.field,
+                relationship_importer: &candidate.relationship.importer,
+                relationship_provider: &candidate.relationship.provider,
+                result: candidate.result,
+            })
+            .expect("policy diff compensation event must serialize"),
         );
     }
 

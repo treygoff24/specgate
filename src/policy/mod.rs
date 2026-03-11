@@ -16,19 +16,20 @@ pub use classify::{
 pub use compensate::{dependency_edges_from_specs, find_compensation_candidates};
 pub use config_diff::classify_config_changes;
 pub use git::{
-    DiscoveredAndLoadedSpecSnapshots, DiscoveredSpecFileChanges, FailClosedSpecOperation,
-    LoadedSpecSnapshots, PolicyGitError, SpecSnapshotPair, discover_and_load_spec_snapshots,
-    discover_config_changes, discover_spec_file_changes, list_tracked_files_scoped,
-    load_config_from_ref, load_spec_snapshots_for_changed_paths, parse_name_status_z,
+    discover_and_load_spec_snapshots, discover_config_changes, discover_spec_file_changes,
+    list_tracked_files_scoped, load_config_from_ref, load_spec_snapshots_for_changed_paths,
+    parse_name_status_z, DiscoveredAndLoadedSpecSnapshots, DiscoveredSpecFileChanges,
+    FailClosedSpecOperation, LoadedSpecSnapshots, PolicyGitError, SpecSnapshotPair,
 };
 pub use render::{render_policy_diff_human, render_policy_diff_json, render_policy_diff_ndjson};
+pub use types::PolicyDiffExit as PolicyDiffExitType;
 pub use types::{
-    ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult,
-    ConfigFieldChange, DependencyEdge, FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION,
-    PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
     sort_compensation_candidates_deterministic, sort_config_field_changes_deterministic,
     sort_field_changes_deterministic, sort_module_policy_diffs_deterministic,
-    sort_policy_diff_errors_deterministic,
+    sort_policy_diff_errors_deterministic, ChangeClassification, ChangeScope,
+    CompensationCandidate, CompensationResult, ConfigFieldChange, DependencyEdge, FieldChange,
+    ModulePolicyDiff, PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
+    POLICY_DIFF_SCHEMA_VERSION,
 };
 
 pub fn build_policy_diff_report(
