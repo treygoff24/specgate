@@ -297,6 +297,86 @@ fn unresolved_edge_policy_ignore_to_error_is_narrowing() {
 }
 
 #[test]
+fn unresolved_edge_policy_error_to_warn_is_widening() {
+    let base = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Error,
+        ..SpecConfig::default()
+    };
+
+    let head = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
+        ..SpecConfig::default()
+    };
+
+    let changes = classify_config_changes(&base, &head);
+    assert_single_change(
+        &changes,
+        "unresolved_edge_policy",
+        ChangeClassification::Widening,
+    );
+}
+
+#[test]
+fn unresolved_edge_policy_warn_to_error_is_narrowing() {
+    let base = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
+        ..SpecConfig::default()
+    };
+
+    let head = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Error,
+        ..SpecConfig::default()
+    };
+
+    let changes = classify_config_changes(&base, &head);
+    assert_single_change(
+        &changes,
+        "unresolved_edge_policy",
+        ChangeClassification::Narrowing,
+    );
+}
+
+#[test]
+fn unresolved_edge_policy_warn_to_ignore_is_widening() {
+    let base = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
+        ..SpecConfig::default()
+    };
+
+    let head = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Ignore,
+        ..SpecConfig::default()
+    };
+
+    let changes = classify_config_changes(&base, &head);
+    assert_single_change(
+        &changes,
+        "unresolved_edge_policy",
+        ChangeClassification::Widening,
+    );
+}
+
+#[test]
+fn unresolved_edge_policy_ignore_to_warn_is_narrowing() {
+    let base = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Ignore,
+        ..SpecConfig::default()
+    };
+
+    let head = SpecConfig {
+        unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
+        ..SpecConfig::default()
+    };
+
+    let changes = classify_config_changes(&base, &head);
+    assert_single_change(
+        &changes,
+        "unresolved_edge_policy",
+        ChangeClassification::Narrowing,
+    );
+}
+
+#[test]
 fn strict_ownership_true_to_false_is_widening() {
     let base = SpecConfig {
         strict_ownership: true,
@@ -500,4 +580,50 @@ fn no_changes_produces_empty() {
     let config = SpecConfig::default();
     let changes = classify_config_changes(&config, &config);
     assert!(changes.is_empty());
+}
+
+#[test]
+fn config_change_renders_before_after_values_correctly() {
+    let base = SpecConfig {
+        jest_mock_mode: JestMockMode::Warn,
+        ..SpecConfig::default()
+    };
+
+    let head = SpecConfig {
+        jest_mock_mode: JestMockMode::Enforce,
+        ..SpecConfig::default()
+    };
+
+    let changes = classify_config_changes(&base, &head);
+    let change = changes_for(&changes, "jest_mock_mode");
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].before, "warn");
+    assert_eq!(change[0].after, "enforce");
+}
+
+#[test]
+fn config_change_renders_absent_value_for_added_set_entry() {
+    let base = SpecConfig::default();
+    let mut head = SpecConfig::default();
+    head.exclude.push("**/new-exclude/**".into());
+
+    let changes = classify_config_changes(&base, &head);
+    let change = changes_for(&changes, "exclude");
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].before, "<absent>");
+    assert_eq!(change[0].after, "**/new-exclude/**");
+}
+
+#[test]
+fn config_change_renders_none_for_removed_optional_limit() {
+    let mut base = SpecConfig::default();
+    base.escape_hatches.max_new_per_diff = Some(5);
+
+    let head = SpecConfig::default();
+    let changes = classify_config_changes(&base, &head);
+
+    let change = changes_for(&changes, "escape_hatches.max_new_per_diff");
+    assert_eq!(change.len(), 1);
+    assert_eq!(change[0].before, "5");
+    assert_eq!(change[0].after, "none");
 }
