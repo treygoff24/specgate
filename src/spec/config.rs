@@ -634,6 +634,61 @@ import_hygiene:
     }
 
     #[test]
+    fn import_hygiene_parses_mixed_legacy_and_structured_entries() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  deny_deep_imports:
+    - lodash
+    - pattern: express/**
+      max_depth: 2
+    - react
+"#,
+        )
+        .expect("parse config");
+
+        assert_eq!(parsed.import_hygiene.deny_deep_imports.len(), 3);
+        // Legacy entry: lodash
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].pattern, "lodash");
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].max_depth, 0);
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].severity, None);
+        // Structured entry: express/**
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[1].pattern,
+            "express/**"
+        );
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[1].max_depth, 2);
+        // Legacy entry: react
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[2].pattern, "react");
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[2].max_depth, 0);
+    }
+
+    #[test]
+    fn structured_entry_without_max_depth_uses_default_zero() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  deny_deep_imports:
+    - pattern: lodash/**
+"#,
+        )
+        .expect("parse config");
+
+        assert_eq!(parsed.import_hygiene.deny_deep_imports.len(), 1);
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[0].pattern,
+            "lodash/**"
+        );
+        // Default max_depth should be 0 (deny all deep imports)
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].max_depth, 0);
+        // Default severity should be warning
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[0].effective_severity(),
+            Severity::Warning
+        );
+    }
+
+    #[test]
     fn test_boundary_compat_maps_legacy_deny_production_imports() {
         let parsed: SpecConfig = yaml_serde::from_str(
             r#"
