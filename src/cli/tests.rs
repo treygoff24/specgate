@@ -1,10 +1,13 @@
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use serde_json::Value;
 use tempfile::TempDir;
 
 use super::test_support::{write_basic_project, write_basic_project_with_edge, write_file};
-use super::*;
+use crate::cli::doctor::STRUCTURED_TRACE_SCHEMA_VERSION;
+use crate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn parse_json(stdout: &str) -> Value {
     serde_json::from_str(stdout).expect("cli output json")
@@ -85,6 +88,29 @@ fn check_exit_codes_follow_policy_vs_runtime_contract() {
         "--no-baseline",
     ]);
     assert_eq!(runtime.exit_code, EXIT_CODE_RUNTIME_ERROR);
+}
+
+#[test]
+fn check_fails_closed_on_malformed_workspace_config() {
+    let temp = TempDir::new().expect("tempdir");
+    write_basic_project(temp.path());
+    write_file(
+        temp.path(),
+        "package.json",
+        "{\"name\":\"root\",\"workspaces\":17}",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
+    assert!(result.stdout.contains("\"status\": \"error\""));
+    assert!(result.stdout.contains("failed to discover workspace packages"));
 }
 
 #[test]

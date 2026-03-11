@@ -461,3 +461,88 @@ fn check_rejects_invalid_tsconfig_filename_in_config() {
         result.stdout
     );
 }
+
+#[test]
+fn check_reports_malformed_workspace_config_as_runtime_error() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"{"name":"broken-monorepo","private":true,"workspaces":17}"#,
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/index.ts", "export const app = 1;\n");
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code,
+        EXIT_CODE_RUNTIME_ERROR,
+        "malformed workspace config should fail closed; stdout={stdout}, stderr={stderr}",
+        stdout = result.stdout,
+        stderr = result.stderr
+    );
+    assert!(
+        result.stdout.contains("package.json"),
+        "stdout should identify the malformed workspace source; stdout={}",
+        result.stdout
+    );
+    assert!(
+        result.stdout.contains("workspaces"),
+        "stdout should mention the malformed workspaces field; stdout={}",
+        result.stdout
+    );
+}
+
+#[test]
+fn check_allows_valid_workspace_config_with_no_matching_packages() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"{"name":"empty-monorepo","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        "version: \"2.2\"\nmodule: app\nboundaries:\n  path: src/**/*\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/index.ts", "export const app = 1;\n");
+
+    let (result, verdict) = run_check(temp.path());
+
+    assert_eq!(
+        result.exit_code,
+        EXIT_CODE_PASS,
+        "valid but empty workspace discovery should remain a success; stdout={stdout}, stderr={stderr}",
+        stdout = result.stdout,
+        stderr = result.stderr
+    );
+    assert_eq!(verdict["status"], "pass");
+    assert!(
+        verdict.get("workspace_packages").is_none() || verdict["workspace_packages"].is_null(),
+        "workspace_packages should stay absent for legitimate empty discovery; verdict={verdict:?}"
+    );
+}

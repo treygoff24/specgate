@@ -9,6 +9,17 @@ use walkdir::WalkDir;
 
 pub mod config;
 pub mod ownership;
+pub mod rule_ids {
+    pub const BOUNDARY_CANONICAL_IMPORT_RULE_ID: &str = "boundary.canonical_import";
+    pub const BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS: &str = "boundary.canonical_imports";
+    pub const BOUNDARY_CONTRACT_EMPTY_RULE_ID: &str = "boundary.contract_empty";
+    pub const BOUNDARY_CONTRACT_MISSING_RULE_ID: &str = "boundary.contract_missing";
+    pub const BOUNDARY_CONTRACT_REF_INVALID_RULE_ID: &str = "boundary.contract_ref_invalid";
+    pub const BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID: &str =
+        "boundary.contract_version_mismatch";
+    pub const BOUNDARY_ENVELOPE_MISSING_RULE_ID: &str = "boundary.envelope_missing";
+    pub const BOUNDARY_MATCH_UNRESOLVED_RULE_ID: &str = "boundary.match_unresolved";
+}
 pub mod types;
 pub mod validation;
 pub mod workspace_discovery;
@@ -41,6 +52,33 @@ pub enum SpecError {
     },
     #[error("invalid config: {message}")]
     ConfigInvalid { message: String },
+    #[error("failed to parse workspace yaml file: {path}")]
+    WorkspaceYamlParse {
+        path: PathBuf,
+        #[source]
+        source: yaml_serde::Error,
+    },
+    #[error("failed to parse workspace json file: {path}")]
+    WorkspaceJsonParse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("invalid workspace config: {path}: {message}")]
+    WorkspaceConfigInvalid { path: PathBuf, message: String },
+    #[error("invalid workspace glob '{pattern}' from {path}: {source}")]
+    WorkspaceGlobInvalid {
+        path: PathBuf,
+        pattern: String,
+        #[source]
+        source: globset::Error,
+    },
+    #[error("failed to traverse workspace path from {path}: {source}")]
+    WorkspaceTraversal {
+        path: PathBuf,
+        #[source]
+        source: walkdir::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, SpecError>;
@@ -100,11 +138,11 @@ pub fn discover_specs(project_root: &Path, config: &SpecConfig) -> Result<Vec<Sp
             continue;
         }
 
-        for entry in WalkDir::new(&absolute_dir)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(std::result::Result::ok)
-        {
+        for entry in WalkDir::new(&absolute_dir).follow_links(true).into_iter() {
+            let entry = entry.map_err(|source| SpecError::WorkspaceTraversal {
+                path: absolute_dir.clone(),
+                source,
+            })?;
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -225,5 +263,32 @@ mod tests {
         let specs = discover_specs(temp.path(), &config).expect("discover");
         let modules: Vec<_> = specs.into_iter().map(|s| s.module).collect();
         assert_eq!(modules, vec!["a", "b"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discover_specs_fails_closed_on_walkdir_errors() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().expect("tempdir");
+        let specs_dir = temp.path().join("specs");
+        fs::create_dir_all(specs_dir.join("loop")).expect("mkdir");
+        fs::write(
+            specs_dir.join("app.spec.yml"),
+            "version: \"2.2\"\nmodule: app\nconstraints: []\n",
+        )
+        .expect("write spec");
+        symlink(&specs_dir, specs_dir.join("loop/back")).expect("symlink");
+
+        let config = SpecConfig {
+            spec_dirs: vec!["specs".to_string()],
+            ..SpecConfig::default()
+        };
+
+        let error = discover_specs(temp.path(), &config).expect_err("discover should fail");
+        assert!(
+            matches!(error, SpecError::WorkspaceTraversal { .. }),
+            "expected traversal error, got {error:?}"
+        );
     }
 }

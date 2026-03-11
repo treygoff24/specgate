@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use globset::GlobBuilder;
 
@@ -246,7 +246,7 @@ fn check_match_patterns(
         let matcher = glob.compile_matcher();
 
         // Check if any file matches this pattern
-        let matches = find_matching_files(ctx.project_root, &matcher);
+        let matches = find_matching_files(ctx, &matcher);
         if matches.is_empty() {
             failed_patterns.push(pattern.clone());
             continue;
@@ -410,30 +410,19 @@ fn check_envelope(
     violations
 }
 
-/// Find all files matching a glob pattern under the project root.
-fn find_matching_files(project_root: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
-    let mut matches = Vec::new();
+/// Find all discovered source files matching a glob pattern.
+fn find_matching_files(ctx: &RuleContext<'_>, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
+    let canonical_root =
+        std::fs::canonicalize(ctx.project_root).unwrap_or_else(|_| ctx.project_root.to_path_buf());
 
-    for entry in walkdir::WalkDir::new(project_root)
-        .follow_links(true)
+    ctx.graph
+        .files()
         .into_iter()
-        .filter_map(std::result::Result::ok)
-    {
-        if entry.file_type().is_file() {
-            let path = entry.path();
-            let relative = match path.strip_prefix(project_root) {
-                Ok(r) => r,
-                Err(_) => path,
-            };
-            // Convert to string and normalize path separators
-            let relative_str = relative.to_string_lossy().replace('\\', "/");
-            if matcher.is_match(&relative_str) {
-                matches.push(path.to_path_buf());
-            }
-        }
-    }
-
-    matches
+        .filter_map(|node| {
+            let relative_str = crate::deterministic::normalize_repo_relative(&canonical_root, &node.path);
+            matcher.is_match(&relative_str).then(|| node.path.clone())
+        })
+        .collect()
 }
 
 /// Check that imports_contract references are valid (point to existing contracts in other modules).
@@ -499,6 +488,8 @@ fn check_contract_refs(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::resolver::ModuleResolver;
     use crate::spec::types::{Boundaries, ContractDirection, ContractMatch, EnvelopeRequirement};
@@ -762,6 +753,41 @@ mod tests {
         let violations = evaluate_contract_rules(&ctx, None);
 
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn match_patterns_only_consider_graph_discovered_source_files() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api")).expect("create src/api");
+        fs::write(temp.path().join("src/api/handler.txt"), "not source").expect("write txt");
+        fs::write(temp.path().join("src/api/index.ts"), "export {}").expect("write source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/*.txt"],
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_MATCH_UNRESOLVED_RULE_ID
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 
 use crate::deterministic::normalize_path;
 use crate::spec::{
-    SpecConfig,
+    Result, SpecConfig, SpecError,
     config::{DEFAULT_EXCLUDED_DIRS, include_dir_set},
 };
 
@@ -26,18 +26,25 @@ struct PnpmWorkspaceConfig {
     packages: Vec<String>,
 }
 
-pub fn discover_workspace_packages(project_root: &Path) -> Vec<WorkspacePackage> {
-    discover_workspace_packages_with_config(project_root, &SpecConfig::default())
+pub fn discover_workspace_packages_best_effort(project_root: &Path) -> Vec<WorkspacePackage> {
+    discover_workspace_packages_strict(project_root, &SpecConfig::default()).unwrap_or_default()
 }
 
-pub fn discover_workspace_packages_with_config(
+pub fn discover_workspace_packages_with_config_best_effort(
     project_root: &Path,
     config: &SpecConfig,
 ) -> Vec<WorkspacePackage> {
+    discover_workspace_packages_strict(project_root, config).unwrap_or_default()
+}
+
+pub fn discover_workspace_packages_strict(
+    project_root: &Path,
+    config: &SpecConfig,
+) -> Result<Vec<WorkspacePackage>> {
     let include_dirs = include_dir_set(&config.include_dirs);
-    let mut patterns = workspace_patterns(project_root);
+    let mut patterns = workspace_patterns(project_root)?;
     if patterns.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     patterns.sort();
@@ -45,7 +52,7 @@ pub fn discover_workspace_packages_with_config(
 
     let mut candidate_dirs = BTreeSet::new();
     for pattern in patterns {
-        candidate_dirs.extend(expand_workspace_pattern(project_root, &pattern));
+        candidate_dirs.extend(expand_workspace_pattern(project_root, &pattern)?);
     }
 
     let mut packages = Vec::new();
@@ -98,68 +105,110 @@ pub fn discover_workspace_packages_with_config(
             .cmp(&b.relative_dir)
             .then_with(|| a.module.cmp(&b.module))
     });
-    packages
+    Ok(packages)
 }
 
-fn workspace_patterns(project_root: &Path) -> Vec<String> {
+fn workspace_patterns(project_root: &Path) -> Result<Vec<String>> {
     let mut patterns = Vec::new();
-    patterns.extend(read_pnpm_workspace_patterns(project_root));
-    patterns.extend(read_package_json_workspace_patterns(project_root));
-    patterns
+    patterns.extend(read_pnpm_workspace_patterns(project_root)?);
+    patterns.extend(read_package_json_workspace_patterns(project_root)?);
+    Ok(patterns)
 }
 
-fn read_pnpm_workspace_patterns(project_root: &Path) -> Vec<String> {
+fn read_pnpm_workspace_patterns(project_root: &Path) -> Result<Vec<String>> {
     let path = project_root.join("pnpm-workspace.yaml");
     let Ok(contents) = fs::read_to_string(path) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
-    let Ok(parsed) = yaml_serde::from_str::<PnpmWorkspaceConfig>(&contents) else {
-        return Vec::new();
-    };
+    let parsed = yaml_serde::from_str::<PnpmWorkspaceConfig>(&contents).map_err(|source| {
+        SpecError::WorkspaceYamlParse {
+            path: project_root.join("pnpm-workspace.yaml"),
+            source,
+        }
+    })?;
 
-    parsed
+    Ok(parsed
         .packages
         .into_iter()
         .map(|pattern| normalize_pattern(&pattern))
         .filter(|pattern| !pattern.is_empty())
-        .collect()
+        .collect())
 }
 
-fn read_package_json_workspace_patterns(project_root: &Path) -> Vec<String> {
+fn read_package_json_workspace_patterns(project_root: &Path) -> Result<Vec<String>> {
     let path = project_root.join("package.json");
-    let Ok(contents) = fs::read_to_string(path) else {
-        return Vec::new();
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return Ok(Vec::new());
     };
 
-    let Ok(parsed) = serde_json::from_str::<Value>(&contents) else {
-        return Vec::new();
-    };
+    let parsed = serde_json::from_str::<Value>(&contents).map_err(|source| {
+        SpecError::WorkspaceJsonParse {
+            path: path.clone(),
+            source,
+        }
+    })?;
 
     let Some(workspaces) = parsed.get("workspaces") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
     match workspaces {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(Value::as_str)
-            .map(normalize_pattern)
-            .filter(|pattern| !pattern.is_empty())
-            .collect(),
-        Value::Object(map) => map
-            .get("packages")
-            .and_then(Value::as_array)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(normalize_pattern)
-                    .filter(|pattern| !pattern.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default(),
-        _ => Vec::new(),
+        Value::Array(entries) => {
+            let entries = entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .as_str()
+                        .ok_or_else(|| SpecError::WorkspaceConfigInvalid {
+                            path: path.clone(),
+                            message: "workspaces array entries must be strings".to_string(),
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(entries
+                .into_iter()
+                .map(normalize_pattern)
+                .filter(|pattern| !pattern.is_empty())
+                .collect())
+        }
+        Value::Object(map) => {
+            let Some(entries) = map.get("packages") else {
+                return Err(SpecError::WorkspaceConfigInvalid {
+                    path: path.clone(),
+                    message: "workspaces object must contain a 'packages' array".to_string(),
+                });
+            };
+            let Some(entries) = entries.as_array() else {
+                return Err(SpecError::WorkspaceConfigInvalid {
+                    path: path.clone(),
+                    message: "workspaces.packages must be an array".to_string(),
+                });
+            };
+
+            let entries = entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .as_str()
+                        .ok_or_else(|| SpecError::WorkspaceConfigInvalid {
+                            path: path.clone(),
+                            message: "workspaces.packages entries must be strings".to_string(),
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(entries
+                .into_iter()
+                .map(normalize_pattern)
+                .filter(|pattern| !pattern.is_empty())
+                .collect())
+        }
+        _ => Err(SpecError::WorkspaceConfigInvalid {
+            path,
+            message: "workspaces must be an array or an object with a 'packages' array".to_string(),
+        }),
     }
 }
 
@@ -171,28 +220,30 @@ fn normalize_pattern(raw: &str) -> String {
         .replace('\\', "/")
 }
 
-fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Vec<String> {
+fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Result<Vec<String>> {
     let normalized_pattern = normalize_pattern(pattern);
     if normalized_pattern.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     if !normalized_pattern.contains('*') {
         let candidate = project_root.join(&normalized_pattern);
-        return if candidate.is_dir() {
+        return Ok(if candidate.is_dir() {
             vec![normalized_pattern]
         } else {
             Vec::new()
-        };
+        });
     }
 
-    let Ok(matcher) = GlobBuilder::new(&normalized_pattern)
+    let matcher = GlobBuilder::new(&normalized_pattern)
         .literal_separator(true)
         .build()
         .map(|glob| glob.compile_matcher())
-    else {
-        return Vec::new();
-    };
+        .map_err(|source| SpecError::WorkspaceGlobInvalid {
+            path: workspace_source_path(project_root, pattern),
+            pattern: normalized_pattern.clone(),
+            source,
+        })?;
 
     let first_wildcard = normalized_pattern.find('*').unwrap_or(0);
     let prefix = normalized_pattern[..first_wildcard].trim_end_matches('/');
@@ -202,7 +253,7 @@ fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Vec<String> {
         project_root.join(prefix)
     };
     if !search_root.is_dir() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut candidates = BTreeSet::new();
@@ -211,7 +262,11 @@ fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Vec<String> {
         walker = walker.max_depth(1);
     }
 
-    for entry in walker.into_iter().filter_map(std::result::Result::ok) {
+    for entry in walker {
+        let entry = entry.map_err(|source| SpecError::WorkspaceTraversal {
+            path: search_root.clone(),
+            source,
+        })?;
         if !entry.file_type().is_dir() {
             continue;
         }
@@ -225,7 +280,17 @@ fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Vec<String> {
         }
     }
 
-    candidates.into_iter().collect()
+    Ok(candidates.into_iter().collect())
+}
+
+fn workspace_source_path(project_root: &Path, pattern: &str) -> std::path::PathBuf {
+    if project_root.join("pnpm-workspace.yaml").is_file() {
+        return project_root.join("pnpm-workspace.yaml");
+    }
+    if project_root.join("package.json").is_file() {
+        return project_root.join("package.json");
+    }
+    project_root.join(pattern)
 }
 
 pub(crate) fn excluded_dir_names() -> &'static [&'static str] {
@@ -285,7 +350,7 @@ mod tests {
             "export const shared = 1;\n",
         );
 
-        let packages = discover_workspace_packages(temp.path());
+        let packages = discover_workspace_packages_best_effort(temp.path());
         assert_eq!(packages.len(), 2);
 
         assert_eq!(packages[0].module, "shared");
@@ -316,7 +381,7 @@ mod tests {
             "export const alpha = 1;\n",
         );
 
-        let packages = discover_workspace_packages(temp.path());
+        let packages = discover_workspace_packages_best_effort(temp.path());
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].module, "alpha");
         assert_eq!(packages[0].relative_dir, "packages/alpha");
@@ -342,7 +407,7 @@ mod tests {
             "export const lib = 1;\n",
         );
 
-        let packages = discover_workspace_packages(temp.path());
+        let packages = discover_workspace_packages_best_effort(temp.path());
         assert!(packages.is_empty(), "vendor should be excluded by default");
     }
 
@@ -370,7 +435,7 @@ mod tests {
             ..SpecConfig::default()
         };
 
-        let packages = discover_workspace_packages_with_config(temp.path(), &config);
+        let packages = discover_workspace_packages_with_config_best_effort(temp.path(), &config);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].relative_dir, "vendor/lib");
     }
@@ -394,8 +459,8 @@ mod tests {
             "export const app = 1;\n",
         );
 
-        let default_packages = discover_workspace_packages(temp.path());
-        let include_packages = discover_workspace_packages_with_config(
+        let default_packages = discover_workspace_packages_best_effort(temp.path());
+        let include_packages = discover_workspace_packages_with_config_best_effort(
             temp.path(),
             &SpecConfig {
                 include_dirs: vec!["packages".to_string()],
@@ -405,5 +470,68 @@ mod tests {
 
         assert_eq!(include_packages, default_packages);
         assert_eq!(include_packages.len(), 1);
+    }
+
+    #[test]
+    fn checked_discovery_rejects_malformed_package_json_workspaces() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "package.json",
+            "{\"name\":\"root\",\"workspaces\":17}",
+        );
+
+        let error =
+            discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
+                .expect_err("workspace discovery should fail");
+
+        assert!(
+            error.to_string().contains("workspaces"),
+            "error should mention workspaces: {error}"
+        );
+    }
+
+    #[test]
+    fn best_effort_discovery_drops_workspace_config_errors() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "package.json",
+            "{\"name\":\"root\",\"workspaces\":17}",
+        );
+
+        let packages = discover_workspace_packages_best_effort(temp.path());
+
+        assert!(packages.is_empty(), "best-effort discovery should be lossy");
+    }
+
+    #[test]
+    fn checked_discovery_rejects_invalid_workspace_glob() {
+        let temp = TempDir::new().expect("tempdir");
+        let error = expand_workspace_pattern(temp.path(), "[abc*").expect_err("invalid glob");
+
+        assert!(
+            error.to_string().contains("invalid workspace glob"),
+            "error should mention invalid workspace glob: {error}"
+        );
+    }
+
+    #[test]
+    fn checked_discovery_allows_valid_but_empty_workspace_configs() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "package.json",
+            "{\"workspaces\":[\"packages/*\"]}",
+        );
+
+        let packages =
+            discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
+                .expect("workspace discovery should succeed");
+
+        assert!(
+            packages.is_empty(),
+            "unmatched workspace globs should be allowed"
+        );
     }
 }

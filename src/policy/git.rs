@@ -691,16 +691,7 @@ pub fn list_tracked_files_scoped(
         ));
     }
 
-    let mut files = BTreeSet::new();
-    for token in output
-        .stdout
-        .split(|byte| *byte == b'\0')
-        .filter(|token| !token.is_empty())
-    {
-        files.insert(parse_utf8_token(token, "path")?);
-    }
-
-    Ok(files)
+    Ok(parse_ls_tree_name_only_z(&output.stdout)?.into_iter().collect())
 }
 
 pub fn parse_name_status_z(raw: &[u8]) -> Result<DiscoveredSpecFileChanges, PolicyGitError> {
@@ -790,6 +781,21 @@ fn parse_utf8_token(token: &[u8], label: &str) -> Result<String, PolicyGitError>
     })
 }
 
+fn parse_ls_tree_name_only_z(raw: &[u8]) -> Result<Vec<String>, PolicyGitError> {
+    raw.split(|byte| *byte == b'\0')
+        .filter(|token| !token.is_empty())
+        .map(|token| parse_utf8_token(token, "path"))
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn load_spec_snapshots_for_ref_from_raw_ls_tree(
+    _reference: &str,
+    raw: &[u8],
+) -> Result<Vec<String>, PolicyGitError> {
+    parse_ls_tree_name_only_z(raw)
+}
+
 /// Load all spec files from a git reference.
 /// Used for compensation analysis to build dependency edges from HEAD specs.
 pub fn load_spec_snapshots_for_ref(
@@ -820,13 +826,10 @@ pub fn load_spec_snapshots_for_ref(
         ));
     }
 
-    let spec_paths: Vec<String> = output
-        .stdout
-        .split(|byte| *byte == b'\0')
-        .filter(|token| !token.is_empty())
-        .filter_map(|token| String::from_utf8(token.to_vec()).ok())
+    let spec_paths = parse_ls_tree_name_only_z(&output.stdout)?
+        .into_iter()
         .filter(|path| path.ends_with(".spec.yml"))
-        .collect();
+        .collect::<Vec<_>>();
 
     if spec_paths.is_empty() {
         return Ok(Vec::new());

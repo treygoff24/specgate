@@ -86,7 +86,7 @@ pub(crate) fn build_workspace_packages_info(
     project_root: &Path,
     config: &SpecConfig,
 ) -> Option<Vec<WorkspacePackageInfo>> {
-    let packages = discover_workspace_packages_with_config(project_root, config);
+    let packages = discover_workspace_packages_with_config_best_effort(project_root, config);
     if packages.is_empty() {
         return None;
     }

@@ -1,4 +1,6 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::cli::LoadedProject;
 
 use crate::deterministic::normalize_repo_relative;
 use crate::git_blast::BlastRadius;
@@ -21,7 +23,7 @@ pub(crate) fn build_blast_radius(
         return Ok(None);
     };
 
-    let blast_data = build_blast_radius_data(loaded, edge_pairs);
+    let blast_data = build_blast_radius_data(loaded, edge_pairs)?;
     let radius = crate::git_blast::compute_blast_radius(
         &loaded.project_root,
         since_ref,
@@ -73,16 +75,24 @@ pub(crate) fn derive_blast_edge_pairs(
 pub(crate) fn build_blast_radius_data(
     loaded: &LoadedProject,
     edge_pairs: &BTreeSet<(String, String)>,
-) -> BlastRadiusData {
+) -> std::result::Result<BlastRadiusData, String> {
     let mut module_to_files: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut file_to_module: BTreeMap<String, String> = BTreeMap::new();
-    let project_files = walkdir::WalkDir::new(&loaded.project_root)
+    let mut project_files = Vec::new();
+    for entry in walkdir::WalkDir::new(&loaded.project_root)
         .follow_links(true)
         .into_iter()
-        .filter_map(std::result::Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|entry| normalize_repo_relative(&loaded.project_root, entry.path()))
-        .collect::<Vec<_>>();
+    {
+        let entry = entry.map_err(|error| {
+            format!(
+                "failed to discover files for blast radius under {}: {error}",
+                loaded.project_root.display()
+            )
+        })?;
+        if entry.file_type().is_file() {
+            project_files.push(normalize_repo_relative(&loaded.project_root, entry.path()));
+        }
+    }
 
     // Map files to modules based on spec boundaries
     for spec in &loaded.specs {
@@ -132,9 +142,9 @@ pub(crate) fn build_blast_radius_data(
             .insert(from_module.clone());
     }
 
-    BlastRadiusData {
+    Ok(BlastRadiusData {
         module_to_files,
         file_to_module,
         importer_graph,
-    }
+    })
 }

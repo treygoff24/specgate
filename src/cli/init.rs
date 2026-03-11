@@ -145,7 +145,8 @@ pub(crate) fn infer_init_scaffold_specs(
         }];
     }
 
-    let workspace_packages = spec::workspace_discovery::discover_workspace_packages(project_root);
+    let workspace_packages =
+        spec::workspace_discovery::discover_workspace_packages_best_effort(project_root);
     if !workspace_packages.is_empty() {
         let mut scaffolds = Vec::new();
         if let Some(root_path) = infer_root_module_path(project_root) {

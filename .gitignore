@@ -1,8 +1,11 @@
 /target
 .DS_Store
 .opencode/
+.claude/
+.desloppify/
 merge_blockers.md
 output/
+scorecard.png
 
 npm/specgate/node_modules/
 thoughts/

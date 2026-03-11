@@ -303,6 +303,18 @@ fn parse_name_status_z_preserves_unicode_and_special_paths() {
 }
 
 #[test]
+fn load_spec_snapshots_for_ref_rejects_non_utf8_ls_tree_paths() {
+    let error = super::git::load_spec_snapshots_for_ref_from_raw_ls_tree(
+        "HEAD",
+        b"modules/app.spec.yml\0modules/\xFF.spec.yml\0",
+    )
+    .expect_err("non-UTF-8 ls-tree output should fail");
+
+    assert_eq!(error.code(), "git.diff_parse_error");
+    assert!(error.message().contains("non-UTF-8 path token"));
+}
+
+#[test]
 fn discover_spec_file_changes_rejects_non_git_directories() {
     let temp = TempDir::new().expect("tempdir");
 
