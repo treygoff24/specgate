@@ -1,9 +1,17 @@
 use specgate::policy::config_diff::classify_config_changes;
 use specgate::policy::types::{ChangeClassification, ConfigFieldChange};
 use specgate::spec::config::{
-    JestMockMode, ReleaseChannel, SpecConfig, StaleBaselinePolicy, StrictOwnershipLevel,
-    UnresolvedEdgePolicy,
+    DenyDeepImportEntry, JestMockMode, ReleaseChannel, SpecConfig, StaleBaselinePolicy,
+    StrictOwnershipLevel, UnresolvedEdgePolicy,
 };
+
+fn deep_import_entry(pattern: &str) -> DenyDeepImportEntry {
+    DenyDeepImportEntry {
+        pattern: pattern.to_string(),
+        max_depth: 0,
+        severity: None,
+    }
+}
 
 fn changes_for<'a>(
     changes: &'a [ConfigFieldChange],
@@ -408,7 +416,7 @@ fn strict_ownership_false_to_true_is_narrowing() {
 #[test]
 fn import_hygiene_deny_deep_imports_removed_is_widening() {
     let mut base = SpecConfig::default();
-    base.import_hygiene.deny_deep_imports = vec!["lodash".into()];
+    base.import_hygiene.deny_deep_imports = vec![deep_import_entry("lodash")];
 
     let head = SpecConfig::default();
     let changes = classify_config_changes(&base, &head);
@@ -424,7 +432,7 @@ fn import_hygiene_deny_deep_imports_removed_is_widening() {
 fn import_hygiene_deny_deep_imports_added_is_narrowing() {
     let base = SpecConfig::default();
     let mut head = SpecConfig::default();
-    head.import_hygiene.deny_deep_imports = vec!["lodash".into()];
+    head.import_hygiene.deny_deep_imports = vec![deep_import_entry("lodash")];
 
     let changes = classify_config_changes(&base, &head);
     assert_single_change(

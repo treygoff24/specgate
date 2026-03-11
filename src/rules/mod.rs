@@ -5,7 +5,15 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::deterministic::normalize_repo_relative;
 use crate::graph::DependencyGraph;
-use crate::spec::{SpecConfig, SpecFile};
+use crate::spec::{Severity, SpecConfig, SpecFile};
+
+fn severity_sort_rank(severity: Option<Severity>) -> u8 {
+    match severity {
+        Some(Severity::Error) => 0,
+        Some(Severity::Warning) => 1,
+        None => 2,
+    }
+}
 
 pub mod boundary;
 pub mod circular;
@@ -54,6 +62,7 @@ pub struct RuleContext<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleViolation {
     pub rule: String,
+    pub severity: Option<Severity>,
     pub message: String,
     pub from_file: PathBuf,
     pub to_file: Option<PathBuf>,
@@ -88,6 +97,7 @@ pub(crate) fn sort_violations_stable(violations: &mut [RuleViolation]) {
             .then_with(|| a.to_file.cmp(&b.to_file))
             .then_with(|| a.from_module.cmp(&b.from_module))
             .then_with(|| a.to_module.cmp(&b.to_module))
+            .then_with(|| severity_sort_rank(a.severity).cmp(&severity_sort_rank(b.severity)))
             .then_with(|| a.rule.cmp(&b.rule))
             .then_with(|| a.message.cmp(&b.message))
     });

@@ -333,8 +333,10 @@ pub(crate) fn analyze_project(
     let hygiene_violations = evaluate_hygiene_rules(&ctx)
         .into_iter()
         .map(|violation| PolicyViolation {
+            severity: violation
+                .severity
+                .unwrap_or_else(|| default_hygiene_rule_severity(&violation.rule)),
             rule: violation.rule,
-            severity: Severity::Error,
             message: violation.message,
             from_file: violation.from_file,
             to_file: violation.to_file,

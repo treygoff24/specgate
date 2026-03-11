@@ -4,6 +4,7 @@ use crate::cli::{
 };
 use crate::deterministic::normalize_repo_relative;
 
+use super::canonical::canonical_import_findings;
 use super::types::{DoctorOutput, DoctorOverlapOutput};
 
 pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
@@ -53,6 +54,16 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
     };
 
     let workspace_packages = build_workspace_packages_info(&loaded.project_root, &loaded.config);
+    let findings = match canonical_import_findings(&loaded) {
+        Ok(findings) => findings,
+        Err(error) => {
+            return runtime_error_json(
+                "runtime",
+                "failed to evaluate doctor findings",
+                vec![error],
+            );
+        }
+    };
 
     let tsconfig_filename_override = if loaded.config.tsconfig_filename != "tsconfig.json" {
         Some(loaded.config.tsconfig_filename.clone())
@@ -72,6 +83,7 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         policy_violation_count: artifacts.policy_violations.len(),
         layer_config_issues: artifacts.layer_config_issues,
         module_map_overlaps: overlaps,
+        findings,
         workspace_packages,
         tsconfig_filename_override,
     };

@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use super::trace_types::TraceResultKind;
+use crate::spec::Severity;
 use crate::verdict::WorkspacePackageInfo;
 
 #[derive(Debug, Serialize)]
@@ -16,10 +17,22 @@ pub(super) struct DoctorOutput {
     pub(super) policy_violation_count: usize,
     pub(super) layer_config_issues: Vec<String>,
     pub(super) module_map_overlaps: Vec<DoctorOverlapOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) findings: Vec<DoctorFindingOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) workspace_packages: Option<Vec<WorkspacePackageInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tsconfig_filename_override: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct DoctorFindingOutput {
+    pub(super) rule: String,
+    pub(super) severity: Severity,
+    pub(super) module: String,
+    pub(super) message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) spec_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

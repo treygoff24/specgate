@@ -159,6 +159,7 @@ fn check_contract_file(
         return Some(ContractRuleViolation::new(
             RuleViolation {
                 rule: BOUNDARY_CONTRACT_MISSING_RULE_ID.to_string(),
+                severity: None,
                 message: format!(
                     "Contract file '{}' not found for contract '{}' in module '{}'",
                     contract.contract, contract.id, spec.module
@@ -188,6 +189,7 @@ fn check_contract_file(
         return Some(ContractRuleViolation::new(
             RuleViolation {
                 rule: BOUNDARY_CONTRACT_EMPTY_RULE_ID.to_string(),
+                severity: None,
                 message: format!(
                     "Contract file '{}' is empty for contract '{}' in module '{}'",
                     contract.contract, contract.id, spec.module
@@ -262,6 +264,7 @@ fn check_match_patterns(
             Some(ContractRuleViolation::new(
                 RuleViolation {
                     rule: BOUNDARY_MATCH_UNRESOLVED_RULE_ID.to_string(),
+                    severity: None,
                     message: format!(
                         "Match patterns for contract '{}' in module '{}' did not resolve to any files: {:?}",
                         contract.id, spec.module, failed_patterns
@@ -313,6 +316,7 @@ fn check_envelope(
             violations.push(ContractRuleViolation::new(
                 RuleViolation {
                     rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
+                    severity: None,
                     message: format!(
                         "Required envelope import is missing for contract '{}' in file '{}'",
                         contract.id,
@@ -347,6 +351,7 @@ fn check_envelope(
             violations.push(ContractRuleViolation::new(
                 RuleViolation {
                     rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
+                    severity: None,
                     message: format!(
                         "Required envelope call for contract '{}' not found in file '{}'",
                         contract.id,
@@ -440,6 +445,7 @@ fn check_contract_refs(
         return Some(ContractRuleViolation::new(
             RuleViolation {
                 rule: BOUNDARY_CONTRACT_REF_INVALID_RULE_ID.to_string(),
+                severity: None,
                 message: format!(
                     "Invalid imports_contract references for contract '{}' in module '{}': {}",
                     contract.id, spec.module, ref_details.join(", ")
