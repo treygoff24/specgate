@@ -97,6 +97,19 @@ fn run_policy_diff_ndjson(root: &Path, base: &str) -> specgate::cli::CliRunResul
     ])
 }
 
+fn run_policy_diff_human(root: &Path, base: &str) -> specgate::cli::CliRunResult {
+    run([
+        "specgate",
+        "policy-diff",
+        "--project-root",
+        root.to_str().expect("utf8 root path"),
+        "--base",
+        base,
+        "--format",
+        "human",
+    ])
+}
+
 fn parse_ndjson_lines(stdout: &str) -> Vec<Value> {
     stdout
         .lines()
@@ -828,4 +841,136 @@ fn path_glob_change_with_unbounded_prefix_reports_limitation_summary() {
                         .contains("path_coverage_unbounded_mvp")
             })
     );
+}
+
+#[test]
+fn config_addition_is_structural_only_and_surfaces_all_formats() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(temp.path(), "src/app.ts", "export const app = 1;\n");
+    commit_all(temp.path(), "base");
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "jest_mock_mode: enforce\n",
+    );
+    commit_all(temp.path(), "head config widening");
+
+    let json_result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(json_result.exit_code, EXIT_CODE_PASS);
+
+    let json_output = parse_json(&json_result.stdout);
+    assert_eq!(json_output["summary"]["has_widening"], false);
+    assert_eq!(json_output["summary"]["widening_changes"], 0);
+    assert_eq!(json_output["summary"]["structural_changes"], 1);
+    assert_eq!(json_output["net_classification"], "structural");
+    assert_eq!(json_output["config_changes"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json_output["config_changes"][0]["field_path"],
+        "jest_mock_mode"
+    );
+    assert_eq!(
+        json_output["config_changes"][0]["classification"],
+        "structural"
+    );
+
+    let ndjson_result = run_policy_diff_ndjson(temp.path(), "HEAD~1");
+    assert_eq!(ndjson_result.exit_code, EXIT_CODE_PASS);
+
+    let events = parse_ndjson_lines(&ndjson_result.stdout);
+    assert!(events.iter().any(|event| {
+        event["type"] == "config_change"
+            && event["field_path"] == "jest_mock_mode"
+            && event["classification"] == "structural"
+    }));
+    assert_eq!(
+        events.last().expect("summary")["net_classification"],
+        "structural"
+    );
+
+    let human_result = run_policy_diff_human(temp.path(), "HEAD~1");
+    assert_eq!(human_result.exit_code, EXIT_CODE_PASS);
+    assert!(
+        human_result
+            .stdout
+            .contains("Config changes (specgate.config.yml):")
+    );
+    assert!(
+        human_result
+            .stdout
+            .contains("STRUCTURAL: jest_mock_mode: warn -> enforce")
+    );
+}
+
+#[test]
+fn config_deletion_relaxes_to_defaults_and_reports_widening() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "strict_ownership: true\nstrict_ownership_level: warnings\n",
+    );
+    commit_all(temp.path(), "base strict config");
+
+    fs::remove_file(temp.path().join("specgate.config.yml")).expect("remove config");
+    commit_all(temp.path(), "delete config");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["summary"]["has_widening"], true);
+    assert_eq!(output["summary"]["widening_changes"], 2);
+    assert_eq!(output["net_classification"], "widening");
+    assert!(
+        output["config_changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|change| {
+                change["field_path"] == "strict_ownership" && change["classification"] == "widening"
+            })
+    );
+    assert!(
+        output["config_changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|change| {
+                change["field_path"] == "strict_ownership_level"
+                    && change["classification"] == "widening"
+            })
+    );
+}
+
+#[test]
+fn config_update_widening_contributes_to_exit_code_and_summary_counts() {
+    let temp = TempDir::new().expect("tempdir");
+    init_git_repo(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "jest_mock_mode: enforce\n",
+    );
+    commit_all(temp.path(), "base config");
+
+    write_file(temp.path(), "specgate.config.yml", "jest_mock_mode: warn\n");
+    commit_all(temp.path(), "relax config");
+
+    let result = run_policy_diff_json(temp.path(), "HEAD~1");
+    assert_eq!(result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["summary"]["has_widening"], true);
+    assert_eq!(output["summary"]["widening_changes"], 1);
+    assert_eq!(output["summary"]["structural_changes"], 0);
+    assert_eq!(output["net_classification"], "widening");
+    assert_eq!(output["diffs"].as_array().unwrap().len(), 0);
+    assert_eq!(output["config_changes"][0]["field_path"], "jest_mock_mode");
+    assert_eq!(output["config_changes"][0]["classification"], "widening");
 }

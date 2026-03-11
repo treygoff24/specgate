@@ -96,6 +96,9 @@ pub struct SpecConfig {
     /// causes a non-zero exit code.
     #[serde(default)]
     pub strict_ownership: bool,
+    /// How strictly ownership findings gate runs when strict ownership is enabled.
+    #[serde(default)]
+    pub strict_ownership_level: StrictOwnershipLevel,
 }
 
 /// Envelope validation settings for contract enforcement.
@@ -169,6 +172,14 @@ pub enum ReleaseChannel {
     #[default]
     Stable,
     Beta,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StrictOwnershipLevel {
+    #[default]
+    Errors,
+    Warnings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -318,6 +329,7 @@ impl Default for SpecConfig {
             unresolved_edge_policy: UnresolvedEdgePolicy::Warn,
             import_hygiene: ImportHygieneConfig::default(),
             strict_ownership: false,
+            strict_ownership_level: StrictOwnershipLevel::Errors,
         }
     }
 }
@@ -337,6 +349,7 @@ mod tests {
         assert!(!config.enforce_type_only_imports);
         assert!(config.include_dirs.is_empty());
         assert!(!config.baseline.require_metadata);
+        assert_eq!(config.strict_ownership_level, StrictOwnershipLevel::Errors);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
@@ -483,6 +496,7 @@ telemetry:
         assert!(rendered.contains("\"baseline\":{\"require_metadata\":false}"));
         assert!(rendered.contains("\"include_dirs\":[]"));
         assert!(rendered.contains("\"tsconfig_filename\":\"tsconfig.json\""));
+        assert!(rendered.contains("\"strict_ownership_level\":\"errors\""));
     }
 
     #[test]
@@ -591,5 +605,28 @@ telemetry:
         let parsed: SpecConfig =
             yaml_serde::from_str("spec_dirs:\n  - specs\n").expect("parse config");
         assert!(!parsed.strict_ownership);
+        assert_eq!(parsed.strict_ownership_level, StrictOwnershipLevel::Errors);
+    }
+
+    #[test]
+    fn test_strict_ownership_level_defaults_to_errors() {
+        let config = SpecConfig::default();
+        assert_eq!(config.strict_ownership_level, StrictOwnershipLevel::Errors);
+    }
+
+    #[test]
+    fn test_strict_ownership_level_parses_warnings() {
+        let parsed: SpecConfig =
+            yaml_serde::from_str("strict_ownership_level: warnings\n").expect("parse config");
+        assert_eq!(
+            parsed.strict_ownership_level,
+            StrictOwnershipLevel::Warnings
+        );
+    }
+
+    #[test]
+    fn test_strict_ownership_level_serializes_correctly() {
+        let rendered = serde_json::to_string(&SpecConfig::default()).expect("serialize");
+        assert!(rendered.contains("\"strict_ownership_level\":\"errors\""));
     }
 }

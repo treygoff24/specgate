@@ -107,6 +107,8 @@ impl PolicyDiffReport {
     pub fn sort_deterministic(&mut self) {
         sort_module_policy_diffs_deterministic(&mut self.diffs);
         sort_policy_diff_errors_deterministic(&mut self.errors);
+        sort_compensation_candidates_deterministic(&mut self.compensations);
+        sort_config_field_changes_deterministic(&mut self.config_changes);
     }
 }
 
@@ -147,13 +149,39 @@ pub struct CompensationCandidate {
     pub result: CompensationResult,
 }
 
-/// Placeholder — fully defined in Task 2.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigFieldChange {
     pub field_path: String,
     pub classification: ChangeClassification,
     pub before: String,
     pub after: String,
+}
+
+pub fn sort_compensation_candidates_deterministic(candidates: &mut [CompensationCandidate]) {
+    candidates.sort_by(|a, b| {
+        compensation_result_rank(a.result)
+            .cmp(&compensation_result_rank(b.result))
+            .then_with(|| a.widening.module.cmp(&b.widening.module))
+            .then_with(|| a.widening.field.cmp(&b.widening.field))
+            .then_with(|| a.narrowing.module.cmp(&b.narrowing.module))
+            .then_with(|| a.narrowing.field.cmp(&b.narrowing.field))
+            .then_with(|| a.relationship.importer.cmp(&b.relationship.importer))
+            .then_with(|| a.relationship.provider.cmp(&b.relationship.provider))
+    });
+}
+
+pub fn sort_config_field_changes_deterministic(changes: &mut [ConfigFieldChange]) {
+    changes.sort_by(|a, b| {
+        a.field_path
+            .cmp(&b.field_path)
+            .then_with(|| {
+                a.classification
+                    .deterministic_rank()
+                    .cmp(&b.classification.deterministic_rank())
+            })
+            .then_with(|| a.before.cmp(&b.before))
+            .then_with(|| a.after.cmp(&b.after))
+    });
 }
 
 pub fn sort_field_changes_deterministic(changes: &mut [FieldChange]) {
@@ -187,6 +215,14 @@ pub fn sort_policy_diff_errors_deterministic(errors: &mut [PolicyDiffErrorEntry]
             .then_with(|| a.spec_path.cmp(&b.spec_path))
             .then_with(|| a.message.cmp(&b.message))
     });
+}
+
+const fn compensation_result_rank(result: CompensationResult) -> u8 {
+    match result {
+        CompensationResult::Offset => 0,
+        CompensationResult::Partial => 1,
+        CompensationResult::Ambiguous => 2,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

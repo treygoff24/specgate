@@ -36,6 +36,17 @@ struct NdjsonSummaryRecord {
     narrowing_changes: usize,
     structural_changes: usize,
     has_widening: bool,
+    net_classification: ChangeClassification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NdjsonConfigChangeRecord<'a> {
+    #[serde(rename = "type")]
+    r#type: &'static str,
+    field_path: &'a str,
+    classification: ChangeClassification,
+    before: &'a str,
+    after: &'a str,
 }
 
 /// Render a full policy diff report as human-readable grouped output.
@@ -59,12 +70,27 @@ pub fn render_policy_diff_human(report: &PolicyDiffReport) -> String {
     render_section("NARROWING", narrowing, &mut lines);
     render_section("STRUCTURAL", structural, &mut lines);
 
+    if !report.config_changes.is_empty() {
+        lines.push("Config changes (specgate.config.yml):".to_string());
+        for change in &report.config_changes {
+            lines.push(format!(
+                "  {}: {}: {} -> {}",
+                render_classification(change.classification),
+                change.field_path,
+                change.before,
+                change.after
+            ));
+        }
+        lines.push(String::new());
+    }
+
     lines.push(format!(
-        "Summary: modules_changed={} widening={} narrowing={} structural={}",
+        "Summary: modules_changed={} widening={} narrowing={} structural={} net={}",
         report.summary.modules_changed,
         report.summary.widening_changes,
         report.summary.narrowing_changes,
-        report.summary.structural_changes
+        report.summary.structural_changes,
+        render_classification(report.net_classification)
     ));
 
     if !report.summary.limitations.is_empty() {
@@ -135,6 +161,19 @@ pub fn render_policy_diff_ndjson(report: &PolicyDiffReport) -> Vec<String> {
         }
     }
 
+    for change in &report.config_changes {
+        lines.push(
+            serde_json::to_string(&NdjsonConfigChangeRecord {
+                r#type: "config_change",
+                field_path: &change.field_path,
+                classification: change.classification,
+                before: &change.before,
+                after: &change.after,
+            })
+            .expect("policy diff config change event must serialize"),
+        );
+    }
+
     lines.push(
         serde_json::to_string(&NdjsonSummaryRecord {
             r#type: "summary",
@@ -143,6 +182,7 @@ pub fn render_policy_diff_ndjson(report: &PolicyDiffReport) -> Vec<String> {
             narrowing_changes: report.summary.narrowing_changes,
             structural_changes: report.summary.structural_changes,
             has_widening: report.summary.has_widening,
+            net_classification: report.net_classification,
         })
         .expect("policy diff summary event must serialize"),
     );
@@ -184,4 +224,12 @@ fn collect_changes_by_classification(
     }
 
     changes
+}
+
+fn render_classification(classification: ChangeClassification) -> &'static str {
+    match classification {
+        ChangeClassification::Widening => "WIDENING",
+        ChangeClassification::Narrowing => "NARROWING",
+        ChangeClassification::Structural => "STRUCTURAL",
+    }
 }

@@ -3,6 +3,7 @@ use std::path::Path;
 
 pub mod classify;
 pub mod compensate;
+pub mod config_diff;
 pub mod git;
 pub mod render;
 pub mod types;
@@ -13,17 +14,19 @@ pub use classify::{
     classify_spec_snapshot_pairs_with_path_coverage,
 };
 pub use compensate::{dependency_edges_from_specs, find_compensation_candidates};
+pub use config_diff::classify_config_changes;
 pub use git::{
     DiscoveredAndLoadedSpecSnapshots, DiscoveredSpecFileChanges, FailClosedSpecOperation,
     LoadedSpecSnapshots, PolicyGitError, SpecSnapshotPair, discover_and_load_spec_snapshots,
-    discover_spec_file_changes, list_tracked_files_scoped, load_spec_snapshots_for_changed_paths,
-    parse_name_status_z,
+    discover_config_changes, discover_spec_file_changes, list_tracked_files_scoped,
+    load_config_from_ref, load_spec_snapshots_for_changed_paths, parse_name_status_z,
 };
 pub use render::{render_policy_diff_human, render_policy_diff_json, render_policy_diff_ndjson};
 pub use types::{
     ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult,
     ConfigFieldChange, DependencyEdge, FieldChange, ModulePolicyDiff, POLICY_DIFF_SCHEMA_VERSION,
     PolicyDiffErrorEntry, PolicyDiffExit, PolicyDiffReport, PolicyDiffSummary,
+    sort_compensation_candidates_deterministic, sort_config_field_changes_deterministic,
     sort_field_changes_deterministic, sort_module_policy_diffs_deterministic,
     sort_policy_diff_errors_deterministic,
 };
@@ -54,6 +57,12 @@ pub fn build_policy_diff_report(
         summary = PolicyDiffSummary::default();
     }
 
+    let config_changes = if discovered.loaded.errors.is_empty() {
+        discover_config_changes(project_root, base_ref, head_ref)?
+    } else {
+        Vec::new()
+    };
+
     let mut report = PolicyDiffReport::new(
         base_ref.to_string(),
         head_ref.to_string(),
@@ -61,6 +70,9 @@ pub fn build_policy_diff_report(
         summary,
         discovered.loaded.errors,
     );
+    report.config_changes = config_changes;
+    apply_config_changes_to_summary(&mut report.summary, &report.config_changes);
+    report.net_classification = derive_net_classification(&report.summary);
     report.sort_deterministic();
     Ok(report)
 }
@@ -68,10 +80,38 @@ pub fn build_policy_diff_report(
 pub fn derive_policy_diff_exit(report: &PolicyDiffReport) -> PolicyDiffExit {
     if !report.errors.is_empty() {
         PolicyDiffExit::RuntimeError
-    } else if report.summary.has_widening {
+    } else if report.net_classification == ChangeClassification::Widening {
         PolicyDiffExit::Widening
     } else {
         PolicyDiffExit::Clean
+    }
+}
+
+fn apply_config_changes_to_summary(
+    summary: &mut PolicyDiffSummary,
+    config_changes: &[ConfigFieldChange],
+) {
+    for change in config_changes {
+        match change.classification {
+            ChangeClassification::Widening => {
+                summary.widening_changes += 1;
+                summary.has_widening = true;
+            }
+            ChangeClassification::Narrowing => {
+                summary.narrowing_changes += 1;
+            }
+            ChangeClassification::Structural => {
+                summary.structural_changes += 1;
+            }
+        }
+    }
+}
+
+fn derive_net_classification(summary: &PolicyDiffSummary) -> ChangeClassification {
+    if summary.has_widening {
+        ChangeClassification::Widening
+    } else {
+        ChangeClassification::Structural
     }
 }
 

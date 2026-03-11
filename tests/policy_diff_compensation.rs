@@ -150,9 +150,11 @@ fn ambiguous_compensation_fails_closed() {
     ];
     let candidates = find_compensation_candidates(&widenings, &narrowings, &edges);
     // Ambiguous: one narrowing could offset either widening
-    assert!(candidates
-        .iter()
-        .all(|c| c.result == CompensationResult::Ambiguous));
+    assert!(
+        candidates
+            .iter()
+            .all(|c| c.result == CompensationResult::Ambiguous)
+    );
 }
 
 #[test]

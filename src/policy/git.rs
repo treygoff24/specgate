@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::classify::specs_semantically_equivalent_for_rename;
-use super::types::PolicyDiffErrorEntry;
-use crate::spec::SpecFile;
+use super::config_diff::classify_config_changes;
+use super::types::{ChangeClassification, ConfigFieldChange, PolicyDiffErrorEntry};
+use crate::spec::{SpecConfig, SpecFile};
+
+const CONFIG_FILE_PATH: &str = "specgate.config.yml";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiscoveredSpecFileChanges {
@@ -86,6 +89,12 @@ pub struct DiscoveredAndLoadedSpecSnapshots {
     pub loaded: LoadedSpecSnapshots,
 }
 
+#[derive(Debug, Clone)]
+struct ConfigSnapshot {
+    exists: bool,
+    config: SpecConfig,
+}
+
 pub fn discover_and_load_spec_snapshots(
     project_root: &Path,
     base_ref: &str,
@@ -106,6 +115,41 @@ pub fn discover_and_load_spec_snapshots(
     )?;
 
     Ok(DiscoveredAndLoadedSpecSnapshots { discovered, loaded })
+}
+
+pub fn discover_config_changes(
+    project_root: &Path,
+    base_ref: &str,
+    head_ref: &str,
+) -> Result<Vec<ConfigFieldChange>, PolicyGitError> {
+    validate_git_worktree(project_root)?;
+    validate_ref_exists(project_root, base_ref)?;
+    validate_ref_exists(project_root, head_ref)?;
+
+    let base_snapshot = load_config_snapshot_from_ref(project_root, base_ref)?;
+    let head_snapshot = load_config_snapshot_from_ref(project_root, head_ref)?;
+
+    if !base_snapshot.exists && !head_snapshot.exists {
+        return Ok(Vec::new());
+    }
+
+    let mut changes = classify_config_changes(&base_snapshot.config, &head_snapshot.config);
+    if !base_snapshot.exists && head_snapshot.exists {
+        for change in &mut changes {
+            change.classification = ChangeClassification::Structural;
+        }
+    }
+
+    Ok(changes)
+}
+
+pub fn load_config_from_ref(
+    project_root: &Path,
+    git_ref: &str,
+) -> Result<SpecConfig, PolicyGitError> {
+    validate_git_worktree(project_root)?;
+    validate_ref_exists(project_root, git_ref)?;
+    Ok(load_config_snapshot_from_ref(project_root, git_ref)?.config)
 }
 
 fn hydrate_rename_copy_semantics(
@@ -189,6 +233,29 @@ fn hydrate_rename_copy_semantics(
     }
 
     Ok(())
+}
+
+fn load_config_snapshot_from_ref(
+    project_root: &Path,
+    git_ref: &str,
+) -> Result<ConfigSnapshot, PolicyGitError> {
+    let config_path = vec![CONFIG_FILE_PATH.to_string()];
+    let blob = load_blob_batch_for_ref(project_root, git_ref, &config_path)?
+        .into_iter()
+        .next()
+        .expect("single config blob lookup must return one slot");
+
+    let Some(blob) = blob else {
+        return Ok(ConfigSnapshot {
+            exists: false,
+            config: SpecConfig::default(),
+        });
+    };
+
+    Ok(ConfigSnapshot {
+        exists: true,
+        config: parse_config_blob(git_ref, &blob)?,
+    })
 }
 
 pub fn load_spec_snapshots_for_changed_paths(
@@ -552,6 +619,31 @@ fn parse_spec_blob(
 
     spec.spec_path = Some(PathBuf::from(spec_path));
     Some(spec)
+}
+
+fn parse_config_blob(reference: &str, blob: &[u8]) -> Result<SpecConfig, PolicyGitError> {
+    let source = String::from_utf8(blob.to_vec()).map_err(|_| {
+        PolicyGitError::new(
+            "policy.config_blob_non_utf8",
+            format!("{reference}:{CONFIG_FILE_PATH} is not valid UTF-8"),
+        )
+    })?;
+
+    let config: SpecConfig = yaml_serde::from_str(&source).map_err(|error| {
+        PolicyGitError::new(
+            "policy.config_parse_error",
+            format!("failed to parse {reference}:{CONFIG_FILE_PATH}: {error}"),
+        )
+    })?;
+
+    config.validate().map_err(|message| {
+        PolicyGitError::new(
+            "policy.config_invalid",
+            format!("invalid config in {reference}:{CONFIG_FILE_PATH}: {message}"),
+        )
+    })?;
+
+    Ok(config)
 }
 
 pub fn list_tracked_files_scoped(
