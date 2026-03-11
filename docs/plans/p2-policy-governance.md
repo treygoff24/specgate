@@ -2,7 +2,7 @@
 
 > **For Claude:** Spawn `task-builder` agent to implement this plan task-by-task.
 >
-> **Status note (2026-03-10):** This is the historical MVP implementation plan for `policy-diff`. Current behavior has moved beyond this snapshot: semantic rename/copy pairing and `check --deny-widenings` are now implemented. Use `docs/reference/policy-diff.md` and `docs/roadmap.md` for current operator-facing truth.
+> **Status note (2026-03-10):** This is the historical MVP implementation plan for `policy-diff`. Current behavior has moved beyond this snapshot: semantic rename/copy pairing, `check --deny-widenings`, cross-file compensation, and config-level governance diffing are now implemented. Use `docs/reference/policy-diff.md` and `docs/roadmap.md` for current operator-facing truth.
 
 **Goal:** Add a new `specgate policy-diff` command that compares `.spec.yml` policy between two git refs and deterministically classifies each change as **widening**, **narrowing**, or **structural**.
 
@@ -36,6 +36,10 @@
   - `2` = runtime/git/parse failure (same runtime error convention as existing CLI)
 
 ## Explicitly deferred follow-up
+
+Status update: the original MVP-deferred items "cross-file compensation" and
+"config-level governance (`specgate.config.yml` diffing)" have since shipped.
+Keep this section as historical scope context only.
 
 - Semantic rename pairing that can safely downgrade `R*`/`C*` from widening-risk when content is semantically equivalent
 - Cross-file compensation analysis ("A widened but B narrowed")

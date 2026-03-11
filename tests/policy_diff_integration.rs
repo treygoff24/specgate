@@ -934,10 +934,7 @@ fn config_addition_widening_keeps_widening_classification() {
         output["config_changes"][0]["field_path"],
         "unresolved_edge_policy"
     );
-    assert_eq!(
-        output["config_changes"][0]["classification"],
-        "widening"
-    );
+    assert_eq!(output["config_changes"][0]["classification"], "widening");
 }
 
 #[test]

@@ -144,7 +144,7 @@ Behavior with the flag enabled:
 
 For modified `.spec.yml` files, `policy-diff` classifies changes over parsed policy fields rather than raw text. That includes boundaries, constraints, and contracts. Examples include import allowlists, import denylists, visibility, contract envelope requirements, and other policy fields.
 
-For `specgate.config.yml`, `policy-diff` emits `config_changes` records for governance-relevant config fields and folds them into the same summary counters and exit semantics. A config widening still makes the run fail with exit `1`.
+For `specgate.config.yml`, `policy-diff` emits `config_changes` records for governance-relevant config fields and folds them into the same summary counters and exit semantics. A config widening still makes the run fail with exit `1`. Shipped examples include `strict_ownership`, `strict_ownership_level`, `unresolved_edge_policy`, `baseline.require_metadata`, and `import_hygiene.deny_deep_import_entries`.
 
 Some changes remain intentionally conservative in the MVP. Constraint additions and removals are currently reported as `structural` unless a rule specific severity change is recognized. When `boundaries.path` coverage cannot be bounded safely, the command reports the change as `structural` and adds the `path_coverage_unbounded_mvp` limitation in the summary.
 
@@ -156,7 +156,7 @@ Rename/copy semantic pairing uses normalized `SpecFile` snapshots (trimmed scala
 - `narrowing` if no widening remains and at least one narrowing is present.
 - `structural` if the report is otherwise clean or if exit `2` suppressed authoritative classification output.
 
-## Deferred follow up
+## Shipped follow-up items
 
 | Item | Current behavior |
 |------|------------------|
@@ -164,6 +164,11 @@ Rename/copy semantic pairing uses normalized `SpecFile` snapshots (trimmed scala
 | Cross file compensation | Implemented as an opt-in analysis behind `--cross-file-compensation`. It is scoped to directly connected modules and reports candidate pairings in `compensations`; ambiguous matches fail closed. |
 | Config level governance | Implemented for `specgate.config.yml`; config changes are reported in `config_changes` and folded into summary/net classification. |
 | Future gate integration | Implemented for `check` via `--deny-widenings` (requires `--since <base-ref>`). |
+
+Ownership note:
+
+- `strict_ownership_level` participates in config governance diffing today.
+- In `doctor ownership`, `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs, while `strict_ownership_level: warnings` gates all ownership findings.
 
 ## Related docs
 

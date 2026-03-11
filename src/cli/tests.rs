@@ -836,7 +836,9 @@ fn check_rejects_config_widenings_when_flag_is_enabled() {
         "{output:#}"
     );
     assert!(
-        result.stderr.contains("config field=unresolved_edge_policy"),
+        result
+            .stderr
+            .contains("config field=unresolved_edge_policy"),
         "{}",
         result.stderr
     );

@@ -4,8 +4,10 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-11
+
 - Documentation/workflow parity fixes for governance, ownership diagnostics, install fallback, release checksum guidance, and baseline metadata commands.
-- Policy-diff/operator docs now reflect config-governance reporting, opt-in compensation, and narrowing `net_classification`.
+- Policy-diff/operator docs now reflect config-governance reporting, opt-in compensation, narrowing `net_classification`, and the current `strict_ownership` versus `strict_ownership_level` semantics.
 
 ## [0.3.0] - 2026-03-10
 

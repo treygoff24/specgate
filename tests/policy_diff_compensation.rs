@@ -1,11 +1,11 @@
 //! Integration tests for cross-file compensation in policy-diff.
 
+use serde_json::json;
 use specgate::policy::compensate::{dependency_edges_from_specs, find_compensation_candidates};
 use specgate::policy::types::{
     ChangeClassification, ChangeScope, CompensationCandidate, CompensationResult, DependencyEdge,
     FieldChange, ModulePolicyDiff, PolicyDiffReport, PolicyDiffSummary,
 };
-use serde_json::json;
 use specgate::spec::{Boundaries, SpecFile};
 
 #[test]
@@ -569,7 +569,8 @@ fn make_set_change(
     let detail = match classification {
         ChangeClassification::Widening => format!(
             "added {}",
-            after.iter()
+            after
+                .iter()
                 .filter(|value| !before.contains(value))
                 .copied()
                 .collect::<Vec<_>>()

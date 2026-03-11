@@ -1,5 +1,10 @@
 # Tier 2 + Tier 3 Buildout Design
 
+> **Status note (2026-03-10):** This is a historical buildout design snapshot.
+> Cross-file compensation and config-level governance diffing described below
+> have since shipped. Use `docs/roadmap.md` and
+> `docs/reference/policy-diff.md` for current operator-facing status.
+
 **Date:** 2026-03-10
 **Scope:** All deferred product backlog (Tier 2) and historical backlog (Tier 3) items
 **Source:** `docs/handoffs/2026-03-10-remaining-buildout-handoff.md`

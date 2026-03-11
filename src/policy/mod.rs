@@ -217,12 +217,14 @@ fn derive_net_classification_with_compensation(report: &PolicyDiffReport) -> Cha
         .map(|c| (c.widening.module.clone(), c.widening.field.clone()))
         .collect();
 
-    let has_uncompensated_spec_widening = report.diffs.iter().flat_map(|diff| diff.changes.iter()).any(
-        |change| {
+    let has_uncompensated_spec_widening = report
+        .diffs
+        .iter()
+        .flat_map(|diff| diff.changes.iter())
+        .any(|change| {
             change.classification == ChangeClassification::Widening
                 && !offset_widenings.contains(&(change.module.clone(), change.field.clone()))
-        },
-    );
+        });
     let has_config_widening = report
         .config_changes
         .iter()

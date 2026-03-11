@@ -5,6 +5,12 @@ Last updated: 2026-03-10
 > **Historical note:** This handoff was written before `v0.3.0` release
 > publication completed. Current repo truth now lives in `docs/roadmap.md`,
 > `docs/project-status.md`, `README.md`, and `SPECGATE_FOR_AGENTS.md`.
+>
+> **Status note (2026-03-10):** Two items described below as deferred product
+> backlog have since shipped: cross-file compensation in `policy-diff` and
+> config-level governance diffing for `specgate.config.yml`. Leave the original
+> text in place as historical context, but do not use those sections as active
+> backlog.
 
 ## Purpose
 
@@ -88,6 +94,8 @@ These are the only clearly active not-built feature items called out in the road
 
 Status: explicitly deferred beyond this release.
 
+Status update: shipped after this handoff. See [docs/reference/policy-diff.md](../reference/policy-diff.md) and [docs/roadmap.md](../roadmap.md) for current behavior.
+
 Source:
 
 - [docs/roadmap.md](../roadmap.md)
@@ -122,6 +130,8 @@ cargo test
 ### 3. Config-level governance diffing for `specgate.config.yml`
 
 Status: explicitly deferred beyond this release.
+
+Status update: shipped after this handoff. See [docs/reference/policy-diff.md](../reference/policy-diff.md) and [docs/roadmap.md](../roadmap.md) for current behavior.
 
 Source:
 
@@ -211,9 +221,8 @@ Do not assume these are approved next steps just because they appear in historic
 If the goal is "finish everything still active":
 
 1. Do the release-publication work first.
-2. If you want post-release product work, pick one deferred governance item next:
-   - cross-file compensation, or
-   - config-level governance diffing.
+2. Historical note: when this handoff was written, the next suggested governance item was:
+   - historical note only: the original options here were cross-file compensation, or config-level governance diffing, and both have since shipped.
 3. Do deferred fixture/rule-family expansion after governance semantics are settled.
 
 If the goal is "build every remaining plausible backlog item":

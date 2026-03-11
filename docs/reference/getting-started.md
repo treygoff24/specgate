@@ -182,7 +182,7 @@ specgate policy-diff --base origin/main
 specgate doctor ownership --project-root . --format json
 ```
 
-If you want ownership findings to fail CI, set `strict_ownership: true` in `specgate.config.yml`.
+If you want ownership findings to fail CI, set `strict_ownership: true` in `specgate.config.yml`. Use `strict_ownership_level: errors` to gate duplicate module ids and invalid ownership globs, or `strict_ownership_level: warnings` to gate all ownership findings.
 
 Quick CI snippet:
 

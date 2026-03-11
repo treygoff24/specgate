@@ -151,31 +151,31 @@ In the MVP, deleting a `.spec.yml` file is always a widening. Renames/copies use
   run: specgate policy-diff --base origin/main
 ```
 
-See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, config-governance behavior, and compensation limits.
+See [Policy diff reference](docs/reference/policy-diff.md) for format details, examples, shallow clone guidance, config-governance behavior, cross-file compensation semantics, and ownership-governance field coverage such as `strict_ownership` and `strict_ownership_level`.
 
 ### Upgrade guidance
 
 - Governance: pick one gate path for PRs - `specgate policy-diff --base <ref>` or `specgate check --since <ref> --deny-widenings`.
 - SARIF: add `specgate check --format sarif > specgate.sarif` when uploading results to code scanning platforms.
-- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json`; the canonical workflow now uploads ownership output, and `strict_ownership: true` makes findings fail the gate.
+- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json`; the canonical workflow now uploads ownership output. With `strict_ownership: true`, `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs, while `strict_ownership_level: warnings` gates all ownership findings. Both fields are also part of shipped config-governance diffing in `policy-diff`.
 - Fetch depth: when diffing against remote refs, use full history (`fetch-depth: 0`).
 
 ## Project Status
 
-**Status (as of 2026-03-10): `v0.3.0` is released from `master`, with Phase 5 envelope checks, policy-diff, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all shipped. Current roadmap items are deferred backlog items beyond the `v0.3.0` release.**
+**Status (as of 2026-03-11): `v0.3.1` is the current release from `master`, with Phase 5 envelope checks, `policy-diff` config governance, opt-in cross-file compensation, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all shipped. Current roadmap items are now limited to genuinely unimplemented Tier 2/Tier 3 backlog work beyond the `v0.3.1` release.**
 
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.
-- ✅ `specgate policy-diff` for policy evolution checks, with multiple output formats and clear failure semantics.
+- ✅ `specgate policy-diff` for policy evolution checks, including deterministic spec/config diffing, semantic rename/copy pairing, and opt-in cross-file compensation.
 - ✅ `specgate check --deny-widenings` for single-command governance enforcement when using `--since`.
 - ✅ SARIF reporting via `--format sarif` for CI security scanning workflows.
-- ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement.
+- ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement, including `strict_ownership_level` runtime thresholds plus shipped config-governance coverage for `strict_ownership` and `strict_ownership_level`.
 - ✅ Full monorepo support including workspace discovery, nearest-tsconfig resolution, and `workspace_packages` reporting.
 - ✅ Expanded adversarial and parity fixtures plus coverage in contract/golden/CI test sets.
 - ✅ CLI refactor work for modular command structure and stable command-level diagnostics.
 
 ### Next Steps
-- 📌 Keep deferred backlog items explicit in the roadmap and operator references.
+- 📌 Keep the remaining Tier 2/Tier 3 backlog explicit in the roadmap and operator references without relabeling shipped governance features as deferred.
 - 📌 Use [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md) as the stable handoff doc for agents helping users install or integrate Specgate.
 
 See [Roadmap](docs/roadmap.md) for current closeout status and [archived implementation plan](docs/archive/plans/implementation-plan-v1.1.md#15-post-mvp-work-prioritized) for historical planning context.

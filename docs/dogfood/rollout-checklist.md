@@ -13,7 +13,7 @@ branch ref. Substitute your actual default branch ref when it differs.
    - include a policy governance step (`specgate policy-diff --base origin/main`)
    - if you choose in-band enforcement, use `specgate check --since origin/main --deny-widenings` instead of a separate policy-diff gate
    - include SARIF upload guidance (`specgate ... --format sarif` + `github/codeql-action/upload-sarif@v3`)
-   - include an ownership diagnostics step (`specgate doctor ownership --project-root . --format json`); `strict_ownership: true` controls whether findings block the gate
+   - include an ownership diagnostics step (`specgate doctor ownership --project-root . --format json`); `strict_ownership: true` plus `strict_ownership_level` controls whether CI blocks only error-class ownership findings or all ownership findings
 4. Confirm required docs are discoverable from `README.md`.
 
 ## Week 0 (pilot)

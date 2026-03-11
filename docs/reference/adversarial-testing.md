@@ -50,5 +50,5 @@ For each known gap, this lists (1) why it is currently unhandled, (2) whether th
 
 ### `orphan-module`
 - **Why:** Modules whose spec globs match zero source files do not generate a policy violation in `specgate check`; they surface through ownership diagnostics instead.
-- **Will this be fixed?** `specgate doctor ownership` reports orphaned specs today; `strict_ownership: true` lets teams gate on those findings in CI.
+- **Will this be fixed?** `specgate doctor ownership` reports orphaned specs today; `strict_ownership: true` plus `strict_ownership_level: warnings` lets teams gate on those findings in CI.
 - **Workaround:** Include `specgate doctor ownership` in workflow to catch orphaned spec modules and keep fixture/module inventories explicit.

@@ -96,7 +96,7 @@ specgate doctor ownership --project-root . --format json
   - `specgate policy-diff --base <ref>`, or
   - `specgate check --since <ref> --deny-widenings`
 - SARIF output is available with `specgate check --format sarif`.
-- Ownership findings only become a blocking gate when `strict_ownership: true` is enabled in `specgate.config.yml`.
+- Ownership findings only become a blocking gate when `strict_ownership: true` is enabled in `specgate.config.yml`; `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs, while `strict_ownership_level: warnings` gates all ownership findings.
 
 ## Canonical Docs
 

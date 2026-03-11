@@ -10,7 +10,7 @@ branch ref. Substitute your actual default branch ref when it differs.
 - `specgate check --output-mode deterministic` mean runtime in CI:
   - target: **<= 10% increase** over baseline repo test time.
 - `specgate policy-diff --base origin/main` should report clean governance behavior (no unexpected widening).
-- `specgate doctor ownership --project-root . --format json` should complete on the canonical workflow; `strict_ownership: true` remains the switch that makes ownership findings gate the build.
+- `specgate doctor ownership --project-root . --format json` should complete on the canonical workflow; `strict_ownership: true` plus the chosen `strict_ownership_level` controls whether CI gates only error-class ownership findings or all ownership findings.
 
 ## Baseline health
 

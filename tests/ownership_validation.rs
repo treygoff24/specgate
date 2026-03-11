@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+use specgate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
 
 fn write_file(root: &Path, relative_path: &str, content: &str) {
     let path = root.join(relative_path);
@@ -155,19 +155,98 @@ fn test_ownership_reports_orphaned_specs() {
 }
 
 #[test]
-fn test_strict_ownership_exits_nonzero_when_findings() {
+fn test_strict_ownership_errors_does_not_gate_warning_findings() {
     let temp = TempDir::new().expect("tempdir");
     setup_mixed_fixture(temp.path());
 
-    // Override config with strict_ownership: true
     write_file(
         temp.path(),
         "specgate.config.yml",
-        "spec_dirs:\n  - specs\nstrict_ownership: true\n",
+        "spec_dirs:\n  - specs\nstrict_ownership: true\nstrict_ownership_level: errors\n",
+    );
+
+    let (exit_code, _) = run_ownership_json(temp.path());
+    assert_eq!(exit_code, EXIT_CODE_PASS);
+}
+
+#[test]
+fn test_strict_ownership_warnings_gates_warning_findings() {
+    let temp = TempDir::new().expect("tempdir");
+    setup_mixed_fixture(temp.path());
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\nstrict_ownership: true\nstrict_ownership_level: warnings\n",
     );
 
     let (exit_code, _) = run_ownership_json(temp.path());
     assert_eq!(exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+}
+
+#[test]
+fn test_strict_ownership_errors_gates_error_findings() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "specs/api-one.spec.yml",
+        "version: \"2.2\"\nmodule: api\nboundaries:\n  path: \"src/api/**\"\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "specs/api-two.spec.yml",
+        "version: \"2.2\"\nmodule: api\nboundaries:\n  path: \"src/other/**\"\nconstraints: []\n",
+    );
+    write_file(temp.path(), "src/api/index.ts", "export const api = 1;\n");
+    write_file(
+        temp.path(),
+        "src/other/index.ts",
+        "export const other = 2;\n",
+    );
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\nstrict_ownership: true\nstrict_ownership_level: errors\n",
+    );
+
+    let (exit_code, json) = run_ownership_json(temp.path());
+    assert_eq!(exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let duplicate_ids = json["report"]["duplicate_module_ids"]
+        .as_array()
+        .expect("duplicate module ids array");
+    assert_eq!(duplicate_ids.len(), 1);
+    assert_eq!(duplicate_ids[0]["module_id"], "api");
+}
+
+#[test]
+fn test_ownership_still_runtime_fails_on_non_ownership_validation_errors() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "specs/api.spec.yml",
+        "version: \"2.2\"\nmodule: api\nboundaries:\n  path: \"src/**\"\nconstraints:\n  - rule: unknown-rule\n",
+    );
+    write_file(temp.path(), "src/index.ts", "export const x = 1;\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "ownership",
+        "--project-root",
+        temp.path().to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
 }
 
 #[test]

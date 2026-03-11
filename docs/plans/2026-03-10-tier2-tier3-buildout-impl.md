@@ -1,6 +1,11 @@
 # Tier 2 + Tier 3 Buildout Implementation Plan
 
 > **For Claude:** Spawn `task-builder` agents to implement this plan. See dependency graph for parallelization.
+>
+> **Status note (2026-03-10):** This is a historical implementation plan
+> snapshot. The sections for cross-file compensation and config-level
+> governance diffing have since shipped. Use `docs/roadmap.md` and
+> `docs/reference/policy-diff.md` for current operator-facing truth.
 
 **Goal:** Implement the 8 deferred features from the Tier 2/Tier 3 design spec, covering cross-file compensation, config-level governance diffing, edge classification, baseline v2 metadata, import hygiene rules, provider-side visibility gaps, contradictory glob detection, and rule-family fixture expansion.
 

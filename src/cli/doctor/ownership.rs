@@ -6,6 +6,7 @@ use crate::cli::{
     runtime_error_json,
 };
 use crate::graph::discovery::discover_source_files;
+use crate::spec::config::StrictOwnershipLevel;
 use crate::spec::ownership::{OwnershipReport, validate_ownership};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -31,25 +32,67 @@ struct OwnershipOutput {
     report: OwnershipReport,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnershipFindingSummary {
+    has_error_findings: bool,
+    has_warning_findings: bool,
+}
+
+impl OwnershipFindingSummary {
+    fn from_report(report: &OwnershipReport) -> Self {
+        Self {
+            has_error_findings: !report.duplicate_module_ids.is_empty()
+                || !report.invalid_globs.is_empty(),
+            has_warning_findings: !report.unclaimed_files.is_empty()
+                || !report.overlapping_files.is_empty()
+                || !report.orphaned_specs.is_empty(),
+        }
+    }
+
+    fn has_any_findings(self) -> bool {
+        self.has_error_findings || self.has_warning_findings
+    }
+
+    fn should_gate(self, level: StrictOwnershipLevel) -> bool {
+        match level {
+            StrictOwnershipLevel::Errors => self.has_error_findings,
+            StrictOwnershipLevel::Warnings => self.has_any_findings(),
+        }
+    }
+}
+
+fn is_ownership_validation_issue(message: &str) -> bool {
+    message.contains("duplicate module") || message.contains("invalid boundaries.path glob pattern")
+}
+
 pub(super) fn handle_doctor_ownership(args: DoctorOwnershipArgs) -> CliRunResult {
     let loaded = match load_project(&args.common.project_root) {
         Ok(loaded) => loaded,
         Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),
     };
 
-    // Finding #13: validation gate — block on spec errors before analysis
+    // Ownership-specific validation issues can still be rendered by the ownership
+    // report path. Other spec validation failures still block analysis.
     if loaded.validation.has_errors() {
-        let details = loaded
+        let (ownership_errors, blocking_errors): (Vec<_>, Vec<_>) = loaded
             .validation
             .errors()
             .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        );
+            .partition(|issue| is_ownership_validation_issue(&issue.message));
+
+        if !blocking_errors.is_empty() {
+            let details = blocking_errors
+                .into_iter()
+                .map(|issue| format!("{}: {}", issue.module, issue.message))
+                .collect();
+            return runtime_error_json(
+                "validation",
+                "spec validation failed; run `specgate validate` for details",
+                details,
+            );
+        }
+
+        let _ = ownership_errors;
     }
 
     let discovery = match discover_source_files(&loaded.project_root, &loaded.config.exclude) {
@@ -64,14 +107,12 @@ pub(super) fn handle_doctor_ownership(args: DoctorOwnershipArgs) -> CliRunResult
     };
 
     let report = validate_ownership(&loaded.project_root, &loaded.specs, &discovery.files);
+    let findings = OwnershipFindingSummary::from_report(&report);
+    let has_findings = findings.has_any_findings();
 
-    let has_findings = !report.unclaimed_files.is_empty()
-        || !report.overlapping_files.is_empty()
-        || !report.orphaned_specs.is_empty()
-        || !report.duplicate_module_ids.is_empty()
-        || !report.invalid_globs.is_empty();
-
-    let exit_code = if loaded.config.strict_ownership && has_findings {
+    let exit_code = if loaded.config.strict_ownership
+        && findings.should_gate(loaded.config.strict_ownership_level)
+    {
         EXIT_CODE_POLICY_VIOLATIONS
     } else {
         EXIT_CODE_PASS

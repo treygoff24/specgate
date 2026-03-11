@@ -23,7 +23,7 @@ The "gate" refers to the merge gate and CI pipeline that must pass before beta c
   - `specgate policy-diff --base origin/main`
 - Ownership diagnostics gate:
   - `specgate doctor ownership --project-root .`
-  - enforce the output in CI either by `strict_ownership: true` or explicit release approval
+  - enforce the output in CI with `strict_ownership: true` plus the desired `strict_ownership_level`, or require explicit release approval
 - Binary artifact build and verification
 - npm wrapper publish and dist-tag verification
 

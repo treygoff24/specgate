@@ -490,13 +490,12 @@ mod tests {
         let config = SpecConfig::default();
         let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
 
-        let (classification, edges) =
-            build_edge_classification(
-                temp.path(),
-                &graph,
-                &BTreeSet::new(),
-                UnresolvedEdgePolicy::Warn,
-            );
+        let (classification, edges) = build_edge_classification(
+            temp.path(),
+            &graph,
+            &BTreeSet::new(),
+            UnresolvedEdgePolicy::Warn,
+        );
 
         // Only the non-ignored import should be counted
         assert_eq!(
@@ -557,13 +556,12 @@ mod tests {
         let config = SpecConfig::default();
         let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("build");
 
-        let (classification, edges) =
-            build_edge_classification(
-                temp.path(),
-                &graph,
-                &BTreeSet::new(),
-                UnresolvedEdgePolicy::Error,
-            );
+        let (classification, edges) = build_edge_classification(
+            temp.path(),
+            &graph,
+            &BTreeSet::new(),
+            UnresolvedEdgePolicy::Error,
+        );
 
         assert_eq!(
             classification.unresolved_literal, 1,
@@ -639,6 +637,9 @@ mod tests {
         assert_eq!(classification.external, 2, "{classification:?}");
         assert_eq!(classification.unresolved_literal, 0, "{classification:?}");
         assert_eq!(classification.unresolved_dynamic, 0, "{classification:?}");
-        assert!(edges.is_empty(), "external-like unresolved imports should not emit hygiene edges");
+        assert!(
+            edges.is_empty(),
+            "external-like unresolved imports should not emit hygiene edges"
+        );
     }
 }

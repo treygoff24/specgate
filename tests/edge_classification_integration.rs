@@ -340,7 +340,8 @@ boundaries:
 
     let edges = verdict["edges"].as_array().expect("edges array");
     assert!(
-        edges.iter()
+        edges
+            .iter()
             .all(|edge| edge["import_path"] != "./ignored-missing"),
         "ignored unresolved import should stay out of edge detail"
     );

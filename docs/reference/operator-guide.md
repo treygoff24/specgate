@@ -313,7 +313,7 @@ Mapping:
 - `C09 → A02` (api-leakage)
 - `C08 → A03` (layer-reversal)
 - `C07 → A04` (registry-canonical)
-- `C06` — deferred from current Tier A scope; deterministic fixtures still missing
+- `C06` — still outside current Tier A scope; deterministic governance-consistency coverage is not shipped yet
 
 ### Explicit limitation note (future rule families)
 
@@ -325,13 +325,14 @@ Mapping:
 
 ## Release Status
 
-**Current: `v0.3.0` is released from `master`; release-closeout publication is complete, and the remaining items are deferred backlog beyond this release.**
+**Current: `v0.3.1` is released from `master`; release-closeout publication is complete, and the remaining items are limited to genuine unimplemented Tier 2/Tier 3 backlog beyond this release.**
 
 Current command surface summary:
 
 - `specgate policy-diff` is the implemented governance command for CI policy widening checks.
+- `policy-diff` includes shipped config-governance reporting for `specgate.config.yml` plus opt-in `--cross-file-compensation` analysis.
 - `specgate check --format sarif` is available and produces SARIF output.
-- `specgate doctor ownership` is available, and `strict_ownership: true` enables CI gating on ownership findings.
+- `specgate doctor ownership` is available, and `strict_ownership: true` enables CI gating on ownership findings. `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs, while `strict_ownership_level: warnings` gates all ownership findings.
 - `check --deny-widenings` is implemented for in-band governance checks when `--since <base-ref>` is provided.
 - Roadmap source: [docs/roadmap.md](../roadmap.md).
 
@@ -345,12 +346,13 @@ Current command surface summary:
 | Reviewer hardening | `7a7fab8` | Near-miss contracts, null handling |
 | Merge-gate docs consolidation | `126bc38` / `502ad8a` | Merge-gate and operator docs aligned |
 
-### Deferred Backlog Focus
+### Remaining Backlog Focus
 
 1. **Adoption CI wiring** — Ensure consumer repos apply the canonical merge-gate contract and failure mapping.
-2. **Golden expansion** — Broaden informational corpus coverage for deferred and future rule families.
+2. **Golden expansion** — Broaden informational corpus coverage for the still-unimplemented `C02`, `C06`, and `C07` rule-family variants.
 3. **Dogfood rollout alignment** — Keep CI guidance aligned with the current example workflow and policy-diff+SARIF checks.
 4. **Governance follow-through** — Keep CI governance singular (`policy-diff` or `check --deny-widenings`) and aligned across rollout docs.
+5. **Tier 2/Tier 3 hardening that is not yet shipped** — Contradictory glob detection, namespace-intent/governance-consistency checks, and deeper import-hygiene gaps remain backlog rather than release-closeout work.
 
 ### Dogfood Docs
 

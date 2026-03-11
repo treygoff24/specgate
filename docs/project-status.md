@@ -1,6 +1,6 @@
 # Project Status: Release Closeout Verification
 
-Last verified on 2026-03-10.
+Last verified on 2026-03-11.
 
 | Check | Role | Status | Result |
 | --- | --- | --- | --- |
@@ -16,3 +16,9 @@ Last verified on 2026-03-10.
 | Release publication (`v0.3.0`) | Tag + push verification | pass | Release commit `5fd3079` was tagged as `v0.3.0` and pushed to `origin`; locked release binary smoke-check passed and SHA-256 checksum was generated. |
 
 All release-closeout verification checks above were re-run and verified green, and the `v0.3.0` release was cut from the verified commit.
+
+Post-closeout shipped-status note:
+
+- `policy-diff` now includes shipped config-level governance diffing and opt-in cross-file compensation, covered in-code by dedicated suites such as `tests/policy_diff_config.rs`, `tests/policy_diff_compensation.rs`, and related integration coverage.
+- `strict_ownership_level` is present in `specgate.config.yml`, participates in config-governance classification, and now affects `doctor ownership` gating: `errors` gates duplicate module ids and invalid ownership globs, while `warnings` gates all ownership findings.
+- Fresh 2026-03-11 verification reran `cargo test --locked`, `cargo test --locked --test ownership_validation`, and `./scripts/ci/mvp_gate.sh`, and all passed.
