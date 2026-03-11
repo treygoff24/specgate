@@ -3,9 +3,10 @@ use std::collections::BTreeSet;
 use super::types::{
     ChangeClassification, ConfigFieldChange, sort_config_field_changes_deterministic,
 };
+use crate::spec::Severity;
 use crate::spec::config::{
-    JestMockMode, ReleaseChannel, SpecConfig, StaleBaselinePolicy, StrictOwnershipLevel,
-    UnresolvedEdgePolicy,
+    DenyDeepImportEntry, JestMockMode, ReleaseChannel, SpecConfig, StaleBaselinePolicy,
+    StrictOwnershipLevel, UnresolvedEdgePolicy,
 };
 
 const ABSENT_VALUE: &str = "<absent>";
@@ -84,13 +85,11 @@ pub fn classify_config_changes(base: &SpecConfig, head: &SpecConfig) -> Vec<Conf
         base.strict_ownership.to_string(),
         head.strict_ownership.to_string(),
     );
-    diff_string_set(
+    diff_deny_deep_import_entries(
         &mut changes,
         "import_hygiene.deny_deep_imports",
         &base.import_hygiene.deny_deep_imports,
         &head.import_hygiene.deny_deep_imports,
-        ChangeClassification::Narrowing,
-        ChangeClassification::Widening,
     );
     diff_ranked_change(
         &mut changes,
@@ -186,6 +185,50 @@ fn diff_string_set(
     }
 }
 
+fn diff_deny_deep_import_entries(
+    changes: &mut Vec<ConfigFieldChange>,
+    field_path: &str,
+    base: &[DenyDeepImportEntry],
+    head: &[DenyDeepImportEntry],
+) {
+    let base_map = normalized_deep_import_entry_map(base);
+    let head_map = normalized_deep_import_entry_map(head);
+    let patterns = base_map
+        .keys()
+        .chain(head_map.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    for pattern in patterns {
+        match (base_map.get(&pattern), head_map.get(&pattern)) {
+            (Some(before), None) => push_change(
+                changes,
+                field_path,
+                ChangeClassification::Widening,
+                render_deep_import_entry(before),
+                ABSENT_VALUE.to_string(),
+            ),
+            (None, Some(after)) => push_change(
+                changes,
+                field_path,
+                ChangeClassification::Narrowing,
+                ABSENT_VALUE.to_string(),
+                render_deep_import_entry(after),
+            ),
+            (Some(before), Some(after)) if before != after => {
+                push_change(
+                    changes,
+                    field_path,
+                    classify_deep_import_entry_change(before, after),
+                    render_deep_import_entry(before),
+                    render_deep_import_entry(after),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 fn diff_optional_limit(
     changes: &mut Vec<ConfigFieldChange>,
     field_path: &str,
@@ -270,6 +313,61 @@ fn push_change(
     });
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NormalizedDeepImportEntry {
+    pattern: String,
+    max_depth: usize,
+    severity: Severity,
+}
+
+fn normalized_deep_import_entry_map(
+    entries: &[DenyDeepImportEntry],
+) -> std::collections::BTreeMap<String, NormalizedDeepImportEntry> {
+    entries
+        .iter()
+        .map(|entry| {
+            let normalized = NormalizedDeepImportEntry {
+                pattern: entry.pattern.trim().to_string(),
+                max_depth: entry.max_depth,
+                severity: entry.effective_severity(),
+            };
+            (normalized.pattern.clone(), normalized)
+        })
+        .collect()
+}
+
+fn classify_deep_import_entry_change(
+    before: &NormalizedDeepImportEntry,
+    after: &NormalizedDeepImportEntry,
+) -> ChangeClassification {
+    let depth_direction = match after.max_depth.cmp(&before.max_depth) {
+        std::cmp::Ordering::Less => Some(ChangeClassification::Narrowing),
+        std::cmp::Ordering::Greater => Some(ChangeClassification::Widening),
+        std::cmp::Ordering::Equal => None,
+    };
+    let severity_direction =
+        match severity_rank(after.severity).cmp(&severity_rank(before.severity)) {
+            std::cmp::Ordering::Less => Some(ChangeClassification::Narrowing),
+            std::cmp::Ordering::Greater => Some(ChangeClassification::Widening),
+            std::cmp::Ordering::Equal => None,
+        };
+
+    match (depth_direction, severity_direction) {
+        (Some(direction), None) | (None, Some(direction)) => direction,
+        (Some(left), Some(right)) if left == right => left,
+        _ => ChangeClassification::Structural,
+    }
+}
+
+fn render_deep_import_entry(entry: &NormalizedDeepImportEntry) -> String {
+    serde_json::json!({
+        "pattern": entry.pattern,
+        "max_depth": entry.max_depth,
+        "severity": render_severity(entry.severity),
+    })
+    .to_string()
+}
+
 fn render_optional_limit(value: Option<usize>) -> String {
     value
         .map(|value| value.to_string())
@@ -342,5 +440,19 @@ fn render_release_channel(channel: ReleaseChannel) -> String {
     match channel {
         ReleaseChannel::Stable => "stable".to_string(),
         ReleaseChannel::Beta => "beta".to_string(),
+    }
+}
+
+const fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+    }
+}
+
+fn render_severity(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
     }
 }

@@ -30,6 +30,8 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::spec::config::TestBoundaryMode;
+
 /// Array of supported spec language versions.
 ///
 /// These are the accepted values for the `version` field in `.spec.yml` files.
@@ -159,6 +161,9 @@ pub struct Boundaries {
     /// If true, boundary checks apply to test files.
     #[serde(default)]
     pub enforce_in_tests: bool,
+    /// Per-module import hygiene overrides (config defaults apply when omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_hygiene: Option<ModuleImportHygiene>,
     /// Boundary contracts defining cross-boundary data exchange.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contracts: Vec<BoundaryContract>,
@@ -169,6 +174,31 @@ impl Boundaries {
     pub fn visibility_or_default(&self) -> Visibility {
         self.visibility.unwrap_or(Visibility::Public)
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleImportHygiene {
+    #[serde(default)]
+    pub deny_deep_imports: Vec<ModuleDenyDeepImportEntry>,
+    #[serde(default)]
+    pub test_boundary: Option<ModuleTestBoundaryOverride>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleDenyDeepImportEntry {
+    pub pattern: String,
+    #[serde(default)]
+    pub max_depth: Option<usize>,
+    #[serde(default)]
+    pub allow: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleTestBoundaryOverride {
+    pub mode: TestBoundaryMode,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -374,6 +404,7 @@ mod tests {
             allowed_dependencies: vec!["lodash".to_string()],
             forbidden_dependencies: vec!["moment".to_string()],
             enforce_in_tests: true,
+            import_hygiene: None,
             contracts: Vec::new(),
         };
 
@@ -429,7 +460,34 @@ mod tests {
         assert!(boundaries.allowed_dependencies.is_empty());
         assert!(boundaries.forbidden_dependencies.is_empty());
         assert!(!boundaries.enforce_in_tests);
+        assert!(boundaries.import_hygiene.is_none());
         assert!(boundaries.contracts.is_empty());
+    }
+
+    #[test]
+    fn boundaries_parse_module_import_hygiene_overrides() {
+        let parsed: Boundaries = serde_json::from_str(
+            r#"{
+                "import_hygiene": {
+                    "deny_deep_imports": [
+                        { "pattern": "lodash/**", "max_depth": 0 },
+                        { "pattern": "internal-sdk/**", "allow": true }
+                    ],
+                    "test_boundary": { "mode": "off" }
+                }
+            }"#,
+        )
+        .expect("parse boundaries");
+
+        let hygiene = parsed.import_hygiene.expect("import hygiene override");
+        assert_eq!(hygiene.deny_deep_imports.len(), 2);
+        assert_eq!(hygiene.deny_deep_imports[0].pattern, "lodash/**");
+        assert_eq!(hygiene.deny_deep_imports[0].max_depth, Some(0));
+        assert!(hygiene.deny_deep_imports[1].allow);
+        assert_eq!(
+            hygiene.test_boundary.expect("test boundary").mode,
+            TestBoundaryMode::Off
+        );
     }
 
     #[test]

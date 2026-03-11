@@ -239,6 +239,7 @@ fn typed_violations_to_rule_violations(typed: Vec<DependencyViolation>) -> Vec<R
 
             RuleViolation {
                 rule: rule.to_string(),
+                severity: None,
                 message,
                 from_file: violation.file,
                 to_file: None,

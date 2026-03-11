@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::rules::RuleViolation;
+use crate::rules::{HYGIENE_DEEP_THIRD_PARTY_RULE_ID, RuleViolation};
 use crate::spec::{Severity, SpecConfig, SpecFile};
 use crate::verdict::WorkspacePackageInfo;
 
@@ -24,6 +24,13 @@ pub(crate) fn dependency_violation_severity(rule_id: &str) -> Severity {
     );
 
     Severity::Error
+}
+
+pub(crate) fn default_hygiene_rule_severity(rule_id: &str) -> Severity {
+    match rule_id {
+        HYGIENE_DEEP_THIRD_PARTY_RULE_ID => Severity::Warning,
+        _ => Severity::Error,
+    }
 }
 
 pub(crate) fn rule_ids_match(constraint_rule: &str, violation_rule: &str) -> bool {

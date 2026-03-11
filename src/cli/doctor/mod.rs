@@ -1,3 +1,4 @@
+mod canonical;
 mod compare;
 mod focus;
 mod overview;

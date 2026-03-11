@@ -454,6 +454,7 @@ fn build_violation(
 ) -> RuleViolation {
     RuleViolation {
         rule: rule.to_string(),
+        severity: None,
         message,
         from_file: from_file.to_path_buf(),
         to_file: to_file.map(Path::to_path_buf),

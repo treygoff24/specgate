@@ -3,14 +3,86 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::spec::types::Severity;
+
+fn default_deep_import_max_depth() -> usize {
+    0
+}
+
+/// Structured deep import policy entry.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DenyDeepImportEntry {
+    pub pattern: String,
+    #[serde(default = "default_deep_import_max_depth")]
+    pub max_depth: usize,
+    #[serde(default)]
+    pub severity: Option<Severity>,
+}
+
+impl DenyDeepImportEntry {
+    pub fn effective_severity(&self) -> Severity {
+        self.severity.unwrap_or(Severity::Warning)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum DenyDeepImportEntryCompat {
+    Legacy(String),
+    Structured(DenyDeepImportEntry),
+}
+
+fn deserialize_deny_deep_import_entries<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<DenyDeepImportEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let parsed = Option::<Vec<DenyDeepImportEntryCompat>>::deserialize(deserializer)?;
+    Ok(parsed
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| match entry {
+            DenyDeepImportEntryCompat::Legacy(pattern) => DenyDeepImportEntry {
+                pattern,
+                max_depth: default_deep_import_max_depth(),
+                severity: None,
+            },
+            DenyDeepImportEntryCompat::Structured(entry) => entry,
+        })
+        .collect())
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TestBoundaryMode {
+    #[default]
+    Off,
+    ProductionOnly,
+    Bidirectional,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct TestBoundaryConfigCompat {
+    enabled: Option<bool>,
+    mode: Option<TestBoundaryMode>,
+    test_patterns: Vec<String>,
+    deny_production_imports: Option<bool>,
+}
+
 /// Import hygiene rules for catching common agent mistakes.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 pub struct ImportHygieneConfig {
     /// Deny deep imports into third-party packages.
-    /// Each entry is a package name — imports deeper than the package entrypoint are flagged.
-    /// Example: ["express", "react"] → flags `import { x } from 'express/lib/internal'`
-    #[serde(default)]
-    pub deny_deep_imports: Vec<String>,
+    ///
+    /// Backward-compatible parsing accepts either legacy strings:
+    /// `deny_deep_imports: ["express", "react"]`
+    /// or structured entries:
+    /// `deny_deep_imports: [{ pattern: "lodash/**", max_depth: 1 }]`
+    #[serde(default, deserialize_with = "deserialize_deny_deep_import_entries")]
+    pub deny_deep_imports: Vec<DenyDeepImportEntry>,
 
     /// Test-production boundary enforcement.
     #[serde(default)]
@@ -27,15 +99,65 @@ pub struct BaselineConfig {
 }
 
 /// Test-production boundary enforcement configuration.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct TestBoundaryConfig {
+    /// Master enable switch for test boundary checks.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Which boundary directions are enforced when the rule is enabled.
+    #[serde(default)]
+    pub mode: TestBoundaryMode,
+
     /// Additional test file patterns beyond the global test_patterns.
     #[serde(default)]
     pub test_patterns: Vec<String>,
+}
 
-    /// When true, flag production files that import from test files.
-    #[serde(default)]
-    pub deny_production_imports: bool,
+impl TestBoundaryConfig {
+    pub fn effective_mode(&self) -> TestBoundaryMode {
+        if self.enabled {
+            self.mode
+        } else {
+            TestBoundaryMode::Off
+        }
+    }
+}
+
+impl Default for TestBoundaryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: TestBoundaryMode::Off,
+            test_patterns: Vec::new(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TestBoundaryConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = TestBoundaryConfigCompat::deserialize(deserializer)?;
+        let legacy_enabled = raw.deny_production_imports.unwrap_or(false);
+        let enabled = raw.enabled.unwrap_or(
+            legacy_enabled || raw.mode.is_some_and(|mode| mode != TestBoundaryMode::Off),
+        );
+        let mode = raw.mode.unwrap_or({
+            if enabled || legacy_enabled {
+                TestBoundaryMode::ProductionOnly
+            } else {
+                TestBoundaryMode::Off
+            }
+        });
+
+        Ok(Self {
+            enabled,
+            mode,
+            test_patterns: raw.test_patterns,
+        })
+    }
 }
 
 /// Project-level configuration parsed from `specgate.config.yml`.
@@ -463,6 +585,88 @@ telemetry:
         let parsed: SpecConfig =
             yaml_serde::from_str("enforce_type_only_imports: true\n").expect("parse config");
         assert!(parsed.enforce_type_only_imports);
+    }
+
+    #[test]
+    fn import_hygiene_parses_legacy_string_entries() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  deny_deep_imports:
+    - lodash
+    - express
+"#,
+        )
+        .expect("parse config");
+
+        assert_eq!(parsed.import_hygiene.deny_deep_imports.len(), 2);
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].pattern, "lodash");
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].max_depth, 0);
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[0].effective_severity(),
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn import_hygiene_parses_structured_entries() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  deny_deep_imports:
+    - pattern: lodash/**
+      max_depth: 1
+      severity: error
+"#,
+        )
+        .expect("parse config");
+
+        assert_eq!(parsed.import_hygiene.deny_deep_imports.len(), 1);
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[0].pattern,
+            "lodash/**"
+        );
+        assert_eq!(parsed.import_hygiene.deny_deep_imports[0].max_depth, 1);
+        assert_eq!(
+            parsed.import_hygiene.deny_deep_imports[0].severity,
+            Some(Severity::Error)
+        );
+    }
+
+    #[test]
+    fn test_boundary_compat_maps_legacy_deny_production_imports() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  test_boundary:
+    deny_production_imports: true
+"#,
+        )
+        .expect("parse config");
+
+        assert!(parsed.import_hygiene.test_boundary.enabled);
+        assert_eq!(
+            parsed.import_hygiene.test_boundary.mode,
+            TestBoundaryMode::ProductionOnly
+        );
+    }
+
+    #[test]
+    fn test_boundary_mode_defaults_to_off_when_disabled() {
+        let parsed: SpecConfig = yaml_serde::from_str(
+            r#"
+import_hygiene:
+  test_boundary:
+    mode: bidirectional
+"#,
+        )
+        .expect("parse config");
+
+        assert!(parsed.import_hygiene.test_boundary.enabled);
+        assert_eq!(
+            parsed.import_hygiene.test_boundary.effective_mode(),
+            TestBoundaryMode::Bidirectional
+        );
     }
 
     #[test]
