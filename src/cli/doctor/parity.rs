@@ -2,7 +2,7 @@ use crate::spec::config::{ReleaseChannel, SpecConfig};
 
 use super::focus::DoctorCompareFocus;
 use super::trace_types::{ParsedTraceData, TraceResultKind};
-use super::types::DoctorCompareResolutionOutput;
+use super::types::{CompareStatus, DoctorCompareResolutionOutput, MismatchCategory};
 
 pub(super) fn derive_tsc_focus_resolution(
     parsed_trace: &ParsedTraceData,
@@ -83,34 +83,34 @@ pub(super) fn derive_tsc_focus_resolution(
     }
 }
 
-pub(super) fn parity_verdict_for_status(status: &str) -> &'static str {
+pub(super) fn parity_verdict_for_status(status: CompareStatus) -> &'static str {
     match status {
-        "match" => "MATCH",
-        "mismatch" => "DIFF",
-        _ => "SKIPPED",
+        CompareStatus::Match => "MATCH",
+        CompareStatus::Mismatch => "DIFF",
+        CompareStatus::Skipped => "SKIPPED",
     }
 }
 
 pub(super) fn classify_doctor_compare_mismatch(
-    status: &str,
+    status: CompareStatus,
     focus: Option<&DoctorCompareFocus>,
     specgate_resolution: Option<&DoctorCompareResolutionOutput>,
     tsc_trace_resolution: Option<&DoctorCompareResolutionOutput>,
     missing_in_specgate: &[String],
     extra_in_specgate: &[String],
-) -> Option<String> {
-    if status != "mismatch" {
+) -> Option<MismatchCategory> {
+    if status != CompareStatus::Mismatch {
         return None;
     }
 
     let Some(focus) = focus else {
-        return Some("edge_set_diff".to_string());
+        return Some(MismatchCategory::EdgeSetDiff);
     };
 
     let (Some(specgate_resolution), Some(tsc_trace_resolution)) =
         (specgate_resolution, tsc_trace_resolution)
     else {
-        return Some("focused_unknown".to_string());
+        return Some(MismatchCategory::FocusedUnknown);
     };
 
     let category = match (
@@ -120,58 +120,59 @@ pub(super) fn classify_doctor_compare_mismatch(
         (TraceResultKind::FirstParty, TraceResultKind::FirstParty)
             if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
         {
-            "focused_target_mismatch"
+            MismatchCategory::FocusedTargetMismatch
         }
         (
             TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
             TraceResultKind::FirstParty,
-        ) => "focused_specgate_missing_resolution",
+        ) => MismatchCategory::FocusedSpecgateMissingResolution,
         (
             TraceResultKind::FirstParty,
             TraceResultKind::Unresolvable | TraceResultKind::NotObserved,
-        ) => "focused_tsc_missing_resolution",
+        ) => MismatchCategory::FocusedTscMissingResolution,
         (TraceResultKind::ThirdParty, TraceResultKind::FirstParty)
         | (TraceResultKind::FirstParty, TraceResultKind::ThirdParty) => {
-            "focused_classification_mismatch"
+            MismatchCategory::FocusedClassificationMismatch
         }
         _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => {
-            "focused_edge_set_diff"
+            MismatchCategory::FocusedEdgeSetDiff
         }
-        _ => "focused_resolution_mismatch",
+        _ => MismatchCategory::FocusedResolutionMismatch,
     };
 
-    Some(
-        classify_focus_mismatch_tag(focus, specgate_resolution, tsc_trace_resolution)
-            .filter(|_| category == "focused_target_mismatch")
-            .unwrap_or(category)
-            .to_string(),
-    )
+    Some(match category {
+        MismatchCategory::FocusedTargetMismatch => {
+            classify_focus_mismatch_tag(focus, specgate_resolution, tsc_trace_resolution)
+                .unwrap_or(category)
+        }
+        _ => category,
+    })
 }
 
 pub(super) fn classify_focus_mismatch_tag(
     focus: &DoctorCompareFocus,
     specgate_resolution: &DoctorCompareResolutionOutput,
     tsc_trace_resolution: &DoctorCompareResolutionOutput,
-) -> Option<&'static str> {
+) -> Option<MismatchCategory> {
     let specifier = focus.output.import_specifier.as_str();
     let is_relative = specifier.starts_with("./") || specifier.starts_with("../");
 
     if is_relative && matches_js_runtime_extension(specifier) {
-        return Some("extension_alias");
+        return Some(MismatchCategory::ExtensionAlias);
     }
 
     if !is_relative {
         if resolution_path_looks_types(specgate_resolution.resolved_to.as_deref())
             || resolution_path_looks_types(tsc_trace_resolution.resolved_to.as_deref())
         {
-            return Some("condition_names");
+            return Some(MismatchCategory::ConditionNames);
         }
 
         if specifier.starts_with('@') || specifier.contains('/') {
-            return Some("paths");
+            return Some(MismatchCategory::Paths);
         }
 
-        return Some("exports");
+        return Some(MismatchCategory::Exports);
     }
 
     None
@@ -195,14 +196,14 @@ pub(super) fn resolution_path_looks_types(path: Option<&str>) -> bool {
 }
 
 pub(super) fn build_actionable_mismatch_hint(
-    status: &str,
+    status: CompareStatus,
     focus: Option<&DoctorCompareFocus>,
     specgate_resolution: Option<&DoctorCompareResolutionOutput>,
     tsc_trace_resolution: Option<&DoctorCompareResolutionOutput>,
     _missing_in_specgate: &[String],
     _extra_in_specgate: &[String],
 ) -> Option<String> {
-    if status != "mismatch" {
+    if status != CompareStatus::Mismatch {
         return None;
     }
 
@@ -267,7 +268,7 @@ pub(super) fn doctor_compare_beta_channel_enabled(config: &SpecConfig) -> bool {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::super::types::DoctorCompareFocusOutput;
+    use super::super::types::{DoctorCompareFocusOutput, FocusResolutionKind};
     use super::*;
 
     fn focus_with_edge(
@@ -282,7 +283,13 @@ mod tests {
                 from: "src/app/main.ts".to_string(),
                 import_specifier: import_specifier.to_string(),
                 resolved_to: specgate_resolved_to.map(ToString::to_string),
-                resolution_kind: specgate_result_kind.as_str().to_string(),
+                resolution_kind: match specgate_result_kind {
+                    TraceResultKind::FirstParty => FocusResolutionKind::FirstParty,
+                    TraceResultKind::ThirdParty => FocusResolutionKind::ThirdParty,
+                    TraceResultKind::Unresolvable | TraceResultKind::NotObserved => {
+                        FocusResolutionKind::Unresolvable
+                    }
+                },
                 in_specgate_graph: edge.is_some(),
                 specgate_trace: vec!["specgate".to_string()],
             },
@@ -364,7 +371,7 @@ mod tests {
         };
 
         let category = classify_doctor_compare_mismatch(
-            "mismatch",
+            CompareStatus::Mismatch,
             Some(&focus),
             Some(&focus.specgate_resolution),
             Some(&tsc_trace_resolution),
@@ -372,7 +379,10 @@ mod tests {
             &[],
         );
 
-        assert_eq!(category.as_deref(), Some("focused_classification_mismatch"));
+        assert_eq!(
+            category,
+            Some(MismatchCategory::FocusedClassificationMismatch)
+        );
     }
 
     #[test]
@@ -392,7 +402,7 @@ mod tests {
         };
 
         let category = classify_doctor_compare_mismatch(
-            "mismatch",
+            CompareStatus::Mismatch,
             Some(&focus),
             Some(&focus.specgate_resolution),
             Some(&tsc_trace_resolution),
@@ -400,7 +410,7 @@ mod tests {
             &[],
         );
 
-        assert_eq!(category.as_deref(), Some("exports"));
+        assert_eq!(category, Some(MismatchCategory::Exports));
     }
 
     #[test]

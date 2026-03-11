@@ -224,3 +224,41 @@ fn baseline_refresh_prunes_stale_entries() {
         0
     );
 }
+
+#[test]
+fn expired_baseline_entry_resurfaces_violation_as_new() {
+    let temp = TempDir::new().expect("tempdir");
+    create_project_with_violation(temp.path());
+
+    let baseline_result = run([
+        "specgate",
+        "baseline",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(baseline_result.exit_code, EXIT_CODE_PASS);
+
+    let baseline_path = temp.path().join(".specgate-baseline.json");
+    let mut baseline_json =
+        parse_json(&fs::read_to_string(&baseline_path).expect("baseline file should exist"));
+    baseline_json["entries"][0]["expires_at"] = Value::String("2026-01-01".to_string());
+    fs::write(
+        &baseline_path,
+        serde_json::to_string_pretty(&baseline_json).expect("serialize baseline"),
+    )
+    .expect("rewrite baseline");
+
+    let check_result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+    assert_eq!(check_result.exit_code, EXIT_CODE_POLICY_VIOLATIONS);
+
+    let output = parse_json(&check_result.stdout);
+    assert_eq!(output["status"], "fail");
+    assert_eq!(output["summary"]["baseline_violations"], 0);
+    assert_eq!(output["summary"]["new_violations"], 1);
+    assert_eq!(output["summary"]["expired_baseline_entries"], 1);
+}

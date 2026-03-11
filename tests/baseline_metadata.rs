@@ -286,6 +286,50 @@ fn baseline_add_keeps_missing_duplicate_when_only_positional_identity_differs() 
 }
 
 #[test]
+fn baseline_list_normalizes_legacy_rule_ids_for_display() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_violation(temp.path(), false);
+
+    let baseline = BaselineFile {
+        version: BASELINE_FILE_VERSION.to_string(),
+        generated_from: BaselineGeneratedFrom::default(),
+        entries: vec![sample_entry(
+            "legacy-rule",
+            Some("team-app"),
+            Some("migration"),
+            None,
+            None,
+        )],
+    };
+
+    let baseline_path = temp.path().join(".specgate-baseline.json");
+    let mut baseline_json = serde_json::to_value(&baseline).expect("baseline json");
+    baseline_json["entries"][0]["rule"] = Value::String("edge.unresolved".to_string());
+    fs::write(
+        &baseline_path,
+        serde_json::to_string_pretty(&baseline_json).expect("serialize baseline"),
+    )
+    .expect("write baseline");
+
+    let result = run([
+        "specgate",
+        "baseline",
+        "list",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(
+        output["entries"][0]["rule"].as_str().expect("rule"),
+        "hygiene.unresolved_import"
+    );
+}
+
+#[test]
 fn audit_report_counts_metadata_and_expiry_gaps() {
     let baseline = BaselineFile {
         version: BASELINE_FILE_VERSION.to_string(),

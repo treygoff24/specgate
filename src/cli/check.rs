@@ -13,14 +13,32 @@
 //! - `--diff`: Deprecated alias for `--baseline-diff`
 //! - `--diff-new-only`: Deprecated alias for `--baseline-new-only`
 
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, stdout};
+use std::path::Path;
 use std::path::PathBuf;
+use std::time::Instant;
 
-use super::*;
 use clap::Args;
 
-use crate::baseline::DEFAULT_BASELINE_PATH;
+use crate::baseline::{
+    ClassifyOptions, DEFAULT_BASELINE_PATH, classify_violations_with_options,
+    load_optional_baseline,
+};
+use crate::build_info;
+use crate::cli::{
+    CliRunResult, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, build_workspace_packages_info,
+    compute_governance_hashes, compute_telemetry_summary, load_project_for_analysis,
+    normalize_repo_relative, prepare_analysis_for_loaded, project_fingerprint, record_timing,
+    resolve_against_root, runtime_error_json,
+};
 use crate::policy::{self, ChangeClassification, PolicyDiffReport};
+use crate::spec::{Severity, config::StaleBaselinePolicy};
+use crate::verdict::{
+    self, AnonymizedTelemetryEvent, GovernanceContext, TelemetryEventName, VerdictBuildOptions,
+    VerdictIdentity, VerdictMetrics, VerdictStatus,
+};
+use crate::verdict::{VerdictBuildRequest, build_verdict_from_request};
 
 // Used for expiry-aware classification (current_date)
 use chrono::Local;
@@ -276,73 +294,26 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     let total_start = Instant::now();
 
     let load_start = Instant::now();
-    let loaded = match load_project(&args.project_root) {
+    let loaded = match load_project_for_analysis(&args.project_root) {
         Ok(loaded) => loaded,
-        Err(error) => {
-            return runtime_error_json("config", "failed to load project", vec![error]);
-        }
+        Err(error) => return error,
     };
     record_timing(&mut timings, "load_project", load_start);
-
-    if loaded.validation.has_errors() {
-        let details = loaded
-            .validation
-            .errors()
-            .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        );
-    }
 
     let deny_widenings = match evaluate_deny_widenings(&args) {
         Ok(result) => result,
         Err(error_result) => return error_result,
     };
 
-    let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
-        Ok(edge_pairs) => edge_pairs,
-        Err(error) => {
-            return runtime_error_json("git", "failed to compute blast edge pairs", vec![error]);
-        }
-    };
-
-    // Handle --since blast-radius mode - compute affected modules before analysis
-    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &blast_edge_pairs) {
-        Ok(radius) => radius,
-        Err(error) => {
-            return runtime_error_json("git", "failed to compute blast radius", vec![error]);
-        }
-    };
-
-    // Compute affected modules from blast radius for contract rule scoping
-    let affected_modules: Option<BTreeSet<String>> = blast_radius.as_ref().map(|radius| {
-        radius
-            .affected_modules
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-    });
-
     let analyze_start = Instant::now();
-    let artifacts = match analyze_project(&loaded, affected_modules.as_ref()) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            return runtime_error_json("runtime", "failed to analyze project", vec![error]);
-        }
+    let prepared = match prepare_analysis_for_loaded(loaded, args.since.as_deref()) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
     record_timing(&mut timings, "analyze_project", analyze_start);
-
-    if !artifacts.layer_config_issues.is_empty() {
-        return runtime_error_json(
-            "config",
-            "invalid enforce-layer rule configuration",
-            artifacts.layer_config_issues,
-        );
-    }
+    let loaded = prepared.loaded;
+    let artifacts = prepared.artifacts;
+    let blast_radius = prepared.blast_radius;
     let baseline_start = Instant::now();
     let baseline = if args.no_baseline {
         None
@@ -382,13 +353,12 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
 
     let classify_start = Instant::now();
     let current_date = Local::now().format("%Y-%m-%d").to_string();
-    let (classified, stale_baseline_entries, expired_baseline_entries) =
-        classify_violations_with_options(
-            &loaded.project_root,
-            &policy_violations,
-            baseline.as_ref(),
-            &ClassifyOptions { current_date },
-        );
+    let classification = classify_violations_with_options(
+        &loaded.project_root,
+        &policy_violations,
+        baseline.as_ref(),
+        &ClassifyOptions { current_date },
+    );
     record_timing(&mut timings, "classify_baseline", classify_start);
 
     let governance = match compute_governance_hashes(&loaded) {
@@ -442,13 +412,13 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
     let spec_hash_for_telemetry = governance.spec_hash.clone();
 
     let telemetry_summary = compute_telemetry_summary(
-        &classified,
+        &classification.violations,
         artifacts.suppressed_violations,
-        stale_baseline_entries,
-        expired_baseline_entries,
+        classification.stale_count,
+        classification.expired_count,
     );
     let fail_on_stale =
-        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && stale_baseline_entries > 0;
+        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && classification.stale_count > 0;
     let telemetry_status = if telemetry_summary.new_error_violations > 0 || fail_on_stale {
         VerdictStatus::Fail
     } else {
@@ -475,12 +445,12 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
         None
     };
 
-    let mut verdict = build_verdict_with_options(
-        &loaded.project_root,
-        &classified,
-        artifacts.suppressed_violations,
+    let mut verdict = build_verdict_from_request(VerdictBuildRequest {
+        project_root: &loaded.project_root,
+        violations: &classification.violations,
+        suppressed_violations: artifacts.suppressed_violations,
         metrics,
-        VerdictIdentity {
+        identity: VerdictIdentity {
             tool_version: build_info::tool_version().to_string(),
             git_sha: build_info::git_sha().to_string(),
             config_hash: governance.config_hash,
@@ -490,17 +460,17 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
             rule_deltas: deny_widenings.widening_details.clone(),
             policy_change_detected: deny_widenings.has_widening,
         },
-        GovernanceContext {
-            stale_baseline_entries,
-            expired_baseline_entries,
+        governance: GovernanceContext {
+            stale_baseline_entries: classification.stale_count,
+            expired_baseline_entries: classification.expired_count,
             rule_deltas: deny_widenings.widening_details.clone(),
             policy_change_detected: deny_widenings.has_widening,
         },
-        VerdictBuildOptions {
+        options: VerdictBuildOptions {
             stale_baseline_policy: loaded.config.stale_baseline,
             telemetry: telemetry_event,
         },
-    );
+    });
 
     if deny_widenings.has_widening {
         verdict.status = VerdictStatus::Fail;
@@ -579,70 +549,23 @@ pub(super) fn handle_check(args: CheckArgs) -> CliRunResult {
 /// - New violations are prefixed with `+`
 /// - Baseline violations are prefixed with ` ` (space)
 pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> CliRunResult {
-    let loaded = match load_project(&args.project_root) {
+    let loaded = match load_project_for_analysis(&args.project_root) {
         Ok(loaded) => loaded,
-        Err(error) => {
-            return runtime_error_json("config", "failed to load project", vec![error]);
-        }
+        Err(error) => return error,
     };
-
-    if loaded.validation.has_errors() {
-        let details = loaded
-            .validation
-            .errors()
-            .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        );
-    }
 
     let deny_widenings = match evaluate_deny_widenings(&args) {
         Ok(result) => result,
         Err(error_result) => return error_result,
     };
 
-    let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, args.since.as_deref()) {
-        Ok(edge_pairs) => edge_pairs,
-        Err(error) => {
-            return runtime_error_json("git", "failed to compute blast edge pairs", vec![error]);
-        }
+    let prepared = match prepare_analysis_for_loaded(loaded, args.since.as_deref()) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
-
-    // Handle --since blast-radius mode - compute affected modules before analysis
-    let blast_radius = match build_blast_radius(&loaded, args.since.as_deref(), &blast_edge_pairs) {
-        Ok(radius) => radius,
-        Err(error) => {
-            return runtime_error_json("git", "failed to compute blast radius", vec![error]);
-        }
-    };
-
-    // Compute affected modules from blast radius for contract rule scoping
-    let affected_modules: Option<BTreeSet<String>> = blast_radius.as_ref().map(|radius| {
-        radius
-            .affected_modules
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-    });
-
-    let artifacts = match analyze_project(&loaded, affected_modules.as_ref()) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            return runtime_error_json("runtime", "failed to analyze project", vec![error]);
-        }
-    };
-
-    if !artifacts.layer_config_issues.is_empty() {
-        return runtime_error_json(
-            "config",
-            "invalid enforce-layer rule configuration",
-            artifacts.layer_config_issues,
-        );
-    }
+    let loaded = prepared.loaded;
+    let artifacts = prepared.artifacts;
+    let blast_radius = prepared.blast_radius;
 
     let policy_violations = if let Some(radius) = &blast_radius {
         artifacts
@@ -679,22 +602,22 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
     };
 
     let current_date = Local::now().format("%Y-%m-%d").to_string();
-    let (classified, stale_baseline_entries, _expired_baseline_entries) =
-        classify_violations_with_options(
-            &loaded.project_root,
-            &policy_violations,
-            baseline.as_ref(),
-            &ClassifyOptions { current_date },
-        );
+    let classification = classify_violations_with_options(
+        &loaded.project_root,
+        &policy_violations,
+        baseline.as_ref(),
+        &ClassifyOptions { current_date },
+    );
 
     // Filter based on diff mode
     let filtered: Vec<_> = match diff_mode {
-        DiffMode::NewOnly => classified
+        DiffMode::NewOnly => classification
+            .violations
             .iter()
             .filter(|v| matches!(v.disposition, verdict::ViolationDisposition::New))
             .cloned()
             .collect(),
-        DiffMode::Full => classified,
+        DiffMode::Full => classification.violations,
         DiffMode::None => {
             // This branch is unreachable because handle_check guards against
             // calling handle_check_with_diff when diff_mode is None.
@@ -717,9 +640,10 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
     lines.push(format!("Summary: {}", stats.format_human()));
 
     // Add stale baseline entry count if non-zero
-    if stale_baseline_entries > 0 {
+    if classification.stale_count > 0 {
         lines.push(format!(
-            "Stale baseline entries: {stale_baseline_entries} (consider pruning with `specgate baseline --refresh`)"
+            "Stale baseline entries: {} (consider pruning with `specgate baseline --refresh`)",
+            classification.stale_count
         ));
         if loaded.config.stale_baseline == StaleBaselinePolicy::Fail {
             lines.push(
@@ -735,7 +659,7 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
             && v.violation.severity == Severity::Error
     });
     let stale_policy_failure =
-        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && stale_baseline_entries > 0;
+        loaded.config.stale_baseline == StaleBaselinePolicy::Fail && classification.stale_count > 0;
 
     let exit_code = if has_new_errors || stale_policy_failure {
         EXIT_CODE_POLICY_VIOLATIONS
@@ -752,7 +676,8 @@ pub(super) fn handle_check_with_diff(args: CheckArgs, diff_mode: DiffMode) -> Cl
             loaded.config.stale_baseline.as_str()
         ));
         lines.push(format!(
-            "  stale_baseline_entries: {stale_baseline_entries}"
+            "  stale_baseline_entries: {}",
+            classification.stale_count
         ));
     }
 

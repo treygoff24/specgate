@@ -485,6 +485,29 @@ fn doctor_compare_supports_single_import_focus_mode() {
 }
 
 #[test]
+fn doctor_compare_without_trace_payload_reports_skipped_status_contract() {
+    let temp = TempDir::new().expect("tempdir");
+    write_project_with_edge(temp.path());
+
+    let result = run([
+        "specgate",
+        "doctor",
+        "compare",
+        "--project-root",
+        temp.path().to_str().expect("utf8"),
+    ]);
+
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "skipped");
+    assert_eq!(output["parity_verdict"], "SKIPPED");
+    assert!(
+        output["mismatch_category"].is_null(),
+        "mismatch_category must be absent on skipped compare"
+    );
+}
+
+#[test]
 fn doctor_compare_focus_mismatch_includes_actionable_hint() {
     let temp = TempDir::new().expect("tempdir");
     write_project_with_edge(temp.path());

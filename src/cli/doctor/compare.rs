@@ -1,5 +1,5 @@
 use crate::cli::{
-    CliRunResult, EXIT_CODE_DOCTOR_MISMATCH, EXIT_CODE_PASS, analyze_project, load_project,
+    CliRunResult, EXIT_CODE_DOCTOR_MISMATCH, EXIT_CODE_PASS, prepare_analysis_context,
     resolve_against_root, runtime_error_json,
 };
 use crate::deterministic::normalize_repo_relative;
@@ -12,42 +12,15 @@ use super::parity::{
 };
 use super::trace_io::{load_trace_source, write_structured_snapshot};
 use super::trace_parser::parse_trace_data;
-use super::types::DoctorCompareOutput;
+use super::types::{CompareStatus, DoctorCompareOutput};
 
 pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
-    let loaded = match load_project(&args.common.project_root) {
-        Ok(loaded) => loaded,
-        Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),
+    let prepared = match prepare_analysis_context(&args.common.project_root, None) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
-
-    if loaded.validation.has_errors() {
-        let details = loaded
-            .validation
-            .errors()
-            .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        );
-    }
-
-    let artifacts = match analyze_project(&loaded, None) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            return runtime_error_json("runtime", "failed to analyze project", vec![error]);
-        }
-    };
-
-    if !artifacts.layer_config_issues.is_empty() {
-        return runtime_error_json(
-            "config",
-            "invalid enforce-layer rule configuration",
-            artifacts.layer_config_issues,
-        );
-    }
+    let loaded = &prepared.loaded;
+    let artifacts = &prepared.artifacts;
 
     let focus = match build_doctor_compare_focus(&loaded, &artifacts, &args) {
         Ok(focus) => focus,
@@ -86,7 +59,7 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     let Some(trace_source_payload) = trace_source.payload else {
         let output = DoctorCompareOutput {
             schema_version: "2.2".to_string(),
-            status: "skipped".to_string(),
+            status: CompareStatus::Skipped,
             parity_verdict: "SKIPPED".to_string(),
             parser_mode: args.parser_mode.as_str().to_string(),
             trace_parser: None,
@@ -154,9 +127,9 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         .collect::<Vec<_>>();
 
     let status = if missing_in_specgate.is_empty() && extra_in_specgate.is_empty() {
-        "match"
+        CompareStatus::Match
     } else {
-        "mismatch"
+        CompareStatus::Mismatch
     };
 
     let tsc_trace_resolution = focus
@@ -182,7 +155,7 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
 
     let output = DoctorCompareOutput {
         schema_version: "2.2".to_string(),
-        status: status.to_string(),
+        status,
         parity_verdict: parity_verdict_for_status(status).to_string(),
         parser_mode: args.parser_mode.as_str().to_string(),
         trace_parser: Some(parsed_trace.parser_kind.as_str().to_string()),
@@ -201,7 +174,7 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         focus: focus.as_ref().map(|focus| focus.output.clone()),
     };
 
-    let exit_code = if status == "mismatch" {
+    let exit_code = if status == CompareStatus::Mismatch {
         EXIT_CODE_DOCTOR_MISMATCH
     } else {
         EXIT_CODE_PASS

@@ -45,7 +45,8 @@ pub(super) struct DoctorOverlapOutput {
 #[derive(Debug, Serialize)]
 pub(super) struct DoctorCompareOutput {
     pub(super) schema_version: String,
-    pub(super) status: String,
+    #[serde(serialize_with = "serialize_compare_status")]
+    pub(super) status: CompareStatus,
     pub(super) parity_verdict: String,
     pub(super) parser_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,8 +57,11 @@ pub(super) struct DoctorCompareOutput {
     pub(super) trace_edge_count: usize,
     pub(super) missing_in_specgate: Vec<String>,
     pub(super) extra_in_specgate: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) mismatch_category: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_mismatch_category"
+    )]
+    pub(super) mismatch_category: Option<MismatchCategory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) actionable_mismatch_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +74,58 @@ pub(super) struct DoctorCompareOutput {
     pub(super) tsc_trace_resolution: Option<DoctorCompareResolutionOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) focus: Option<DoctorCompareFocusOutput>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompareStatus {
+    Match,
+    Mismatch,
+    Skipped,
+}
+
+impl CompareStatus {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Match => "match",
+            Self::Mismatch => "mismatch",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MismatchCategory {
+    EdgeSetDiff,
+    FocusedUnknown,
+    FocusedTargetMismatch,
+    FocusedSpecgateMissingResolution,
+    FocusedTscMissingResolution,
+    FocusedClassificationMismatch,
+    FocusedEdgeSetDiff,
+    FocusedResolutionMismatch,
+    ExtensionAlias,
+    ConditionNames,
+    Paths,
+    Exports,
+}
+
+impl MismatchCategory {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::EdgeSetDiff => "edge_set_diff",
+            Self::FocusedUnknown => "focused_unknown",
+            Self::FocusedTargetMismatch => "focused_target_mismatch",
+            Self::FocusedSpecgateMissingResolution => "focused_specgate_missing_resolution",
+            Self::FocusedTscMissingResolution => "focused_tsc_missing_resolution",
+            Self::FocusedClassificationMismatch => "focused_classification_mismatch",
+            Self::FocusedEdgeSetDiff => "focused_edge_set_diff",
+            Self::FocusedResolutionMismatch => "focused_resolution_mismatch",
+            Self::ExtensionAlias => "extension_alias",
+            Self::ConditionNames => "condition_names",
+            Self::Paths => "paths",
+            Self::Exports => "exports",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,7 +156,58 @@ pub(super) struct DoctorCompareFocusOutput {
     pub(super) import_specifier: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) resolved_to: Option<String>,
-    pub(super) resolution_kind: String,
+    #[serde(serialize_with = "serialize_focus_resolution_kind")]
+    pub(super) resolution_kind: FocusResolutionKind,
     pub(super) in_specgate_graph: bool,
     pub(super) specgate_trace: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FocusResolutionKind {
+    FirstParty,
+    ThirdParty,
+    Unresolvable,
+}
+
+impl FocusResolutionKind {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::FirstParty => "first_party",
+            Self::ThirdParty => "third_party",
+            Self::Unresolvable => "unresolvable",
+        }
+    }
+}
+
+pub(super) fn serialize_compare_status<S>(
+    status: &CompareStatus,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(status.as_str())
+}
+
+pub(super) fn serialize_optional_mismatch_category<S>(
+    category: &Option<MismatchCategory>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match category {
+        Some(category) => serializer.serialize_some(category.as_str()),
+        None => serializer.serialize_none(),
+    }
+}
+
+pub(super) fn serialize_focus_resolution_kind<S>(
+    kind: &FocusResolutionKind,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(kind.as_str())
 }

@@ -199,6 +199,17 @@ pub struct VerdictBuildOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerdictBuildRequest<'a> {
+    pub project_root: &'a Path,
+    pub violations: &'a [FingerprintedViolation],
+    pub suppressed_violations: usize,
+    pub metrics: Option<VerdictMetrics>,
+    pub identity: VerdictIdentity,
+    pub governance: GovernanceContext,
+    pub options: VerdictBuildOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerdictIdentity {
     pub tool_version: String,
     pub git_sha: String,
@@ -242,7 +253,7 @@ pub struct Verdict {
 }
 
 /// Governance context for verdict building.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GovernanceContext {
     /// Number of baseline entries that no longer match any current violations.
     pub stale_baseline_entries: usize,
@@ -261,14 +272,15 @@ pub fn build_verdict(
     metrics: Option<VerdictMetrics>,
     identity: VerdictIdentity,
 ) -> Verdict {
-    build_verdict_with_governance(
+    build_verdict_from_request(VerdictBuildRequest {
         project_root,
         violations,
         suppressed_violations,
         metrics,
         identity,
-        GovernanceContext::default(),
-    )
+        governance: GovernanceContext::default(),
+        options: VerdictBuildOptions::default(),
+    })
 }
 
 pub fn build_verdict_with_governance(
@@ -279,15 +291,15 @@ pub fn build_verdict_with_governance(
     identity: VerdictIdentity,
     governance: GovernanceContext,
 ) -> Verdict {
-    build_verdict_with_options(
+    build_verdict_from_request(VerdictBuildRequest {
         project_root,
         violations,
         suppressed_violations,
         metrics,
         identity,
         governance,
-        VerdictBuildOptions::default(),
-    )
+        options: VerdictBuildOptions::default(),
+    })
 }
 
 pub fn build_verdict_with_options(
@@ -299,6 +311,28 @@ pub fn build_verdict_with_options(
     governance: GovernanceContext,
     options: VerdictBuildOptions,
 ) -> Verdict {
+    build_verdict_from_request(VerdictBuildRequest {
+        project_root,
+        violations,
+        suppressed_violations,
+        metrics,
+        identity,
+        governance,
+        options,
+    })
+}
+
+pub fn build_verdict_from_request(request: VerdictBuildRequest<'_>) -> Verdict {
+    let VerdictBuildRequest {
+        project_root,
+        violations,
+        suppressed_violations,
+        metrics,
+        identity,
+        governance,
+        options,
+    } = request;
+
     let mut rendered = violations
         .iter()
         .map(|entry| render_violation(project_root, entry))
@@ -695,6 +729,57 @@ mod tests {
         assert!(rendered.contains("\"policy_change_detected\":false"));
         assert!(!rendered.contains("\"governance\""));
         assert!(!rendered.contains("\"telemetry\""));
+    }
+
+    #[test]
+    fn canonical_request_builder_preserves_wrapper_json_shape() {
+        let entries = vec![FingerprintedViolation {
+            violation: violation("boundary.never_imports", Severity::Error, "src/a.ts", "bad"),
+            fingerprint: "sha256:a".to_string(),
+            disposition: ViolationDisposition::New,
+        }];
+
+        let wrapper_verdict = build_verdict_with_options(
+            Path::new("."),
+            &entries,
+            2,
+            None,
+            identity("deterministic"),
+            GovernanceContext {
+                stale_baseline_entries: 1,
+                expired_baseline_entries: 0,
+                rule_deltas: vec!["boundary.never_imports:added".to_string()],
+                policy_change_detected: true,
+            },
+            VerdictBuildOptions {
+                stale_baseline_policy: StaleBaselinePolicy::Warn,
+                telemetry: None,
+            },
+        );
+
+        let request_verdict = build_verdict_from_request(VerdictBuildRequest {
+            project_root: Path::new("."),
+            violations: &entries,
+            suppressed_violations: 2,
+            metrics: None,
+            identity: identity("deterministic"),
+            governance: GovernanceContext {
+                stale_baseline_entries: 1,
+                expired_baseline_entries: 0,
+                rule_deltas: vec!["boundary.never_imports:added".to_string()],
+                policy_change_detected: true,
+            },
+            options: VerdictBuildOptions {
+                stale_baseline_policy: StaleBaselinePolicy::Warn,
+                telemetry: None,
+            },
+        });
+
+        let wrapper_json = serde_json::to_value(&wrapper_verdict).expect("serialize wrapper");
+        let request_json = serde_json::to_value(&request_verdict).expect("serialize request");
+
+        assert_eq!(request_verdict, wrapper_verdict);
+        assert_eq!(request_json, wrapper_json);
     }
 
     #[test]

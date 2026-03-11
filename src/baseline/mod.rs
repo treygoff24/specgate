@@ -185,6 +185,13 @@ pub struct ClassifyOptions {
     pub current_date: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassificationResult {
+    pub violations: Vec<FingerprintedViolation>,
+    pub stale_count: usize,
+    pub expired_count: usize,
+}
+
 pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
     if !path.exists() {
         return Ok(None);
@@ -195,26 +202,30 @@ pub fn load_optional_baseline(path: &Path) -> Result<Option<BaselineFile>> {
         source,
     })?;
 
-    let mut parsed: BaselineFile =
+    let parsed: BaselineFile =
         serde_json::from_str(&source).map_err(|source| BaselineError::Parse {
             path: path.to_path_buf(),
             source,
         })?;
 
-    for entry in &mut parsed.entries {
-        entry.rule = normalize_baseline_rule_id(&entry.rule).to_string();
-    }
-
-    sort_baseline_entries(&mut parsed.entries);
-    dedup_entries_by_identity(&mut parsed.entries);
-
     Ok(Some(parsed))
 }
 
+pub fn normalize_baseline_file(baseline: &BaselineFile) -> BaselineFile {
+    let mut normalized = baseline.clone();
+
+    for entry in &mut normalized.entries {
+        entry.rule = normalize_baseline_rule_id(&entry.rule).to_string();
+    }
+
+    sort_baseline_entries(&mut normalized.entries);
+    dedup_entries_by_identity(&mut normalized.entries);
+
+    normalized
+}
+
 pub fn write_baseline(path: &Path, baseline: &BaselineFile) -> Result<()> {
-    let mut stable = baseline.clone();
-    sort_baseline_entries(&mut stable.entries);
-    dedup_entries_by_identity(&mut stable.entries);
+    let stable = normalize_baseline_file(baseline);
 
     let rendered = serde_json::to_string_pretty(&stable)
         .map_err(|source| BaselineError::Serialize { source })?;
@@ -498,8 +509,7 @@ pub fn count_stale_baseline_entries(
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> usize {
-    let (_, stale_count) = classify_violations_with_stale(project_root, violations, baseline);
-    stale_count
+    classify_violations_with_stale(project_root, violations, baseline).stale_count
 }
 
 pub fn classify_violations(
@@ -507,9 +517,7 @@ pub fn classify_violations(
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
 ) -> Vec<FingerprintedViolation> {
-    let (classified, _stale_count) =
-        classify_violations_with_stale(project_root, violations, baseline);
-    classified
+    classify_violations_with_stale(project_root, violations, baseline).violations
 }
 
 /// Classify violations against baseline and count stale entries.
@@ -520,17 +528,53 @@ pub fn classify_violations_with_stale(
     project_root: &Path,
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
-) -> (Vec<FingerprintedViolation>, usize) {
+) -> ClassificationResult {
+    classify_violations_engine(project_root, violations, baseline, None)
+}
+
+fn classify_violations_engine(
+    project_root: &Path,
+    violations: &[PolicyViolation],
+    baseline: Option<&BaselineFile>,
+    current_date: Option<&str>,
+) -> ClassificationResult {
     let mut ordered_violations = violations.to_vec();
     sort_policy_violations(&mut ordered_violations);
 
-    let mut remaining_by_primary = baseline.map(build_baseline_match_index).unwrap_or_default();
+    let (active_baseline, expired_count) = if let Some(current_date) = current_date {
+        let expired_count = baseline
+            .map(|b| {
+                b.entries
+                    .iter()
+                    .filter(|entry| is_entry_expired(entry, current_date))
+                    .count()
+            })
+            .unwrap_or(0);
 
-    let mut remaining_legacy = baseline
+        let active_baseline = baseline.map(|b| BaselineFile {
+            version: b.version.clone(),
+            generated_from: b.generated_from.clone(),
+            entries: b
+                .entries
+                .iter()
+                .filter(|entry| !is_entry_expired(entry, current_date))
+                .cloned()
+                .collect(),
+        });
+
+        (active_baseline, expired_count)
+    } else {
+        (baseline.cloned(), 0)
+    };
+
+    let active_baseline = active_baseline.as_ref();
+    let mut remaining_by_primary = active_baseline
+        .map(build_baseline_match_index)
+        .unwrap_or_default();
+    let mut remaining_legacy = active_baseline
         .map(build_legacy_fingerprint_counts)
         .unwrap_or_default();
-
-    let baseline_entry_count = baseline.map(|b| b.entries.len()).unwrap_or(0);
+    let baseline_entry_count = active_baseline.map(|b| b.entries.len()).unwrap_or(0);
 
     let mut matched_baseline_entries = 0usize;
 
@@ -579,7 +623,11 @@ pub fn classify_violations_with_stale(
 
     let stale_count = baseline_entry_count.saturating_sub(matched_baseline_entries);
 
-    (classified, stale_count)
+    ClassificationResult {
+        violations: classified,
+        stale_count,
+        expired_count,
+    }
 }
 
 /// Classify violations against baseline with expiry awareness.
@@ -592,35 +640,13 @@ pub fn classify_violations_with_options(
     violations: &[PolicyViolation],
     baseline: Option<&BaselineFile>,
     options: &ClassifyOptions,
-) -> (Vec<FingerprintedViolation>, usize, usize) {
-    let expired_count = baseline
-        .map(|b| {
-            b.entries
-                .iter()
-                .filter(|e| is_entry_expired(e, &options.current_date))
-                .count()
-        })
-        .unwrap_or(0);
-
-    // Build a filtered baseline that excludes expired entries
-    let filtered_baseline: Option<BaselineFile> = baseline.map(|b| {
-        let filtered_entries = b
-            .entries
-            .iter()
-            .filter(|e| !is_entry_expired(e, &options.current_date))
-            .cloned()
-            .collect();
-        BaselineFile {
-            version: b.version.clone(),
-            generated_from: b.generated_from.clone(),
-            entries: filtered_entries,
-        }
-    });
-
-    let (classified, stale) =
-        classify_violations_with_stale(project_root, violations, filtered_baseline.as_ref());
-
-    (classified, stale, expired_count)
+) -> ClassificationResult {
+    classify_violations_engine(
+        project_root,
+        violations,
+        baseline,
+        Some(&options.current_date),
+    )
 }
 
 /// Stable content fingerprint for baseline matching and verdict identity.
@@ -1010,12 +1036,15 @@ mod tests {
         assert_eq!(baseline.entries.len(), 2);
 
         // Now classify with only one current violation (v2)
-        let (classified, stale_count) =
-            classify_violations_with_stale(project_root, &[v2], Some(&baseline));
+        let classified = classify_violations_with_stale(project_root, &[v2], Some(&baseline));
 
-        assert_eq!(classified.len(), 1);
-        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
-        assert_eq!(stale_count, 1); // v1 is now stale
+        assert_eq!(classified.violations.len(), 1);
+        assert_eq!(
+            classified.violations[0].disposition,
+            ViolationDisposition::Baseline
+        );
+        assert_eq!(classified.stale_count, 1); // v1 is now stale
+        assert_eq!(classified.expired_count, 0);
     }
 
     #[test]
@@ -1026,10 +1055,10 @@ mod tests {
         let v2 = violation("B", "src/b.ts");
         let baseline = build_baseline(project_root, &[v1.clone(), v2.clone()]);
 
-        let (_, stale_count) =
-            classify_violations_with_stale(project_root, &[v1, v2], Some(&baseline));
+        let classified = classify_violations_with_stale(project_root, &[v1, v2], Some(&baseline));
 
-        assert_eq!(stale_count, 0);
+        assert_eq!(classified.stale_count, 0);
+        assert_eq!(classified.expired_count, 0);
     }
 
     #[test]
@@ -1040,9 +1069,10 @@ mod tests {
         let v2 = violation("B", "src/b.ts");
         let baseline = build_baseline(project_root, &[v1, v2]);
 
-        let (_, stale_count) = classify_violations_with_stale(project_root, &[], Some(&baseline));
+        let classified = classify_violations_with_stale(project_root, &[], Some(&baseline));
 
-        assert_eq!(stale_count, 2);
+        assert_eq!(classified.stale_count, 2);
+        assert_eq!(classified.expired_count, 0);
     }
 
     #[test]
@@ -1370,7 +1400,7 @@ mod tests {
             }],
         };
 
-        let (classified, _stale, expired) = classify_violations_with_options(
+        let classified = classify_violations_with_options(
             project_root,
             &[v],
             Some(&baseline),
@@ -1379,9 +1409,13 @@ mod tests {
             },
         );
 
-        assert_eq!(classified.len(), 1);
-        assert_eq!(classified[0].disposition, ViolationDisposition::New);
-        assert_eq!(expired, 1);
+        assert_eq!(classified.violations.len(), 1);
+        assert_eq!(
+            classified.violations[0].disposition,
+            ViolationDisposition::New
+        );
+        assert_eq!(classified.stale_count, 0);
+        assert_eq!(classified.expired_count, 1);
     }
 
     #[test]
@@ -1412,7 +1446,7 @@ mod tests {
             }],
         };
 
-        let (classified, _stale, expired) = classify_violations_with_options(
+        let classified = classify_violations_with_options(
             project_root,
             &[v],
             Some(&baseline),
@@ -1421,9 +1455,60 @@ mod tests {
             },
         );
 
-        assert_eq!(classified.len(), 1);
-        assert_eq!(classified[0].disposition, ViolationDisposition::Baseline);
-        assert_eq!(expired, 0);
+        assert_eq!(classified.violations.len(), 1);
+        assert_eq!(
+            classified.violations[0].disposition,
+            ViolationDisposition::Baseline
+        );
+        assert_eq!(classified.stale_count, 0);
+        assert_eq!(classified.expired_count, 0);
+    }
+
+    #[test]
+    fn load_optional_baseline_preserves_raw_entries_until_normalized() {
+        let temp = tempfile::NamedTempFile::new().expect("temp baseline");
+        std::fs::write(
+            temp.path(),
+            r#"{
+  "version": "1",
+  "generated_from": {
+    "tool_version": "test",
+    "git_sha": "deadbeef",
+    "config_hash": "sha256:config",
+    "spec_hash": "sha256:spec"
+  },
+  "entries": [
+    {
+      "fingerprint": "b",
+      "rule": "boundary.never_imports",
+      "severity": "error",
+      "message": "B",
+      "from_file": "src/b.ts"
+    },
+    {
+      "fingerprint": "a",
+      "rule": "edge.unresolved",
+      "severity": "error",
+      "message": "A",
+      "from_file": "src/a.ts"
+    }
+  ]
+}"#,
+        )
+        .expect("write baseline");
+
+        let loaded = load_optional_baseline(temp.path())
+            .expect("load baseline")
+            .expect("baseline exists");
+        assert_eq!(loaded.entries[0].rule, "boundary.never_imports");
+        assert_eq!(loaded.entries[1].rule, "edge.unresolved");
+
+        let normalized = normalize_baseline_file(&loaded);
+        assert_eq!(
+            normalized.entries[0].rule,
+            HYGIENE_UNRESOLVED_IMPORT_RULE_ID
+        );
+        assert_eq!(normalized.entries[1].rule, "boundary.never_imports");
     }
 
     #[test]

@@ -1,17 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use chrono::{Duration, Local, NaiveDate};
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 
-use super::*;
 use crate::baseline::audit::{AuditReport, audit_baseline};
 use crate::baseline::{
-    BASELINE_FILE_VERSION, BaselineEntry, BaselineFile, BaselineGeneratedFrom, baseline_identity,
-    build_baseline_with_metadata, is_entry_expired, load_optional_baseline,
-    refresh_baseline_with_metadata, write_baseline,
+    BASELINE_FILE_VERSION, BaselineEntry, BaselineFile, BaselineGeneratedFrom,
+    DEFAULT_BASELINE_PATH, baseline_identity, build_baseline_with_metadata, is_entry_expired,
+    load_optional_baseline, normalize_baseline_file, refresh_baseline_with_metadata,
+    write_baseline,
 };
-use crate::verdict::sort_policy_violations;
+use crate::cli::{
+    BaselineOutput, CliRunResult, CommonProjectArgs, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS,
+    PreparedAnalysisContext, compute_governance_hashes, normalize_repo_relative,
+    prepare_analysis_context, resolve_against_root, runtime_error_json,
+};
+use crate::verdict::{PolicyViolation, sort_policy_violations};
+use crate::{build_info, spec};
 
 const CLI_SCHEMA_VERSION: &str = "2.2";
 
@@ -173,8 +180,7 @@ struct BaselineAuditOutput {
 }
 
 struct BaselineProjectContext {
-    loaded: LoadedProject,
-    artifacts: AnalysisArtifacts,
+    prepared: PreparedAnalysisContext,
     generated_from: BaselineGeneratedFrom,
 }
 
@@ -204,7 +210,7 @@ fn handle_baseline_generate(args: BaselineGenerateArgs) -> CliRunResult {
         Err(error) => return error,
     };
 
-    let baseline_path = resolve_against_root(&context.loaded.project_root, &args.output);
+    let baseline_path = resolve_against_root(&context.prepared.loaded.project_root, &args.output);
     let (baseline, stale_entries_pruned) = if args.refresh {
         let existing = match load_optional_baseline(&baseline_path) {
             Ok(existing) => existing,
@@ -219,8 +225,8 @@ fn handle_baseline_generate(args: BaselineGenerateArgs) -> CliRunResult {
 
         if let Some(existing) = existing.as_ref() {
             let refreshed = refresh_baseline_with_metadata(
-                &context.loaded.project_root,
-                &context.artifacts.policy_violations,
+                &context.prepared.loaded.project_root,
+                &context.prepared.artifacts.policy_violations,
                 Some(existing),
                 context.generated_from.clone(),
             );
@@ -228,8 +234,8 @@ fn handle_baseline_generate(args: BaselineGenerateArgs) -> CliRunResult {
         } else {
             (
                 build_baseline_with_metadata(
-                    &context.loaded.project_root,
-                    &context.artifacts.policy_violations,
+                    &context.prepared.loaded.project_root,
+                    &context.prepared.artifacts.policy_violations,
                     context.generated_from.clone(),
                 ),
                 0usize,
@@ -238,8 +244,8 @@ fn handle_baseline_generate(args: BaselineGenerateArgs) -> CliRunResult {
     } else {
         (
             build_baseline_with_metadata(
-                &context.loaded.project_root,
-                &context.artifacts.policy_violations,
+                &context.prepared.loaded.project_root,
+                &context.prepared.artifacts.policy_violations,
                 context.generated_from,
             ),
             0usize,
@@ -257,9 +263,12 @@ fn handle_baseline_generate(args: BaselineGenerateArgs) -> CliRunResult {
     let output = BaselineOutput {
         schema_version: CLI_SCHEMA_VERSION.to_string(),
         status: "ok".to_string(),
-        baseline_path: normalize_repo_relative(&context.loaded.project_root, &baseline_path),
+        baseline_path: normalize_repo_relative(
+            &context.prepared.loaded.project_root,
+            &baseline_path,
+        ),
         entry_count: baseline.entries.len(),
-        source_violation_count: context.artifacts.policy_violations.len(),
+        source_violation_count: context.prepared.artifacts.policy_violations.len(),
         refreshed: args.refresh,
         stale_entries_pruned,
     };
@@ -273,7 +282,7 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
         Err(error) => return error,
     };
 
-    if context.loaded.config.baseline.require_metadata
+    if context.prepared.loaded.config.baseline.require_metadata
         && (!has_non_blank_arg(args.owner.as_deref()) || !has_non_blank_arg(args.reason.as_deref()))
     {
         return runtime_error_json(
@@ -283,7 +292,7 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
         );
     }
 
-    let baseline_path = resolve_against_root(&context.loaded.project_root, &args.baseline);
+    let baseline_path = resolve_against_root(&context.prepared.loaded.project_root, &args.baseline);
     let mut baseline = match load_optional_baseline(&baseline_path) {
         Ok(Some(existing)) => existing,
         Ok(None) => BaselineFile {
@@ -301,8 +310,8 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     };
 
     let matching_violations = filter_matching_violations(
-        &context.loaded.project_root,
-        &context.artifacts.policy_violations,
+        &context.prepared.loaded.project_root,
+        &context.prepared.artifacts.policy_violations,
         &args,
     );
 
@@ -318,7 +327,7 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     }
 
     let mut additions = build_baseline_with_metadata(
-        &context.loaded.project_root,
+        &context.prepared.loaded.project_root,
         &matching_violations,
         context.generated_from.clone(),
     )
@@ -358,7 +367,7 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
                     "baseline",
                     "baseline file disappeared after write",
                     vec![normalize_repo_relative(
-                        &context.loaded.project_root,
+                        &context.prepared.loaded.project_root,
                         &baseline_path,
                     )],
                 );
@@ -376,7 +385,10 @@ fn handle_baseline_add(args: BaselineAddArgs) -> CliRunResult {
     let output = BaselineAddOutput {
         schema_version: CLI_SCHEMA_VERSION.to_string(),
         status: "ok".to_string(),
-        baseline_path: normalize_repo_relative(&context.loaded.project_root, &baseline_path),
+        baseline_path: normalize_repo_relative(
+            &context.prepared.loaded.project_root,
+            &baseline_path,
+        ),
         matched_violation_count,
         added_count,
         entry_count: baseline.entries.len(),
@@ -496,51 +508,9 @@ fn handle_baseline_audit(args: BaselineAuditArgs) -> CliRunResult {
 fn load_baseline_project_context(
     common: &CommonProjectArgs,
 ) -> std::result::Result<BaselineProjectContext, CliRunResult> {
-    let loaded = match load_project(&common.project_root) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            return Err(runtime_error_json(
-                "config",
-                "failed to load project",
-                vec![error],
-            ));
-        }
-    };
+    let prepared = prepare_analysis_context(&common.project_root, None)?;
 
-    if loaded.validation.has_errors() {
-        let details = loaded
-            .validation
-            .errors()
-            .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return Err(runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        ));
-    }
-
-    let artifacts = match analyze_project(&loaded, None) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            return Err(runtime_error_json(
-                "runtime",
-                "failed to analyze project",
-                vec![error],
-            ));
-        }
-    };
-
-    if !artifacts.layer_config_issues.is_empty() {
-        return Err(runtime_error_json(
-            "config",
-            "invalid enforce-layer rule configuration",
-            artifacts.layer_config_issues,
-        ));
-    }
-
-    let governance = match compute_governance_hashes(&loaded) {
+    let governance = match compute_governance_hashes(&prepared.loaded) {
         Ok(governance) => governance,
         Err(error) => {
             return Err(runtime_error_json(
@@ -559,8 +529,7 @@ fn load_baseline_project_context(
     };
 
     Ok(BaselineProjectContext {
-        loaded,
-        artifacts,
+        prepared,
         generated_from,
     })
 }
@@ -570,7 +539,7 @@ fn load_project_root_and_config(
 ) -> std::result::Result<(PathBuf, crate::spec::SpecConfig), CliRunResult> {
     let project_root =
         std::fs::canonicalize(&common.project_root).unwrap_or_else(|_| common.project_root.clone());
-    let config = crate::spec::load_config(&project_root).map_err(|error| {
+    let config = spec::load_config(&project_root).map_err(|error| {
         runtime_error_json("config", "failed to load project", vec![error.to_string()])
     })?;
 
@@ -583,7 +552,7 @@ fn load_required_baseline(
 ) -> std::result::Result<(PathBuf, BaselineFile), CliRunResult> {
     let baseline_path = resolve_against_root(project_root, baseline);
     match load_optional_baseline(&baseline_path) {
-        Ok(Some(baseline)) => Ok((baseline_path, baseline)),
+        Ok(Some(baseline)) => Ok((baseline_path, normalize_baseline_file(&baseline))),
         Ok(None) => Err(runtime_error_json(
             "baseline",
             "baseline file not found",

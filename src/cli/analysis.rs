@@ -1,8 +1,31 @@
-use crate::graph::{DependencyGraph, EdgeKind, EdgeType};
-use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
-use crate::verdict::VerdictEdge;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
-use super::*;
+use crate::git_blast::BlastRadius;
+use crate::graph::{DependencyGraph, EdgeKind, EdgeType};
+use crate::resolver::{ModuleResolver, ModuleResolverOptions};
+use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
+use crate::rules::boundary::evaluate_boundary_rules;
+use crate::rules::{
+    DependencyRule, RuleContext, RuleWithResolver, evaluate_enforce_layer, evaluate_hygiene_rules,
+    evaluate_no_circular_deps,
+};
+use crate::spec::Severity;
+use crate::verdict::{self, EdgeClassification, PolicyViolation, UnresolvedEdge, VerdictEdge};
+
+use super::{
+    AnalysisArtifacts, CliRunResult, LoadedProject, boundary_violation_severity,
+    build_blast_radius, default_hygiene_rule_severity, dependency_violation_severity,
+    derive_blast_edge_pairs, load_project_for_analysis, normalize_repo_relative,
+    runtime_error_json,
+};
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedAnalysisContext {
+    pub(crate) loaded: LoadedProject,
+    pub(crate) artifacts: AnalysisArtifacts,
+    pub(crate) blast_radius: Option<BlastRadius>,
+}
 
 /// Build edge classification and unresolved edge list from a dependency graph.
 ///
@@ -438,6 +461,74 @@ pub(crate) fn analyze_project(
         edge_classification,
         verdict_edges,
         unresolved_edges,
+    })
+}
+
+pub(crate) fn prepare_analysis_context(
+    project_root: &Path,
+    since_ref: Option<&str>,
+) -> std::result::Result<PreparedAnalysisContext, CliRunResult> {
+    let loaded = load_project_for_analysis(project_root)?;
+    prepare_analysis_for_loaded(loaded, since_ref)
+}
+
+pub(crate) fn prepare_analysis_for_loaded(
+    loaded: LoadedProject,
+    since_ref: Option<&str>,
+) -> std::result::Result<PreparedAnalysisContext, CliRunResult> {
+    let blast_edge_pairs = match derive_blast_edge_pairs(&loaded, since_ref) {
+        Ok(edge_pairs) => edge_pairs,
+        Err(error) => {
+            return Err(runtime_error_json(
+                "git",
+                "failed to compute blast edge pairs",
+                vec![error],
+            ));
+        }
+    };
+
+    let blast_radius = match build_blast_radius(&loaded, since_ref, &blast_edge_pairs) {
+        Ok(radius) => radius,
+        Err(error) => {
+            return Err(runtime_error_json(
+                "git",
+                "failed to compute blast radius",
+                vec![error],
+            ));
+        }
+    };
+
+    let affected_modules = blast_radius.as_ref().map(|radius| {
+        radius
+            .affected_modules
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    });
+
+    let artifacts = match analyze_project(&loaded, affected_modules.as_ref()) {
+        Ok(artifacts) => artifacts,
+        Err(error) => {
+            return Err(runtime_error_json(
+                "runtime",
+                "failed to analyze project",
+                vec![error],
+            ));
+        }
+    };
+
+    if !artifacts.layer_config_issues.is_empty() {
+        return Err(runtime_error_json(
+            "config",
+            "invalid enforce-layer rule configuration",
+            artifacts.layer_config_issues.clone(),
+        ));
+    }
+
+    Ok(PreparedAnalysisContext {
+        loaded,
+        artifacts,
+        blast_radius,
     })
 }
 

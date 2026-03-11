@@ -173,26 +173,20 @@ impl ModuleResolver {
         steps.push(format!("from directory: {}", containing_dir.display()));
         steps.push(format!("requested specifier: {specifier}"));
 
-        if let Some(cached) = self.cache.get(&cache_key) {
+        let result = if let Some(cached) = self.cache.get(&cache_key) {
             steps.push("cache hit".to_string());
-            return ResolutionExplanation {
-                specifier: specifier.to_string(),
-                from_file: from_file.to_path_buf(),
-                result: cached.clone(),
-                steps,
-            };
-        }
+            cached.clone()
+        } else {
+            if is_explicit_node_builtin(specifier) {
+                steps.push("explicit node: builtin detected".to_string());
+            } else if is_node_builtin(specifier) {
+                steps.push("bare builtin candidate; resolver consulted first".to_string());
+            }
 
-        if is_explicit_node_builtin(specifier) {
-            steps.push("explicit node: builtin detected".to_string());
-        } else if is_node_builtin(specifier) {
-            steps.push("bare builtin candidate; resolver consulted first".to_string());
-        }
-
-        let result = self.resolve_uncached(&containing_dir, specifier);
-        steps.push(format!("resolver output: {result:?}"));
-
-        self.cache.insert(cache_key, result.clone());
+            let result = self.resolve_uncached(&containing_dir, specifier);
+            steps.push(format!("resolver output: {result:?}"));
+            result
+        };
 
         ResolutionExplanation {
             specifier: specifier.to_string(),
@@ -200,6 +194,21 @@ impl ModuleResolver {
             result,
             steps,
         }
+    }
+
+    /// Explain a resolution and retain the result in the resolver cache.
+    pub fn explain_resolution_cached(
+        &mut self,
+        from_file: &Path,
+        specifier: &str,
+    ) -> ResolutionExplanation {
+        let explanation = self.explain_resolution(from_file, specifier);
+        let containing_dir = containing_dir(from_file, &self.project_root);
+        let cache_key = (containing_dir, specifier.to_string());
+        self.cache
+            .entry(cache_key)
+            .or_insert_with(|| explanation.result.clone());
+        explanation
     }
 
     /// Build module membership map (absolute file path -> module id).
@@ -721,8 +730,28 @@ mod tests {
 
         let specs = vec![base_spec("core", "src/**/*")];
         let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
-        let explanation = resolver.explain_resolution(&temp.path().join("src/a.ts"), "node:path");
+        let explanation =
+            resolver.explain_resolution_cached(&temp.path().join("src/a.ts"), "node:path");
         assert!(!explanation.steps.is_empty());
+    }
+
+    #[test]
+    fn explain_resolution_does_not_populate_cache_on_miss() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+        fs::write(temp.path().join("src/a.ts"), "export const a = 1;\n").expect("write");
+
+        let specs = vec![base_spec("core", "src/**/*")];
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+
+        let explanation = resolver.explain_resolution(&temp.path().join("src/a.ts"), "node:path");
+
+        assert!(!explanation.steps.is_empty());
+        assert_eq!(
+            resolver.cache_len(),
+            0,
+            "read-only explanation should not populate the resolution cache"
+        );
     }
 
     #[test]

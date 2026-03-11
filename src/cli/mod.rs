@@ -16,37 +16,19 @@ pub mod types;
 mod util;
 pub mod validate;
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::baseline::{
-    ClassifyOptions, DEFAULT_BASELINE_PATH, classify_violations_with_options,
-    load_optional_baseline,
-};
-use crate::build_info;
-use crate::deterministic::{normalize_path, normalize_repo_relative, stable_hash_hex};
+use crate::deterministic::{normalize_path, normalize_repo_relative};
 use crate::resolver::nearest_tsconfig_for_dir_uncached;
-use crate::resolver::{ModuleResolver, ModuleResolverOptions};
-use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule, RuleContext,
-    RuleWithResolver, evaluate_enforce_layer, evaluate_hygiene_rules, evaluate_no_circular_deps,
-    is_canonical_import_rule_id,
+    DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, is_canonical_import_rule_id,
 };
-use crate::spec::config::StaleBaselinePolicy;
-use crate::spec::{
-    self, Severity, ValidationLevel, workspace_discovery::discover_workspace_packages_with_config,
-};
-use crate::verdict::{
-    self, AnonymizedTelemetryEvent, AnonymizedTelemetrySummary, EdgeClassification,
-    GovernanceContext, PolicyViolation, TelemetryEventName, UnresolvedEdge, VerdictBuildOptions,
-    VerdictIdentity, VerdictMetrics, VerdictStatus, build_verdict_with_options,
-};
+use crate::spec::workspace_discovery::discover_workspace_packages_with_config_best_effort;
+use crate::spec::{self, ValidationLevel};
 
 // Re-export from submodules for convenience
 pub(crate) use analysis::*;

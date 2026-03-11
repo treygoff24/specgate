@@ -7,7 +7,7 @@ use crate::resolver::{ModuleResolver, ModuleResolverOptions, ResolvedImport};
 
 use super::DoctorCompareArgs;
 use super::trace_types::TraceResultKind;
-use super::types::{DoctorCompareFocusOutput, DoctorCompareResolutionOutput};
+use super::types::{DoctorCompareFocusOutput, DoctorCompareResolutionOutput, FocusResolutionKind};
 
 #[derive(Debug, Clone)]
 pub(super) struct DoctorCompareFocus {
@@ -48,13 +48,17 @@ pub(super) fn build_doctor_compare_focus(
                     (
                         Some((from_normalized.clone(), to.clone())),
                         Some(to),
-                        "first_party".to_string(),
+                        FocusResolutionKind::FirstParty,
                     )
                 }
-                ResolvedImport::ThirdParty { package_name } => {
-                    (None, Some(package_name.clone()), "third_party".to_string())
+                ResolvedImport::ThirdParty { package_name } => (
+                    None,
+                    Some(package_name.clone()),
+                    FocusResolutionKind::ThirdParty,
+                ),
+                ResolvedImport::Unresolvable { .. } => {
+                    (None, None, FocusResolutionKind::Unresolvable)
                 }
-                ResolvedImport::Unresolvable { .. } => (None, None, "unresolvable".to_string()),
             };
 
             let in_specgate_graph = edge

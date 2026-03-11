@@ -1,6 +1,6 @@
 use crate::cli::{
-    CliRunResult, CommonProjectArgs, EXIT_CODE_PASS, EXIT_CODE_RUNTIME_ERROR, analyze_project,
-    build_workspace_packages_info, load_project, runtime_error_json,
+    CliRunResult, CommonProjectArgs, EXIT_CODE_PASS, EXIT_CODE_RUNTIME_ERROR,
+    build_workspace_packages_info, prepare_analysis_context, runtime_error_json,
 };
 use crate::deterministic::normalize_repo_relative;
 
@@ -8,34 +8,15 @@ use super::canonical::canonical_import_findings;
 use super::types::{DoctorOutput, DoctorOverlapOutput};
 
 pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
-    let loaded = match load_project(&args.project_root) {
-        Ok(loaded) => loaded,
-        Err(error) => return runtime_error_json("config", "failed to load project", vec![error]),
+    let prepared = match prepare_analysis_context(&args.project_root, None) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
+    let loaded = &prepared.loaded;
+    let artifacts = &prepared.artifacts;
 
     let validation_errors = loaded.validation.errors().len();
     let validation_warnings = loaded.validation.warnings().len();
-
-    if validation_errors > 0 {
-        let details = loaded
-            .validation
-            .errors()
-            .into_iter()
-            .map(|issue| format!("{}: {}", issue.module, issue.message))
-            .collect();
-        return runtime_error_json(
-            "validation",
-            "spec validation failed; run `specgate validate` for details",
-            details,
-        );
-    }
-
-    let artifacts = match analyze_project(&loaded, None) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            return runtime_error_json("runtime", "failed to analyze project", vec![error]);
-        }
-    };
 
     let overlaps = artifacts
         .module_map_overlaps
@@ -47,11 +28,7 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         })
         .collect::<Vec<_>>();
 
-    let status = if artifacts.layer_config_issues.is_empty() {
-        "ok".to_string()
-    } else {
-        "error".to_string()
-    };
+    let status = "ok".to_string();
 
     let workspace_packages = build_workspace_packages_info(&loaded.project_root, &loaded.config);
     let findings = match canonical_import_findings(&loaded) {
@@ -81,7 +58,7 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         graph_edges: artifacts.graph_edges,
         parse_warning_count: artifacts.parse_warning_count,
         policy_violation_count: artifacts.policy_violations.len(),
-        layer_config_issues: artifacts.layer_config_issues,
+        layer_config_issues: artifacts.layer_config_issues.clone(),
         module_map_overlaps: overlaps,
         findings,
         workspace_packages,

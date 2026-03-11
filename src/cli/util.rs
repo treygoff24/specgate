@@ -1,4 +1,13 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use crate::cli::{
+    CliRunResult, EXIT_CODE_RUNTIME_ERROR, ErrorOutput, GovernanceHashes, LoadedProject,
+};
+use crate::deterministic::{normalize_repo_relative, stable_hash_hex};
+use crate::spec::Severity;
+use crate::verdict::{self, AnonymizedTelemetrySummary};
 
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct HashedSpec {
