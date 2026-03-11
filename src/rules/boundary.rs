@@ -108,29 +108,33 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
             //   receive both policy violations when both modules are misconfigured.
             if !importer_is_test || importer_boundaries.enforce_in_tests {
                 check_importer_side(
-                    edge.kind,
-                    importer_module,
-                    &importer_boundaries,
-                    provider_module,
-                    &edge.to,
-                    matcher_cache.public_api_by_module.get(provider_module),
-                    &matcher_cache.canonical_root,
-                    position,
-                    &node.path,
+                    ImporterBoundaryCheck {
+                        edge_kind: edge.kind,
+                        importer_module,
+                        importer_boundaries: &importer_boundaries,
+                        provider_module,
+                        provider_file: &edge.to,
+                        public_api_matcher: matcher_cache.public_api_by_module.get(provider_module),
+                        canonical_root: &matcher_cache.canonical_root,
+                        position,
+                        from_file: &node.path,
+                    },
                     &mut violations,
                 );
             }
 
             if !importer_is_test || provider_boundaries.enforce_in_tests {
                 check_provider_side(
-                    &edge.specifier,
-                    importer_module,
-                    provider_module,
-                    &provider_boundaries,
-                    edge.kind,
-                    &node.path,
-                    &edge.to,
-                    position,
+                    ProviderBoundaryCheck {
+                        specifier: &edge.specifier,
+                        importer_module,
+                        provider_module,
+                        provider_boundaries: &provider_boundaries,
+                        edge_kind: edge.kind,
+                        from_file: &node.path,
+                        to_file: &edge.to,
+                        position,
+                    },
                     &mut violations,
                 );
             }
@@ -221,135 +225,145 @@ fn render_glob_error(error: &GlobCompileError) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn check_importer_side(
+struct ImporterBoundaryCheck<'a> {
     edge_kind: EdgeKind,
-    importer_module: &str,
-    importer_boundaries: &Boundaries,
-    provider_module: &str,
-    provider_file: &Path,
-    public_api_matcher: Option<&PublicApiMatcher>,
-    canonical_root: &Path,
+    importer_module: &'a str,
+    importer_boundaries: &'a Boundaries,
+    provider_module: &'a str,
+    provider_file: &'a Path,
+    public_api_matcher: Option<&'a PublicApiMatcher>,
+    canonical_root: &'a Path,
     position: Option<(u32, u32)>,
-    from_file: &Path,
-    violations: &mut Vec<RuleViolation>,
-) {
-    let never_set = as_set(&importer_boundaries.never_imports);
-    if never_set.contains(provider_module) {
+    from_file: &'a Path,
+}
+
+fn check_importer_side(request: ImporterBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
+    let never_set = as_set(&request.importer_boundaries.never_imports);
+    if never_set.contains(request.provider_module) {
         violations.push(build_violation(
             "boundary.never_imports",
-            format!("module '{importer_module}' may never import from '{provider_module}'"),
-            from_file,
-            Some(provider_file),
-            Some(importer_module),
-            Some(provider_module),
-            position,
+            format!(
+                "module '{}' may never import from '{}'",
+                request.importer_module, request.provider_module
+            ),
+            request.from_file,
+            Some(request.provider_file),
+            Some(request.importer_module),
+            Some(request.provider_module),
+            request.position,
         ));
         return;
     }
 
-    if let Some(allow_imports_from) = importer_boundaries.allow_imports_from.as_deref() {
+    if let Some(allow_imports_from) = request.importer_boundaries.allow_imports_from.as_deref() {
         let allow_set = as_set(allow_imports_from);
-        if !allow_set.contains(provider_module) {
-            let type_allow_set = as_set(&importer_boundaries.allow_type_imports_from);
-            let type_only_carve_out =
-                edge_kind == EdgeKind::TypeOnlyImport && type_allow_set.contains(provider_module);
+        if !allow_set.contains(request.provider_module) {
+            let type_allow_set = as_set(&request.importer_boundaries.allow_type_imports_from);
+            let type_only_carve_out = request.edge_kind == EdgeKind::TypeOnlyImport
+                && type_allow_set.contains(request.provider_module);
 
             if !type_only_carve_out {
                 violations.push(build_violation(
                     "boundary.allow_imports_from",
                     format!(
-                        "module '{importer_module}' is not allowed to import from '{provider_module}'"
+                        "module '{}' is not allowed to import from '{}'",
+                        request.importer_module, request.provider_module
                     ),
-                    from_file,
-                    Some(provider_file),
-                    Some(importer_module),
-                    Some(provider_module),
-                    position,
+                    request.from_file,
+                    Some(request.provider_file),
+                    Some(request.importer_module),
+                    Some(request.provider_module),
+                    request.position,
                 ));
                 return;
             }
         }
     }
 
-    if let Some(PublicApiMatcher::Compiled(public_api_matcher)) = public_api_matcher {
-        let target_rel = normalize_repo_relative(canonical_root, provider_file);
+    if let Some(PublicApiMatcher::Compiled(public_api_matcher)) = request.public_api_matcher {
+        let target_rel = normalize_repo_relative(request.canonical_root, request.provider_file);
         let is_public_api = public_api_matcher.is_match(&target_rel);
 
         if !is_public_api {
             violations.push(build_violation(
                 "boundary.public_api",
                 format!(
-                    "module '{importer_module}' imported non-public file '{target_rel}' from '{provider_module}'",
+                    "module '{}' imported non-public file '{}' from '{}'",
+                    request.importer_module, target_rel, request.provider_module
                 ),
-                from_file,
-                Some(provider_file),
-                Some(importer_module),
-                Some(provider_module),
-                position,
+                request.from_file,
+                Some(request.provider_file),
+                Some(request.importer_module),
+                Some(request.provider_module),
+                request.position,
             ));
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn check_provider_side(
-    specifier: &str,
-    importer_module: &str,
-    provider_module: &str,
-    provider_boundaries: &Boundaries,
+struct ProviderBoundaryCheck<'a> {
+    specifier: &'a str,
+    importer_module: &'a str,
+    provider_module: &'a str,
+    provider_boundaries: &'a Boundaries,
     edge_kind: EdgeKind,
-    from_file: &Path,
-    to_file: &Path,
+    from_file: &'a Path,
+    to_file: &'a Path,
     position: Option<(u32, u32)>,
-    violations: &mut Vec<RuleViolation>,
-) {
-    let deny_set = as_set(&provider_boundaries.deny_imported_by);
-    if deny_set.contains(importer_module) {
+}
+
+fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
+    let deny_set = as_set(&request.provider_boundaries.deny_imported_by);
+    if deny_set.contains(request.importer_module) {
         violations.push(build_violation(
             "boundary.deny_imported_by",
-            format!("module '{provider_module}' denies imports from '{importer_module}'"),
-            from_file,
-            Some(to_file),
-            Some(importer_module),
-            Some(provider_module),
-            position,
+            format!(
+                "module '{}' denies imports from '{}'",
+                request.provider_module, request.importer_module
+            ),
+            request.from_file,
+            Some(request.to_file),
+            Some(request.importer_module),
+            Some(request.provider_module),
+            request.position,
         ));
         return;
     }
 
-    let allow_set = as_set(&provider_boundaries.allow_imported_by);
-    if !allow_set.is_empty() && !allow_set.contains(importer_module) {
+    let allow_set = as_set(&request.provider_boundaries.allow_imported_by);
+    if !allow_set.is_empty() && !allow_set.contains(request.importer_module) {
         violations.push(build_violation(
             "boundary.allow_imported_by",
             format!(
-                "module '{provider_module}' only allows imports from {:?}",
-                provider_boundaries.allow_imported_by
+                "module '{}' only allows imports from {:?}",
+                request.provider_module,
+                request.provider_boundaries.allow_imported_by
             ),
-            from_file,
-            Some(to_file),
-            Some(importer_module),
-            Some(provider_module),
-            position,
+            request.from_file,
+            Some(request.to_file),
+            Some(request.importer_module),
+            Some(request.provider_module),
+            request.position,
         ));
         return;
     }
 
-    match provider_boundaries.visibility_or_default() {
+    match request.provider_boundaries.visibility_or_default() {
         Visibility::Public => {}
         Visibility::Internal => {
-            let friends = as_set(&provider_boundaries.friend_modules);
-            if !friends.contains(importer_module) {
+            let friends = as_set(&request.provider_boundaries.friend_modules);
+            if !friends.contains(request.importer_module) {
                 violations.push(build_violation(
                     "boundary.visibility.internal",
                     format!(
-                        "module '{provider_module}' is internal and not visible to '{importer_module}'"
+                        "module '{}' is internal and not visible to '{}'",
+                        request.provider_module, request.importer_module
                     ),
-                    from_file,
-                    Some(to_file),
-                    Some(importer_module),
-                    Some(provider_module),
-                    position,
+                    request.from_file,
+                    Some(request.to_file),
+                    Some(request.importer_module),
+                    Some(request.provider_module),
+                    request.position,
                 ));
                 return;
             }
@@ -358,31 +372,33 @@ fn check_provider_side(
             violations.push(build_violation(
                 "boundary.visibility.private",
                 format!(
-                    "module '{provider_module}' is private and cannot be imported by '{importer_module}'"
+                    "module '{}' is private and cannot be imported by '{}'",
+                    request.provider_module, request.importer_module
                 ),
-                from_file,
-                Some(to_file),
-                Some(importer_module),
-                Some(provider_module),
-                position,
+                request.from_file,
+                Some(request.to_file),
+                Some(request.importer_module),
+                Some(request.provider_module),
+                request.position,
             ));
             return;
         }
     }
 
-    if provider_boundaries.enforce_canonical_imports
-        && is_cross_module_relative(specifier, edge_kind)
+    if request.provider_boundaries.enforce_canonical_imports
+        && is_cross_module_relative(request.specifier, request.edge_kind)
     {
         violations.push(build_violation(
             BOUNDARY_CANONICAL_IMPORT_RULE_ID,
             format!(
-                "module '{provider_module}' requires canonical imports; cross-module relative specifier '{specifier}' is not allowed"
+                "module '{}' requires canonical imports; cross-module relative specifier '{}' is not allowed",
+                request.provider_module, request.specifier
             ),
-            from_file,
-            Some(to_file),
-            Some(importer_module),
-            Some(provider_module),
-            position,
+            request.from_file,
+            Some(request.to_file),
+            Some(request.importer_module),
+            Some(request.provider_module),
+            request.position,
         ));
     }
 }

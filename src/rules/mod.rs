@@ -23,19 +23,18 @@ pub mod envelope;
 pub mod hygiene;
 pub mod layers;
 
-pub use boundary::{
+pub use crate::spec::rule_ids::{
     BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
-    BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID, is_canonical_import_rule_id,
+    BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
+    BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
+    BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
 };
+pub use boundary::is_canonical_import_rule_id;
 pub use circular::{
     CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
     evaluate_no_circular_deps,
 };
-pub use contracts::{
-    BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
-    BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
-    ContractRuleViolation, evaluate_contract_rules,
-};
+pub use contracts::{ContractRuleViolation, evaluate_contract_rules};
 pub use dependencies::{
     DEPENDENCY_FORBIDDEN_RULE_ID, DEPENDENCY_NOT_ALLOWED_RULE_ID, DependencyRule,
     DependencyRuleError, DependencyViolation, DependencyViolationKind, evaluate_dependency_rules,

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use globset::{Glob, GlobBuilder};
 
-use crate::rules::{
+use crate::spec::rule_ids::{
     BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
     BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
 };
@@ -29,6 +29,8 @@ const KNOWN_CONSTRAINT_RULES: &[&str] = &[
     BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
     "boundary.envelope_missing",
 ];
+
+const VALID_CIRCULAR_SCOPE_VALUES: &[&str] = &["internal", "external", "both"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationLevel {
@@ -312,6 +314,10 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
                 ),
             );
         }
+
+        if constraint.rule == "no-circular-deps" {
+            validate_no_circular_deps_constraint(spec, constraint, report);
+        }
     }
 
     if let Some(boundaries) = &spec.boundaries {
@@ -380,9 +386,42 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
     }
 }
 
+fn validate_no_circular_deps_constraint(
+    spec: &SpecFile,
+    constraint: &crate::spec::types::Constraint,
+    report: &mut ValidationReport,
+) {
+    let Some(scope) = constraint.params.get("scope") else {
+        return;
+    };
+
+    let Some(scope) = scope.as_str() else {
+        report.push_error(
+            spec,
+            format!(
+                "invalid no-circular-deps scope value; expected one of {:?}. Remediation: set `params.scope` to one of the supported strings.",
+                VALID_CIRCULAR_SCOPE_VALUES
+            ),
+        );
+        return;
+    };
+
+    if !VALID_CIRCULAR_SCOPE_VALUES.contains(&scope.trim().to_ascii_lowercase().as_str()) {
+        report.push_error(
+            spec,
+            format!(
+                "invalid no-circular-deps scope '{}'; expected one of {:?}. Remediation: set `params.scope` to `internal`, `external`, or `both`.",
+                scope, VALID_CIRCULAR_SCOPE_VALUES
+            ),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::rules::BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS;
+    use crate::spec::rule_ids::{
+        BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS, BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
+    };
     use crate::spec::types::{Boundaries, Constraint, Severity};
 
     use super::*;
@@ -1048,5 +1087,40 @@ mod tests {
                 .any(|issue| issue.message.contains("contract_ref_invalid")),
             "valid imports_contract format should not produce error"
         );
+    }
+
+    #[test]
+    fn invalid_no_circular_deps_scope_is_error() {
+        let mut spec = base_spec("orders");
+        spec.constraints.push(Constraint {
+            rule: "no-circular-deps".to_string(),
+            params: serde_json::json!({ "scope": "sideways" }),
+            severity: Severity::Error,
+            message: None,
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(report.has_errors());
+        assert!(report.errors().iter().any(|issue| {
+            issue.message.contains("invalid no-circular-deps scope")
+                && issue.message.contains("sideways")
+        }));
+    }
+
+    #[test]
+    fn non_string_no_circular_deps_scope_is_error() {
+        let mut spec = base_spec("orders");
+        spec.constraints.push(Constraint {
+            rule: "no-circular-deps".to_string(),
+            params: serde_json::json!({ "scope": 7 }),
+            severity: Severity::Error,
+            message: None,
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(report.has_errors());
+        assert!(report.errors().iter().any(|issue| {
+            issue.message.contains("invalid no-circular-deps scope value")
+        }));
     }
 }

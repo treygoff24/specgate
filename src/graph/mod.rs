@@ -76,13 +76,32 @@ pub struct CycleComponent {
     pub modules: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleModuleClassification {
+    Unscoped,
+    Internal,
+    External,
+}
+
 impl CycleComponent {
     pub fn is_cycle(&self) -> bool {
         self.files.len() > 1
     }
 
+    pub fn module_classification(&self) -> CycleModuleClassification {
+        match self.modules.len() {
+            0 => CycleModuleClassification::Unscoped,
+            1 => CycleModuleClassification::Internal,
+            _ => CycleModuleClassification::External,
+        }
+    }
+
     pub fn is_internal(&self) -> bool {
-        self.modules.len() <= 1
+        self.module_classification() == CycleModuleClassification::Internal
+    }
+
+    pub fn is_external(&self) -> bool {
+        self.module_classification() == CycleModuleClassification::External
     }
 }
 
@@ -477,7 +496,7 @@ impl DependencyGraph {
             .filter(|component| component.is_cycle())
             .filter(|component| match scope {
                 CycleScope::Internal => component.is_internal(),
-                CycleScope::External => !component.is_internal(),
+                CycleScope::External => component.is_external(),
                 CycleScope::Both => true,
             })
             .collect::<Vec<_>>();
@@ -1121,5 +1140,20 @@ console.log(value, dep);
             unresolved[0].ignored_by_comment,
             "ignored import should carry ignored_by_comment = true"
         );
+    }
+
+    #[test]
+    fn unscoped_components_are_not_internal_or_external() {
+        let component = CycleComponent {
+            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+            modules: Vec::new(),
+        };
+
+        assert_eq!(
+            component.module_classification(),
+            CycleModuleClassification::Unscoped
+        );
+        assert!(!component.is_internal());
+        assert!(!component.is_external());
     }
 }

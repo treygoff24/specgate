@@ -15,16 +15,16 @@ pub enum CircularScopeParam {
 }
 
 impl CircularScopeParam {
-    fn from_params(params: &serde_json::Value) -> Self {
+    fn parse(params: &serde_json::Value) -> Result<Self, InvalidCircularScope> {
         let Some(scope) = params.get("scope").and_then(serde_json::Value::as_str) else {
-            return Self::Both;
+            return Ok(Self::Both);
         };
 
         match scope.trim().to_ascii_lowercase().as_str() {
-            "internal" => Self::Internal,
-            "external" => Self::External,
-            "both" => Self::Both,
-            _ => Self::Both,
+            "internal" => Ok(Self::Internal),
+            "external" => Ok(Self::External),
+            "both" => Ok(Self::Both),
+            _ => Err(InvalidCircularScope),
         }
     }
 
@@ -36,6 +36,9 @@ impl CircularScopeParam {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InvalidCircularScope;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CircularDependencyViolation {
@@ -79,7 +82,9 @@ pub fn evaluate_no_circular_deps(
                 continue;
             }
 
-            let scope = CircularScopeParam::from_params(&constraint.params);
+            let Ok(scope) = CircularScopeParam::parse(&constraint.params) else {
+                continue;
+            };
             unique_constraints
                 .entry((
                     spec.module.clone(),
@@ -153,7 +158,7 @@ fn precompute_cycle_sets(graph: &DependencyGraph) -> PrecomputedCycleSets {
 
     let external = both
         .iter()
-        .filter(|component| !component.is_internal())
+        .filter(|component| component.is_external())
         .cloned()
         .collect::<Vec<_>>();
 
@@ -384,5 +389,15 @@ mod tests {
                 .iter()
                 .all(|violation| violation.module == "gamma")
         );
+    }
+
+    #[test]
+    fn invalid_scope_does_not_widen_to_both() {
+        let (_temp, graph, mut specs) = setup_cycle_fixture();
+
+        add_constraint(&mut specs[0], "unexpected", Severity::Error, None);
+
+        let violations = evaluate_no_circular_deps(&specs, &graph);
+        assert!(violations.is_empty());
     }
 }

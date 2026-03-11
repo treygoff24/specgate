@@ -13,12 +13,12 @@ use tempfile::TempDir;
 
 use specgate::graph::DependencyGraph;
 use specgate::resolver::ModuleResolver;
-use specgate::rules::contracts::{
+use specgate::rules::evaluate_contract_rules;
+use specgate::spec::SpecConfig;
+use specgate::spec::rule_ids::{
     BOUNDARY_CONTRACT_EMPTY_RULE_ID, BOUNDARY_CONTRACT_MISSING_RULE_ID,
     BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
-    evaluate_contract_rules,
 };
-use specgate::spec::SpecConfig;
 use specgate::spec::types::{
     Boundaries, BoundaryContract, ContractDirection, ContractMatch, EnvelopeRequirement,
 };

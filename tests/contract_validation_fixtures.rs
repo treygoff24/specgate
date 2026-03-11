@@ -5,6 +5,10 @@
 
 use std::path::PathBuf;
 
+use specgate::spec::rule_ids::{
+    BOUNDARY_CONTRACT_REF_INVALID_RULE_ID, BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
+    BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
+};
 use specgate::spec::types::SUPPORTED_SPEC_VERSIONS;
 use specgate::spec::{load_spec, validate_specs};
 
@@ -54,9 +58,9 @@ fn invalid_2_2_with_contracts_fails() {
 
     let errors = report.errors();
     assert!(
-        errors
-            .iter()
-            .any(|e| { e.message.contains("boundary.contract_version_mismatch") }),
+        errors.iter().any(|e| e
+            .message
+            .contains(BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID)),
         "should report contract version mismatch error"
     );
 }
@@ -77,7 +81,7 @@ fn duplicate_contract_ids_detected() {
     let errors = report.errors();
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.contract_ref_invalid")
+            e.message.contains(BOUNDARY_CONTRACT_REF_INVALID_RULE_ID)
                 && e.message.contains("duplicate contract id")
         }),
         "should report duplicate contract id error"
@@ -100,7 +104,7 @@ fn invalid_glob_pattern_detected() {
     let errors = report.errors();
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.match_unresolved")
+            e.message.contains(BOUNDARY_MATCH_UNRESOLVED_RULE_ID)
                 && e.message.contains("invalid glob pattern")
         }),
         "should report invalid glob pattern error"
@@ -125,7 +129,7 @@ fn invalid_imports_contract_ref_detected() {
     // Check for missing colon error
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.contract_ref_invalid")
+            e.message.contains(BOUNDARY_CONTRACT_REF_INVALID_RULE_ID)
                 && e.message.contains("exactly one colon")
         }),
         "should report missing colon error"
@@ -134,7 +138,7 @@ fn invalid_imports_contract_ref_detected() {
     // Check for multiple colons error
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.contract_ref_invalid")
+            e.message.contains(BOUNDARY_CONTRACT_REF_INVALID_RULE_ID)
                 && e.message.contains("exactly one colon")
         }),
         "should report multiple colons error"
@@ -143,7 +147,7 @@ fn invalid_imports_contract_ref_detected() {
     // Check for empty module segment
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.contract_ref_invalid")
+            e.message.contains(BOUNDARY_CONTRACT_REF_INVALID_RULE_ID)
                 && e.message.contains("empty module segment")
         }),
         "should report empty module segment error"
@@ -152,7 +156,7 @@ fn invalid_imports_contract_ref_detected() {
     // Check for empty contract id segment
     assert!(
         errors.iter().any(|e| {
-            e.message.contains("boundary.contract_ref_invalid")
+            e.message.contains(BOUNDARY_CONTRACT_REF_INVALID_RULE_ID)
                 && e.message.contains("empty contract id segment")
         }),
         "should report empty contract id segment error"
