@@ -76,7 +76,7 @@ enum Command {
     /// Run the full policy pipeline and emit verdict JSON.
     Check(CheckArgs),
     /// Validate spec/config files only.
-    Validate(CommonProjectArgs),
+    Validate(ValidateArgs),
     /// Initialize starter config/spec scaffolding.
     Init(init::InitArgs),
     /// Diagnostics and parity checks.
@@ -113,6 +113,9 @@ where
         Command::PolicyDiff(args) => policy_diff::handle_policy_diff(args),
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 mod tests;

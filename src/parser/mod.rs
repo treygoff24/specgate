@@ -860,7 +860,7 @@ fn is_jest_mock_call(call: &CallExpression<'_>) -> bool {
     matches!(member.object(), Expression::Identifier(identifier) if identifier.name == "jest")
 }
 
-fn is_import_type_only(declaration: &oxc_ast::ast::ImportDeclaration<'_>) -> bool {
+pub(crate) fn is_import_type_only(declaration: &oxc_ast::ast::ImportDeclaration<'_>) -> bool {
     if declaration.import_kind.is_type() {
         return true;
     }

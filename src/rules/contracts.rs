@@ -309,7 +309,38 @@ fn check_envelope(
             contract.r#match.pattern.as_deref(),
         ) {
             Ok(analysis) => analysis,
-            Err(_) => continue,
+            Err(error) => {
+                let detail = match error {
+                    envelope::EnvelopeError::FileRead(source) => source.to_string(),
+                    envelope::EnvelopeError::Parse(message) => message,
+                };
+                violations.push(ContractRuleViolation::new(
+                    RuleViolation {
+                        rule: BOUNDARY_ENVELOPE_MISSING_RULE_ID.to_string(),
+                        severity: None,
+                        message: format!(
+                            "Required envelope analysis failed for contract '{}' in file '{}': {}",
+                            contract.id,
+                            file_path.display(),
+                            detail
+                        ),
+                        from_file: file_path.to_path_buf(),
+                        to_file: None,
+                        from_module: Some(spec.module.clone()),
+                        to_module: None,
+                        line: None,
+                        column: None,
+                    },
+                    format!(
+                        "Fix syntax or IO issues in '{}' so Specgate can analyze required envelope usage for contract '{}'",
+                        file_path.display(),
+                        contract.id
+                    ),
+                    contract.id.clone(),
+                    Severity::Warning,
+                ));
+                continue;
+            }
         };
 
         if !analysis.has_envelope_import {
@@ -968,6 +999,60 @@ mod tests {
         );
         assert_eq!(violations[0].severity, Severity::Warning);
         assert!(violations[0].remediation_hint.contains("boundary.validate"));
+    }
+
+    #[test]
+    fn required_envelope_analysis_failure_reports_warning_instead_of_silently_skipping() {
+        let temp = TempDir::new().expect("tempdir");
+
+        let contracts_dir = temp.path().join("contracts");
+        fs::create_dir_all(&contracts_dir).expect("create contracts dir");
+        fs::write(contracts_dir.join("api.json"), r#"{"type": "object"}"#).expect("write contract");
+
+        fs::create_dir_all(temp.path().join("src/api/handlers")).expect("create handlers");
+        fs::write(
+            temp.path().join("src/api/handlers/create.ts"),
+            "import { boundary } from 'specgate-envelope'\nexport function createUser( {\n",
+        )
+        .expect("write malformed source");
+
+        let specs = vec![spec_with_contracts(
+            "api",
+            vec![create_test_contract_with_options(
+                "contract1",
+                "contracts/api.json",
+                vec!["src/api/handlers/*.ts"],
+                None,
+                EnvelopeRequirement::Required,
+                vec![],
+            )],
+        )];
+
+        let graph = build_graph(&temp, &specs);
+        let config = SpecConfig::default();
+        let ctx = create_test_context(temp.path(), &config, &specs, &graph);
+
+        let violations = evaluate_contract_rules(&ctx, None);
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(
+            violations[0].violation.rule,
+            BOUNDARY_ENVELOPE_MISSING_RULE_ID
+        );
+        assert_eq!(violations[0].severity, Severity::Warning);
+        assert!(
+            violations[0]
+                .violation
+                .message
+                .contains("Required envelope analysis failed"),
+            "expected explicit analysis failure message, got {:?}",
+            violations[0].violation.message
+        );
+        assert!(
+            violations[0]
+                .remediation_hint
+                .contains("Fix syntax or IO issues")
+        );
     }
 
     #[test]

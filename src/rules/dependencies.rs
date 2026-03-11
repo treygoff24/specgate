@@ -293,26 +293,14 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::deterministic::normalize_repo_relative;
+    use crate::rules::test_support::build_spec_with_boundaries;
     use crate::rules::{RuleContext, RuleWithResolver, write_test_file};
     use crate::spec::{Boundaries, SpecConfig};
 
     use super::*;
 
     fn spec_with_boundaries(module: &str, path: &str, boundaries: Boundaries) -> SpecFile {
-        SpecFile {
-            version: "2.2".to_string(),
-            module: module.to_string(),
-            package: None,
-            import_id: None,
-            import_ids: Vec::new(),
-            description: None,
-            boundaries: Some(Boundaries {
-                path: Some(path.to_string()),
-                ..boundaries
-            }),
-            constraints: Vec::new(),
-            spec_path: None,
-        }
+        build_spec_with_boundaries("2.2", module, path, boundaries)
     }
 
     fn write_npm_package(root: &std::path::Path, package_name: &str) {

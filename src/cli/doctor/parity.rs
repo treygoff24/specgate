@@ -39,18 +39,33 @@ pub(super) fn derive_tsc_focus_resolution(
         }
     }
 
-    if let Some((_, to)) = parsed_trace
+    let mut source_edges = parsed_trace
         .edges
         .iter()
-        .find(|(from, _)| *from == focus.output.from)
-    {
+        .filter(|(from, _)| *from == focus.output.from)
+        .peekable();
+
+    if let Some((_, to)) = source_edges.next() {
+        if source_edges.peek().is_none() {
+            return DoctorCompareResolutionOutput {
+                source: "tsc_trace".to_string(),
+                result_kind: TraceResultKind::FirstParty,
+                resolved_to: Some(to.clone()),
+                package_name: None,
+                trace: vec![
+                    "trace did not carry import-specifier context; inferred from the sole edge from the same source file"
+                        .to_string(),
+                ],
+            };
+        }
+
         return DoctorCompareResolutionOutput {
             source: "tsc_trace".to_string(),
-            result_kind: TraceResultKind::FirstParty,
-            resolved_to: Some(to.clone()),
+            result_kind: TraceResultKind::NotObserved,
+            resolved_to: None,
             package_name: None,
             trace: vec![
-                "trace did not carry import-specifier context; using first edge from the same source file"
+                "trace did not carry import-specifier context and multiple edges share the same source file; refusing to guess which edge matches `--from/--import`"
                     .to_string(),
             ],
         };
@@ -98,14 +113,10 @@ pub(super) fn classify_doctor_compare_mismatch(
         return Some("focused_unknown".to_string());
     };
 
-    let heuristic_tag =
-        classify_focus_mismatch_tag(focus, specgate_resolution, tsc_trace_resolution);
-
     let category = match (
         &specgate_resolution.result_kind,
         &tsc_trace_resolution.result_kind,
     ) {
-        _ if heuristic_tag.is_some() => heuristic_tag.expect("checked is_some"),
         (TraceResultKind::FirstParty, TraceResultKind::FirstParty)
             if specgate_resolution.resolved_to != tsc_trace_resolution.resolved_to =>
         {
@@ -129,7 +140,12 @@ pub(super) fn classify_doctor_compare_mismatch(
         _ => "focused_resolution_mismatch",
     };
 
-    Some(category.to_string())
+    Some(
+        classify_focus_mismatch_tag(focus, specgate_resolution, tsc_trace_resolution)
+            .filter(|_| category == "focused_target_mismatch")
+            .unwrap_or(category)
+            .to_string(),
+    )
 }
 
 pub(super) fn classify_focus_mismatch_tag(
@@ -183,8 +199,8 @@ pub(super) fn build_actionable_mismatch_hint(
     focus: Option<&DoctorCompareFocus>,
     specgate_resolution: Option<&DoctorCompareResolutionOutput>,
     tsc_trace_resolution: Option<&DoctorCompareResolutionOutput>,
-    missing_in_specgate: &[String],
-    extra_in_specgate: &[String],
+    _missing_in_specgate: &[String],
+    _extra_in_specgate: &[String],
 ) -> Option<String> {
     if status != "mismatch" {
         return None;
@@ -237,9 +253,6 @@ pub(super) fn build_actionable_mismatch_hint(
         | (TraceResultKind::FirstParty, TraceResultKind::ThirdParty) => Some(format!(
             "Resolver classification differs (first-party vs third-party). Inspect package `exports` conditions, path aliases, and symlinked workspace package links; then {shared_guidance}."
         )),
-        _ if !missing_in_specgate.is_empty() || !extra_in_specgate.is_empty() => Some(format!(
-            "Focused parity mismatch detected; {shared_guidance}."
-        )),
         _ => Some(format!(
             "Focused parity mismatch detected; {shared_guidance}."
         )),
@@ -248,4 +261,172 @@ pub(super) fn build_actionable_mismatch_hint(
 
 pub(super) fn doctor_compare_beta_channel_enabled(config: &SpecConfig) -> bool {
     config.release_channel == ReleaseChannel::Beta
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::super::types::DoctorCompareFocusOutput;
+    use super::*;
+
+    fn focus_with_edge(
+        import_specifier: &str,
+        edge: Option<(&str, &str)>,
+        specgate_result_kind: TraceResultKind,
+        specgate_resolved_to: Option<&str>,
+    ) -> DoctorCompareFocus {
+        DoctorCompareFocus {
+            edge: edge.map(|(from, to)| (from.to_string(), to.to_string())),
+            output: DoctorCompareFocusOutput {
+                from: "src/app/main.ts".to_string(),
+                import_specifier: import_specifier.to_string(),
+                resolved_to: specgate_resolved_to.map(ToString::to_string),
+                resolution_kind: specgate_result_kind.as_str().to_string(),
+                in_specgate_graph: edge.is_some(),
+                specgate_trace: vec!["specgate".to_string()],
+            },
+            specgate_resolution: DoctorCompareResolutionOutput {
+                source: "specgate".to_string(),
+                result_kind: specgate_result_kind,
+                resolved_to: specgate_resolved_to.map(ToString::to_string),
+                package_name: None,
+                trace: vec!["specgate".to_string()],
+            },
+        }
+    }
+
+    fn trace_data(
+        edges: &[(&str, &str)],
+        resolutions: Vec<super::super::trace_types::TraceResolutionRecord>,
+    ) -> ParsedTraceData {
+        ParsedTraceData {
+            edges: edges
+                .iter()
+                .map(|(from, to)| (from.to_string(), to.to_string()))
+                .collect::<BTreeSet<_>>(),
+            resolutions,
+        }
+    }
+
+    fn resolution(
+        from: &str,
+        import_specifier: &str,
+        result_kind: TraceResultKind,
+        resolved_to: Option<&str>,
+    ) -> super::super::trace_types::TraceResolutionRecord {
+        super::super::trace_types::TraceResolutionRecord {
+            from: from.to_string(),
+            import_specifier: import_specifier.to_string(),
+            result_kind,
+            resolved_to: resolved_to.map(ToString::to_string),
+            package_name: None,
+            trace: vec!["trace".to_string()],
+        }
+    }
+
+    #[test]
+    fn derive_tsc_focus_resolution_refuses_ambiguous_same_source_edge_fallback() {
+        let focus = focus_with_edge(
+            "@pkg/foo",
+            Some(("src/app/main.ts", "src/core/index.ts")),
+            TraceResultKind::FirstParty,
+            Some("src/core/index.ts"),
+        );
+        let parsed_trace = trace_data(
+            &[
+                ("src/app/main.ts", "src/core/one.ts"),
+                ("src/app/main.ts", "src/core/two.ts"),
+            ],
+            Vec::new(),
+        );
+
+        let resolution = derive_tsc_focus_resolution(&parsed_trace, &focus);
+
+        assert_eq!(resolution.result_kind, TraceResultKind::NotObserved);
+        assert!(resolution.resolved_to.is_none());
+        assert!(
+            resolution.trace[0].contains("refusing to guess"),
+            "expected ambiguity guardrail, got {:?}",
+            resolution.trace
+        );
+    }
+
+    #[test]
+    fn classify_doctor_compare_mismatch_preserves_classification_mismatch_for_package_imports() {
+        let focus = focus_with_edge("left-pad", None, TraceResultKind::ThirdParty, None);
+        let tsc_trace_resolution = DoctorCompareResolutionOutput {
+            source: "tsc_trace".to_string(),
+            result_kind: TraceResultKind::FirstParty,
+            resolved_to: Some("src/core/index.ts".to_string()),
+            package_name: None,
+            trace: vec!["trace".to_string()],
+        };
+
+        let category = classify_doctor_compare_mismatch(
+            "mismatch",
+            Some(&focus),
+            Some(&focus.specgate_resolution),
+            Some(&tsc_trace_resolution),
+            &[],
+            &[],
+        );
+
+        assert_eq!(category.as_deref(), Some("focused_classification_mismatch"));
+    }
+
+    #[test]
+    fn classify_doctor_compare_mismatch_keeps_target_heuristics_for_package_imports() {
+        let focus = focus_with_edge(
+            "left-pad",
+            None,
+            TraceResultKind::FirstParty,
+            Some("src/core/index.ts"),
+        );
+        let tsc_trace_resolution = DoctorCompareResolutionOutput {
+            source: "tsc_trace".to_string(),
+            result_kind: TraceResultKind::FirstParty,
+            resolved_to: Some("src/core/alt.ts".to_string()),
+            package_name: None,
+            trace: vec!["trace".to_string()],
+        };
+
+        let category = classify_doctor_compare_mismatch(
+            "mismatch",
+            Some(&focus),
+            Some(&focus.specgate_resolution),
+            Some(&tsc_trace_resolution),
+            &[],
+            &[],
+        );
+
+        assert_eq!(category.as_deref(), Some("exports"));
+    }
+
+    #[test]
+    fn derive_tsc_focus_resolution_prefers_explicit_matching_resolution_record() {
+        let focus = focus_with_edge(
+            "../core/index",
+            Some(("src/app/main.ts", "src/core/index.ts")),
+            TraceResultKind::FirstParty,
+            Some("src/core/index.ts"),
+        );
+        let parsed_trace = trace_data(
+            &[("src/app/main.ts", "src/core/other.ts")],
+            vec![resolution(
+                "src/app/main.ts",
+                "../core/index",
+                TraceResultKind::FirstParty,
+                Some("src/core/index.ts"),
+            )],
+        );
+
+        let tsc_resolution = derive_tsc_focus_resolution(&parsed_trace, &focus);
+
+        assert_eq!(tsc_resolution.result_kind, TraceResultKind::FirstParty);
+        assert_eq!(
+            tsc_resolution.resolved_to.as_deref(),
+            Some("src/core/index.ts")
+        );
+    }
 }

@@ -471,26 +471,14 @@ mod tests {
 
     use crate::graph::DependencyGraph;
     use crate::resolver::ModuleResolver;
+    use crate::rules::test_support::build_spec_with_boundaries;
     use crate::rules::write_test_file;
     use crate::spec::{Boundaries, SpecConfig, SpecFile, Visibility};
 
     use super::*;
 
     fn spec_with_boundaries(module: &str, path: &str, boundaries: Boundaries) -> SpecFile {
-        SpecFile {
-            version: "2.2".to_string(),
-            module: module.to_string(),
-            package: None,
-            import_id: None,
-            import_ids: Vec::new(),
-            description: None,
-            boundaries: Some(Boundaries {
-                path: Some(path.to_string()),
-                ..boundaries
-            }),
-            constraints: Vec::new(),
-            spec_path: None,
-        }
+        build_spec_with_boundaries("2.2", module, path, boundaries)
     }
 
     fn run_engine(

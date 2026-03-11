@@ -88,6 +88,9 @@ pub trait RuleWithResolver {
     ) -> std::result::Result<Vec<RuleViolation>, Self::Error>;
 }
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub(crate) fn sort_violations_stable(violations: &mut [RuleViolation]) {
     violations.sort_by(|a, b| {
         a.from_file

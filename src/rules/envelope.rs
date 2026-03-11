@@ -11,6 +11,8 @@ use oxc_ast::ast::{
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
+use crate::parser::is_import_type_only;
+
 /// Result of analyzing a single file for envelope compliance.
 #[derive(Debug, Clone)]
 pub struct EnvelopeAnalysis {
@@ -958,22 +960,6 @@ fn expression_contract_id(expression: &Expression<'_>) -> Option<String> {
         Expression::TSAsExpression(ts_as) => expression_contract_id(&ts_as.expression),
         _ => None,
     }
-}
-
-fn is_import_type_only(declaration: &oxc_ast::ast::ImportDeclaration<'_>) -> bool {
-    if declaration.import_kind.is_type() {
-        return true;
-    }
-
-    declaration.specifiers.as_ref().is_some_and(|specifiers| {
-        !specifiers.is_empty()
-            && specifiers.iter().all(|specifier| match specifier {
-                oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
-                    specifier.import_kind.is_type()
-                }
-                _ => false,
-            })
-    })
 }
 
 #[derive(Debug)]
