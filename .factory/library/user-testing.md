@@ -44,5 +44,11 @@ For each assertion, run the CLI against both `intro` and `fix` variants:
 - `specgate doctor governance-consistency --project-root <path> --format json` — Detects contradictory namespace-intent in spec governance configuration.
 - `specgate doctor ownership --project-root <path> --format json` — Validates module ownership: detect overlaps, unclaimed files, orphaned specs, contradictory globs.
 
+## Key Fixture for Import Hygiene
+- **Import Hygiene:** `tests/fixtures/golden/tier-a/import-hygiene/{intro,fix}/`
+  - `intro/` has consumer importing deep internal files (`internal/helpers/format.ts`, `internal/services/auth/token.ts`) bypassing public API → expect 2 violations, status fail
+  - `fix/` has consumer importing through `src/provider/index.ts` → expect 0 violations, status pass
+  - Target rule: `boundary.public_api`
+
 ## Key Fixture for Doctor Ownership
 - `tests/fixtures/adversarial/ownership-overlap/` — Contains overlapping ownership globs for testing.

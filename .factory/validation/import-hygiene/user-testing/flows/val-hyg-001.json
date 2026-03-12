@@ -1,0 +1,21 @@
+{
+  "assertionId": "VAL-HYG-001",
+  "status": "pass",
+  "evidence": [
+    {
+      "description": "Intro variant: deep internal imports detected as violations",
+      "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/import-hygiene/intro --format json --no-baseline",
+      "output": "{\"status\":\"fail\",\"summary\":{\"total_violations\":2,\"error_violations\":2},\"violations\":[{\"rule\":\"boundary.public_api\",\"message\":\"module 'consumer' imported non-public file 'src/provider/internal/helpers/format.ts' from 'provider'\",\"from_module\":\"consumer\",\"to_module\":\"provider\"},{\"rule\":\"boundary.public_api\",\"message\":\"module 'consumer' imported non-public file 'src/provider/internal/services/auth/token.ts' from 'provider'\",\"from_module\":\"consumer\",\"to_module\":\"provider\"}]}",
+      "result": "pass"
+    },
+    {
+      "description": "Fix variant: imports through public entrypoint pass cleanly",
+      "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/import-hygiene/fix --format json --no-baseline",
+      "output": "{\"status\":\"pass\",\"summary\":{\"total_violations\":0,\"error_violations\":0},\"violations\":[]}",
+      "result": "pass"
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["cargo run"]
+}
