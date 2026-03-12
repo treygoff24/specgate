@@ -42,7 +42,8 @@ impl OwnershipFindingSummary {
     fn from_report(report: &OwnershipReport) -> Self {
         Self {
             has_error_findings: !report.duplicate_module_ids.is_empty()
-                || !report.invalid_globs.is_empty(),
+                || !report.invalid_globs.is_empty()
+                || !report.contradictory_globs.is_empty(),
             has_warning_findings: !report.unclaimed_files.is_empty()
                 || !report.overlapping_files.is_empty()
                 || !report.orphaned_specs.is_empty(),
@@ -200,5 +201,251 @@ fn render_human(report: &OwnershipReport) -> String {
         }
     }
 
+    if report.contradictory_globs.is_empty() {
+        out.push_str("\nContradictory ownership globs: none\n");
+    } else {
+        out.push_str("\nContradictory ownership globs:\n");
+        for entry in &report.contradictory_globs {
+            out.push_str(&format!(
+                "  \"{}\" ({}, {}) vs \"{}\" ({}, {})\n",
+                entry.glob_a,
+                entry.module_a,
+                entry.spec_path_a,
+                entry.glob_b,
+                entry.module_b,
+                entry.spec_path_b,
+            ));
+            out.push_str(&format!("    {}\n", entry.description));
+        }
+    }
+
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use crate::cli::test_support::write_file;
+    use crate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, run};
+
+    fn parse_json(source: &str) -> serde_json::Value {
+        serde_json::from_str(source).expect("valid json")
+    }
+
+    #[test]
+    fn doctor_ownership_detects_contradictory_globs_json() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "modules/api.spec.yml",
+            "version: \"2.2\"\nmodule: api\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/ui.spec.yml",
+            "version: \"2.2\"\nmodule: ui\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        );
+        write_file(temp.path(), "src/shared/utils.ts", "export const x = 1;\n");
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "ownership",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--format",
+            "json",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let output = parse_json(&result.stdout);
+        assert_eq!(output["status"], "findings");
+        let contradictory = output["report"]["contradictory_globs"]
+            .as_array()
+            .expect("contradictory_globs array");
+        assert_eq!(
+            contradictory.len(),
+            1,
+            "expected 1 contradictory glob pair: {contradictory:?}"
+        );
+        let entry = &contradictory[0];
+        assert_eq!(entry["glob_a"], "src/shared/**");
+        assert_eq!(entry["glob_b"], "src/shared/**");
+        assert!(
+            entry["description"]
+                .as_str()
+                .expect("description")
+                .contains("overlapping ownership")
+        );
+    }
+
+    #[test]
+    fn doctor_ownership_contradictory_globs_gates_with_strict_ownership() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "modules/api.spec.yml",
+            "version: \"2.2\"\nmodule: api\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/ui.spec.yml",
+            "version: \"2.2\"\nmodule: ui\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nstrict_ownership: true\nstrict_ownership_level: errors\n",
+        );
+        write_file(temp.path(), "src/shared/utils.ts", "export const x = 1;\n");
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "ownership",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--format",
+            "json",
+        ]);
+
+        assert_eq!(
+            result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+            "contradictory globs should gate when strict_ownership + errors level"
+        );
+    }
+
+    #[test]
+    fn doctor_ownership_human_output_shows_contradictory_globs() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "modules/api.spec.yml",
+            "version: \"2.2\"\nmodule: api\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/ui.spec.yml",
+            "version: \"2.2\"\nmodule: ui\nboundaries:\n  path: src/shared/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        );
+        write_file(temp.path(), "src/shared/utils.ts", "export const x = 1;\n");
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "ownership",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--format",
+            "human",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        assert!(
+            result.stdout.contains("Contradictory ownership globs:"),
+            "human output should contain contradictory section header"
+        );
+        assert!(
+            result.stdout.contains("src/shared/**"),
+            "human output should show the glob pattern"
+        );
+        assert!(
+            result.stdout.contains("overlapping ownership"),
+            "human output should include description"
+        );
+    }
+
+    #[test]
+    fn doctor_ownership_no_contradictions_clean_project() {
+        let temp = TempDir::new().expect("tempdir");
+        write_file(
+            temp.path(),
+            "modules/api.spec.yml",
+            "version: \"2.2\"\nmodule: api\nboundaries:\n  path: src/api/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/ui.spec.yml",
+            "version: \"2.2\"\nmodule: ui\nboundaries:\n  path: src/ui/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        );
+        write_file(temp.path(), "src/api/index.ts", "export const api = 1;\n");
+        write_file(temp.path(), "src/ui/button.tsx", "export const btn = 1;\n");
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "ownership",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--format",
+            "json",
+        ]);
+
+        assert_eq!(result.exit_code, EXIT_CODE_PASS);
+        let output = parse_json(&result.stdout);
+        assert_eq!(output["status"], "ok");
+        // contradictory_globs should be absent (skip_serializing_if = empty)
+        assert!(
+            output["report"]["contradictory_globs"].is_null(),
+            "contradictory_globs should not appear in JSON when empty"
+        );
+    }
+
+    #[test]
+    fn doctor_ownership_structural_overlap_detected_without_files() {
+        let temp = TempDir::new().expect("tempdir");
+        // src/** structurally overlaps with src/api/**
+        write_file(
+            temp.path(),
+            "modules/wide.spec.yml",
+            "version: \"2.2\"\nmodule: wide\nboundaries:\n  path: src/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "modules/narrow.spec.yml",
+            "version: \"2.2\"\nmodule: narrow\nboundaries:\n  path: src/api/**\nconstraints: []\n",
+        );
+        write_file(
+            temp.path(),
+            "specgate.config.yml",
+            "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+        );
+        // No source files at all — structural detection should still catch it.
+
+        let result = run([
+            "specgate",
+            "doctor",
+            "ownership",
+            "--project-root",
+            temp.path().to_str().expect("utf8 path"),
+            "--format",
+            "json",
+        ]);
+
+        let output = parse_json(&result.stdout);
+        let contradictory = output["report"]["contradictory_globs"]
+            .as_array()
+            .expect("contradictory_globs array");
+        assert_eq!(
+            contradictory.len(),
+            1,
+            "structural overlap should be detected even without source files: {contradictory:?}"
+        );
+    }
 }

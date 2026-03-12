@@ -14,6 +14,26 @@ pub struct InvalidGlob {
     pub error: String,
 }
 
+/// Two ownership globs from different spec files that overlap — any path matching
+/// one glob could also match the other, indicating contradictory ownership claims.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContradictoryGlob {
+    /// First module defining the glob.
+    pub module_a: String,
+    /// Glob pattern from the first module.
+    pub glob_a: String,
+    /// Spec file path for the first module.
+    pub spec_path_a: String,
+    /// Second module defining the glob.
+    pub module_b: String,
+    /// Glob pattern from the second module.
+    pub glob_b: String,
+    /// Spec file path for the second module.
+    pub spec_path_b: String,
+    /// Human-readable description of the contradiction.
+    pub description: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnershipReport {
     pub total_source_files: usize,
@@ -24,6 +44,9 @@ pub struct OwnershipReport {
     pub orphaned_specs: Vec<OrphanedSpec>,
     /// Globs that failed to compile — surfaced instead of silently dropped.
     pub invalid_globs: Vec<InvalidGlob>,
+    /// Ownership globs from different spec files that structurally overlap/contradict.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contradictory_globs: Vec<ContradictoryGlob>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +186,9 @@ pub fn validate_ownership(
         .collect();
     orphaned_specs.sort_by(|a, b| a.module_id.cmp(&b.module_id));
 
+    let contradictory_globs =
+        detect_contradictory_globs(&spec_matchers, source_files, project_root);
+
     OwnershipReport {
         total_source_files: source_files.len(),
         claimed_files: claimed_count,
@@ -171,7 +197,130 @@ pub fn validate_ownership(
         duplicate_module_ids,
         orphaned_specs,
         invalid_globs,
+        contradictory_globs,
     }
+}
+
+/// Detect contradictory ownership globs across different modules.
+///
+/// Two globs from different modules are considered contradictory when:
+/// 1. They are identical patterns (exact match).
+/// 2. One structurally contains the other (e.g., `src/**` vs `src/api/**`).
+/// 3. They share witnessed file overlaps from the actual source tree.
+///
+/// Pairs where both entries belong to the same module are skipped — those are
+/// not cross-module contradictions.
+fn detect_contradictory_globs(
+    spec_matchers: &[(String, String, String, GlobSet)],
+    source_files: &[PathBuf],
+    project_root: &Path,
+) -> Vec<ContradictoryGlob> {
+    use std::collections::BTreeSet;
+
+    let mut contradictions = Vec::new();
+    let mut seen_pairs: BTreeSet<(usize, usize)> = BTreeSet::new();
+
+    for i in 0..spec_matchers.len() {
+        for j in (i + 1)..spec_matchers.len() {
+            let (module_a, spec_path_a, glob_a, globset_a) = &spec_matchers[i];
+            let (module_b, spec_path_b, glob_b, globset_b) = &spec_matchers[j];
+
+            // Skip pairs within the same module — not a cross-module contradiction.
+            if module_a == module_b {
+                continue;
+            }
+
+            // Deterministic pair key to avoid duplicates.
+            let pair_key = (i, j);
+            if seen_pairs.contains(&pair_key) {
+                continue;
+            }
+
+            let is_contradictory = if glob_a == glob_b {
+                // Identical patterns always contradict.
+                true
+            } else if globs_structurally_overlap(glob_a, glob_b) {
+                // One glob structurally contains the other.
+                true
+            } else {
+                // Fall back to file-witnessed overlap: check if any source file
+                // matches both globs.
+                source_files.iter().any(|path| {
+                    let rel = normalize_repo_relative(project_root, path);
+                    globset_a.is_match(&rel) && globset_b.is_match(&rel)
+                })
+            };
+
+            if is_contradictory {
+                seen_pairs.insert(pair_key);
+
+                // Deterministic ordering: sort the pair by (module, glob) tuple.
+                let (ma, ga, spa, mb, gb, spb) = if (module_a, glob_a) <= (module_b, glob_b) {
+                    (module_a, glob_a, spec_path_a, module_b, glob_b, spec_path_b)
+                } else {
+                    (module_b, glob_b, spec_path_b, module_a, glob_a, spec_path_a)
+                };
+
+                contradictions.push(ContradictoryGlob {
+                    module_a: ma.clone(),
+                    glob_a: ga.clone(),
+                    spec_path_a: spa.clone(),
+                    module_b: mb.clone(),
+                    glob_b: gb.clone(),
+                    spec_path_b: spb.clone(),
+                    description: format!(
+                        "Glob '{ga}' (module '{ma}') and glob '{gb}' (module '{mb}') define overlapping ownership — files may match both patterns.",
+                    ),
+                });
+            }
+        }
+    }
+
+    // Sort for deterministic output.
+    contradictions.sort_by(|a, b| {
+        a.module_a
+            .cmp(&b.module_a)
+            .then_with(|| a.glob_a.cmp(&b.glob_a))
+            .then_with(|| a.module_b.cmp(&b.module_b))
+            .then_with(|| a.glob_b.cmp(&b.glob_b))
+    });
+    contradictions
+}
+
+/// Structural overlap check for two glob patterns.
+///
+/// Returns `true` when one pattern is clearly a subset of the other based on
+/// common prefix analysis. For example:
+/// - `src/**` vs `src/api/**` → overlap (one is a sub-tree of the other)
+/// - `src/api/**` vs `src/api/**/*.ts` → overlap (more specific sub-tree)
+/// - `src/api/**` vs `src/ui/**` → no overlap (disjoint prefixes)
+fn globs_structurally_overlap(glob_a: &str, glob_b: &str) -> bool {
+    // Extract the literal prefix before any glob metacharacter.
+    let prefix_a = literal_prefix(glob_a);
+    let prefix_b = literal_prefix(glob_b);
+
+    // If one prefix starts with the other AND the longer pattern uses a glob
+    // suffix, they structurally overlap.
+    if prefix_a.is_empty() || prefix_b.is_empty() {
+        // A pattern with no literal prefix (e.g., `**/*.ts`) is a wildcard
+        // that can match anything — it overlaps with any other pattern.
+        return true;
+    }
+
+    prefix_a.starts_with(&prefix_b) || prefix_b.starts_with(&prefix_a)
+}
+
+/// Extract the literal (non-glob) prefix of a glob pattern.
+/// Stops at the first glob metacharacter (`*`, `?`, `[`, `{`).
+fn literal_prefix(pattern: &str) -> String {
+    let mut prefix = String::new();
+    for ch in pattern.chars() {
+        if ch == '*' || ch == '?' || ch == '[' || ch == '{' {
+            break;
+        }
+        prefix.push(ch);
+    }
+    prefix
 }
 
 fn detect_duplicate_module_ids(project_root: &Path, specs: &[SpecFile]) -> Vec<DuplicateModule> {
@@ -365,6 +514,7 @@ mod tests {
                 path_glob: "src/old/**".to_string(),
             }],
             invalid_globs: vec![],
+            contradictory_globs: vec![],
         };
 
         let json = serde_json::to_string(&report).expect("serialize");
@@ -443,5 +593,191 @@ mod tests {
                 "expected specs/... path, got: {path}"
             );
         }
+    }
+
+    // --- Contradictory ownership globs ---
+
+    #[test]
+    fn test_contradictory_globs_identical_patterns_different_modules() {
+        let specs = vec![
+            make_spec("api/core", Some("src/shared/**")),
+            make_spec("ui/shared", Some("src/shared/**")),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(
+            report.contradictory_globs.len(),
+            1,
+            "expected one contradictory pair: {:?}",
+            report.contradictory_globs
+        );
+        let entry = &report.contradictory_globs[0];
+        assert!(entry.description.contains("overlapping ownership"));
+    }
+
+    #[test]
+    fn test_contradictory_globs_structural_overlap() {
+        // src/** contains src/api/** — structurally overlapping.
+        let specs = vec![
+            make_spec("wide", Some("src/**")),
+            make_spec("narrow", Some("src/api/**")),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(
+            report.contradictory_globs.len(),
+            1,
+            "expected one contradictory pair: {:?}",
+            report.contradictory_globs
+        );
+    }
+
+    #[test]
+    fn test_contradictory_globs_disjoint_patterns_no_contradiction() {
+        let specs = vec![
+            make_spec("api", Some("src/api/**")),
+            make_spec("ui", Some("src/ui/**")),
+        ];
+        let source = files(&["src/api/index.ts", "src/ui/button.tsx"]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert!(
+            report.contradictory_globs.is_empty(),
+            "expected no contradictory globs for disjoint patterns: {:?}",
+            report.contradictory_globs
+        );
+    }
+
+    #[test]
+    fn test_contradictory_globs_witnessed_by_files() {
+        // Patterns overlap only in specific corner — witnessed by actual file match.
+        let specs = vec![
+            make_spec("mod_a", Some("src/shared/*.ts")),
+            make_spec("mod_b", Some("src/shared/utils.*")),
+        ];
+        let source = files(&["src/shared/utils.ts"]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(
+            report.contradictory_globs.len(),
+            1,
+            "expected file-witnessed contradiction: {:?}",
+            report.contradictory_globs
+        );
+    }
+
+    #[test]
+    fn test_contradictory_globs_same_module_not_reported() {
+        // Two entries for the same module should not be reported as cross-module.
+        let specs = vec![
+            make_spec("auth", Some("src/auth/**")),
+            make_spec("auth", Some("src/auth/internal/**")),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert!(
+            report.contradictory_globs.is_empty(),
+            "same-module overlaps are not cross-module contradictions: {:?}",
+            report.contradictory_globs
+        );
+    }
+
+    #[test]
+    fn test_contradictory_globs_deterministic_ordering() {
+        let specs = vec![
+            make_spec("z_module", Some("src/shared/**")),
+            make_spec("a_module", Some("src/shared/**")),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(report.contradictory_globs.len(), 1);
+        let entry = &report.contradictory_globs[0];
+        // Pair should be sorted: a_module before z_module.
+        assert_eq!(entry.module_a, "a_module");
+        assert_eq!(entry.module_b, "z_module");
+    }
+
+    #[test]
+    fn test_contradictory_globs_multiple_pairs() {
+        let specs = vec![
+            make_spec("mod_a", Some("src/shared/**")),
+            make_spec("mod_b", Some("src/shared/**")),
+            make_spec("mod_c", Some("src/shared/**")),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        // 3 modules with identical patterns → 3 contradiction pairs (a-b, a-c, b-c).
+        assert_eq!(
+            report.contradictory_globs.len(),
+            3,
+            "expected 3 contradiction pairs: {:?}",
+            report.contradictory_globs
+        );
+    }
+
+    #[test]
+    fn test_contradictory_globs_report_includes_spec_paths() {
+        let specs = vec![
+            make_spec_with_path(
+                "api/core",
+                Some("src/shared/**"),
+                Some("/project/specs/api-core.spec.yml"),
+            ),
+            make_spec_with_path(
+                "ui/shared",
+                Some("src/shared/**"),
+                Some("/project/specs/ui-shared.spec.yml"),
+            ),
+        ];
+        let source = files(&[]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(report.contradictory_globs.len(), 1);
+        let entry = &report.contradictory_globs[0];
+        assert_eq!(entry.spec_path_a, "specs/api-core.spec.yml");
+        assert_eq!(entry.spec_path_b, "specs/ui-shared.spec.yml");
+    }
+
+    #[test]
+    fn test_literal_prefix_extraction() {
+        assert_eq!(super::literal_prefix("src/api/**"), "src/api/");
+        assert_eq!(super::literal_prefix("**/*.ts"), "");
+        assert_eq!(
+            super::literal_prefix("src/shared/utils.*"),
+            "src/shared/utils."
+        );
+        assert_eq!(super::literal_prefix("exact-path.ts"), "exact-path.ts");
+        assert_eq!(super::literal_prefix(""), "");
+    }
+
+    #[test]
+    fn test_globs_structurally_overlap_detection() {
+        // One is a subtree of the other.
+        assert!(super::globs_structurally_overlap("src/**", "src/api/**"));
+        // Disjoint prefixes.
+        assert!(!super::globs_structurally_overlap(
+            "src/api/**",
+            "src/ui/**"
+        ));
+        // Identical.
+        assert!(super::globs_structurally_overlap(
+            "src/shared/**",
+            "src/shared/**"
+        ));
+        // Wildcard prefix matches everything.
+        assert!(super::globs_structurally_overlap("**/*.ts", "src/api/**"));
     }
 }

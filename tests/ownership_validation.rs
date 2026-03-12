@@ -156,8 +156,28 @@ fn test_ownership_reports_orphaned_specs() {
 
 #[test]
 fn test_strict_ownership_errors_does_not_gate_warning_findings() {
+    // Use a fixture that only has warning-level findings (unclaimed files,
+    // overlapping files, orphaned specs) but NO error-level findings.
+    // The mixed fixture has shared/a and shared/b both claiming src/shared/**
+    // which now triggers contradictory_globs (an error), so we set up a
+    // simpler fixture with only warning-level findings.
     let temp = TempDir::new().expect("tempdir");
-    setup_mixed_fixture(temp.path());
+
+    // Two specs with non-overlapping globs.
+    write_file(
+        temp.path(),
+        "specs/api.spec.yml",
+        "version: \"2.2\"\nmodule: api\nboundaries:\n  path: \"src/api/**\"\nconstraints: []\n",
+    );
+    write_file(
+        temp.path(),
+        "specs/old-module.spec.yml",
+        "version: \"2.2\"\nmodule: old-module\nboundaries:\n  path: \"src/old/**\"\nconstraints: []\n",
+    );
+
+    // Source files: one claimed, one unclaimed. No files match old-module → orphaned.
+    write_file(temp.path(), "src/api/index.ts", "export const x = 1;\n");
+    write_file(temp.path(), "src/legacy/old.ts", "export const old = 1;\n");
 
     write_file(
         temp.path(),
@@ -166,6 +186,7 @@ fn test_strict_ownership_errors_does_not_gate_warning_findings() {
     );
 
     let (exit_code, _) = run_ownership_json(temp.path());
+    // Only warnings (unclaimed + orphaned), no errors → strict errors should pass.
     assert_eq!(exit_code, EXIT_CODE_PASS);
 }
 
