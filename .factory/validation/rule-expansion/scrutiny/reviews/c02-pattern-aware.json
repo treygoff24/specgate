@@ -1,0 +1,58 @@
+{
+  "featureId": "c02-pattern-aware",
+  "milestone": "rule-expansion",
+  "reviewedAt": "2026-03-12T17:30:00.000Z",
+  "commitId": "a92602a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid implementation of glob pattern matching for all six boundary rule fields. The worker replaced the old `as_set` exact-match helper with three well-documented utility functions (`contains_glob_meta`, `matches_module_pattern`, `has_module_patterns`) that cleanly extend boundary evaluation to support glob patterns while preserving full backward compatibility for plain entries. The `globset` crate was already a dependency, so the added `Glob` import introduces no new external dependency. Tests are comprehensive: 10 unit tests covering all boundary fields (allow_imports_from, never_imports, allow_type_imports_from, deny_imported_by, allow_imported_by/friend_modules) plus single-star, double-star, mixed exact+glob, and type-only carve-out scenarios; 4 CLI-level contract fixture tests; and a tier-a golden fixture with intro/fix variants. The commit also fixes 5 pre-existing clippy warnings and formatting drift — a clean-up that is appropriate in scope.",
+    "issues": [
+      {
+        "file": "src/rules/boundary.rs",
+        "line": 478,
+        "severity": "non_blocking",
+        "description": "Performance: `matches_module_pattern` recompiles glob patterns on every call via `Glob::new` + `compile_matcher`. For projects with many edges and many pattern entries, this could become a hot path. In practice, the CLI runs once per check and module lists are typically small, so this is acceptable for now. A future optimization could pre-compile patterns once per evaluation pass."
+      },
+      {
+        "file": "src/rules/boundary.rs",
+        "line": 476,
+        "severity": "non_blocking",
+        "description": "Silent skip of invalid glob patterns: The doc comment states 'the user will receive separate config-validation feedback', but the current spec validation in src/spec/validation.rs only validates `boundaries.path` and `boundaries.public_api` glob patterns — it does not validate glob syntax inside `allow_imports_from`, `never_imports`, `deny_imported_by`, etc. This means an invalid pattern like `shared/[unclosed` would be silently ignored with no user feedback. This is a documentation accuracy issue rather than a functional bug, since the fallback behavior (skip) is safe."
+      }
+    ]
+  },
+  "issues": [
+    {
+      "severity": "non_blocking",
+      "description": "Performance: `matches_module_pattern` recompiles glob patterns on every call. Acceptable for current usage but could be optimized for large graphs by pre-compiling patterns once per evaluation pass."
+    },
+    {
+      "severity": "non_blocking",
+      "description": "Silent skip of invalid glob patterns in boundary fields (allow_imports_from, never_imports, etc.) is documented as having 'separate config-validation feedback', but no such validation exists for these specific fields yet. The skip behavior is safe but the comment is misleading."
+    }
+  ],
+  "sharedStateObservations": [
+    {
+      "target": "AGENTS.md",
+      "area": "conventions",
+      "observation": "The new pattern-matching behavior (glob metacharacters in boundary fields) is a significant semantic addition to specgate's rule evaluation. AGENTS.md does not mention glob pattern support in boundary fields or the convention that `*`, `?`, `[`, `{` trigger pattern matching vs exact matching. Future workers modifying boundary logic should know this.",
+      "evidence": "src/rules/boundary.rs:468-497 — contains_glob_meta and matches_module_pattern functions define the convention."
+    },
+    {
+      "target": "services.yaml",
+      "area": "services",
+      "observation": "The worker created .factory/services.yaml and .factory/init.sh as part of this commit. These files were not pre-existing — they were bootstrapped by the worker, which is appropriate setup work.",
+      "evidence": "git show a92602a --stat shows .factory/init.sh and .factory/services.yaml as new files."
+    },
+    {
+      "target": "skills",
+      "area": "skills",
+      "observation": "Worker followed the rust-worker skill procedure faithfully: understood requirements, explored code, wrote tests first (TDD), implemented, and verified with cargo test, clippy, fmt, and manual CLI runs. The skill's example handoff even references C02 pattern-aware as its example, suggesting this skill was written or updated alongside the feature. skillFeedback.followedProcedure is true with no deviations.",
+      "evidence": "Handoff verification section shows all 5 commands ran successfully. Transcript skeleton confirms systematic approach."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature c02-pattern-aware is a clean, well-tested implementation. Glob pattern matching was added to all six boundary fields using the existing globset dependency. Backward compatibility is preserved via metacharacter detection. Test coverage is thorough at unit, contract, and golden fixture levels. Two non-blocking observations: (1) glob patterns are recompiled per-call rather than cached, which is fine for current scale; (2) invalid glob syntax in boundary fields is silently skipped without the promised 'separate config-validation feedback'. No blocking issues found."
+}

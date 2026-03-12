@@ -1,0 +1,60 @@
+{
+  "featureId": "c07-unique-export",
+  "milestone": "rule-expansion",
+  "reviewedAt": "2026-03-12T17:55:00.000Z",
+  "commitId": "02081dd312046f3836971f0a93c676bb2485bb3e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid implementation of the boundary.unique_export constraint rule. The new module (src/rules/unique_export.rs, 567 lines) follows the established pattern used by enforce-layer and enforce-category rules: standalone types for Config/Violation/ConfigIssue/Report, a parse function, and an evaluate function. The rule correctly detects duplicate named exports across files within a module boundary, supports scoped export filtering via params, excludes __default pseudo-exports, handles re-exports (non-star), and produces deterministic violations sorted by module then export name. Config issues are properly propagated through AnalysisArtifacts and the doctor output. The analysis.rs integration correctly maps UniqueExportViolation to PolicyViolation and adds config issue error gating. The c07-registry-collision golden corpus was appropriately updated to clarify that runtime data collisions are distinct from static export-name collisions. Test coverage is thorough: 14 unit tests, 4 contract fixture E2E tests, a Tier A golden fixture with intro/fix variants, and golden corpus updates. All verification commands (cargo test, clippy, fmt) passed clean.",
+    "issues": [
+      {
+        "file": "src/cli/analysis.rs",
+        "line": 389,
+        "severity": "non_blocking",
+        "description": "PolicyViolation mapping uses only the first two files (from_file = files[0], to_file = files[1]). If 3+ files share a duplicate export, only the first two appear in the structured from_file/to_file fields. The violation message string does include all file paths, so information is not lost, but structured consumers may miss files beyond the second. This matches the inherent limitation of the PolicyViolation struct which only has from_file/to_file."
+      },
+      {
+        "file": "src/cli/analysis.rs",
+        "line": 391,
+        "severity": "non_blocking",
+        "description": "Severity is hardcoded to Severity::Error regardless of what the user specifies in the constraint's severity field. This is consistent with how enforce-layer and enforce-category also hardcode severity in their PolicyViolation mapping, but it means severity: warning in a spec constraint is silently ignored. Pre-existing pattern, not a regression."
+      },
+      {
+        "file": "src/rules/unique_export.rs",
+        "line": 169,
+        "severity": "non_blocking",
+        "description": "Star re-exports are skipped with a comment that they 'don't introduce specific named bindings at the static level we can check'. This is a reasonable design choice but could lead to false negatives if a module uses star re-exports to forward exports. Worth documenting as a known limitation if users ask about it."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The worker correctly followed all AGENTS.md conventions: deterministic output, fixture/golden test updates in the same change, Rust-first approach, narrow changes. No convention gaps observed.",
+      "evidence": "Commit 02081dd touches only the necessary files, uses BTreeMap for determinism, sorts violations/config_issues, and includes fixture updates."
+    },
+    {
+      "area": "skills",
+      "observation": "Worker followed the rust-worker skill procedure: understood requirements, explored code, used TDD (created tests first), implemented, verified with cargo test + clippy + fmt + manual CLI runs. Handoff matches the skill's example structure. skillFeedback.followedProcedure is true with no deviations.",
+      "evidence": "Handoff verification section shows all 5 commands run successfully. Test section lists 14 unit + 4 contract + Tier A fixture tests."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "issues": [
+    {
+      "severity": "non_blocking",
+      "description": "PolicyViolation from_file/to_file only captures first two files of a multi-file duplicate; message string has all paths so no data loss, but structured consumers see only two."
+    },
+    {
+      "severity": "non_blocking",
+      "description": "Constraint severity field is ignored (hardcoded to Error), consistent with enforce-layer and enforce-category patterns but worth noting."
+    },
+    {
+      "severity": "suggestion",
+      "description": "Star re-exports are skipped in uniqueness checks. Consider documenting this as a known limitation in the rule description or README if the rule is user-facing."
+    }
+  ],
+  "summary": "The C07 boundary.unique_export rule is well-implemented, thoroughly tested, and follows established codebase patterns. It correctly enforces export name uniqueness within module boundaries with support for scoped filtering, default export exclusion, re-export handling, and deterministic output. 14 unit tests, 4 contract fixture E2E tests, and a Tier A golden fixture provide strong coverage. The golden corpus for c07-registry-collision was appropriately updated. Three non-blocking observations noted (PolicyViolation file limits, hardcoded severity, star re-export skip) — none are regressions and all follow existing patterns. Status: PASS."
+}

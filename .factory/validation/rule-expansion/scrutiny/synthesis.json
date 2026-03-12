@@ -1,0 +1,57 @@
+{
+  "milestone": "rule-expansion",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy -- -D warnings", "exitCode": 0 },
+    "format": { "passed": true, "command": "cargo fmt -- --check", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Created .factory/library/adding-a-new-rule.md — a checklist of the 6 integration points required when adding a new constraint rule, plus conventions for determinism, conflict resolution, and test coverage. Derived from patterns observed across all three rule-expansion features (c02, c06, c07).",
+      "sourceFeature": "c06-category-governance"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add a note about glob pattern support in boundary fields: entries containing `*`, `?`, `[`, or `{` are evaluated as glob patterns (via globset), while plain entries use exact matching. This applies to allow_imports_from, never_imports, allow_type_imports_from, deny_imported_by, allow_imported_by, and friend_modules.",
+      "evidence": "Feature c02-pattern-aware added this behavior in src/rules/boundary.rs:468-497. The contains_glob_meta and matches_module_pattern functions define the convention. Future workers modifying boundary logic need to know this.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document the single-canonical-config conflict resolution pattern: when multiple modules declare the same governance rule (enforce-layer, enforce-category, etc.), the lexicographically first module ID's config is used as the canonical config for evaluation. This ensures deterministic behavior but limits to one policy instance per rule type.",
+      "evidence": "Both enforce-layer (src/rules/layers.rs) and enforce-category (src/rules/categories.rs:215) use this pattern. Feature c06-category-governance explicitly followed the enforce-layer precedent.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Worker created .factory/services.yaml and .factory/init.sh as part of c02-pattern-aware commit",
+      "reason": "Informational — these files already exist and are functioning correctly. No action needed."
+    },
+    {
+      "observation": "Worker followed rust-worker skill procedure faithfully (c02-pattern-aware)",
+      "reason": "Informational positive feedback about skill compliance. No shared state update needed."
+    },
+    {
+      "observation": "Worker followed all AGENTS.md conventions (c07-unique-export)",
+      "reason": "Informational positive feedback about convention compliance. No shared state update needed."
+    },
+    {
+      "observation": "Worker followed rust-worker skill procedure (c07-unique-export)",
+      "reason": "Informational positive feedback about skill compliance. No shared state update needed."
+    }
+  ],
+  "previousRound": null
+}

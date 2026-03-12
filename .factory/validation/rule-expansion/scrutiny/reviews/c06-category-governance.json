@@ -1,0 +1,52 @@
+{
+  "featureId": "c06-category-governance",
+  "milestone": "rule-expansion",
+  "reviewedAt": "2026-03-12T17:45:00.000Z",
+  "commitId": "dfcf681ae6c5f9173b51b8cf14fee5ad615a8013",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean, well-structured implementation of enforce-category rule that closely mirrors the existing enforce-layer architecture. Config parsing is thorough with 11 malformed-input rejection cases. Deterministic sorting is applied to violations, config issues, and conflict resolution (lexicographically first module id). Integration into the analysis pipeline, doctor output, and spec validation registration all follow established patterns. Tier A golden fixture covers both fail (cross-category import) and pass (non-member import only) variants. 8 unit tests cover parsing, same-category allowance, cross-category flagging, non-member allowance, malformed config handling, conflict determinism, and category extraction.",
+    "issues": [
+      {
+        "file": "src/rules/categories.rs",
+        "line": 215,
+        "severity": "non_blocking",
+        "description": "The evaluate_enforce_category function uses a single canonical config for the entire project (lexicographically first module declaration wins). This means only one category isolation policy can be active at a time. While this mirrors enforce-layer behavior and is internally consistent, it limits expressiveness for projects needing multiple independent category sets (e.g., 'domains' + 'verticals' simultaneously). Documenting this single-policy constraint in the rule's user-facing docs would help operators understand the expected behavior."
+      },
+      {
+        "file": "src/rules/categories.rs",
+        "line": 197,
+        "severity": "non_blocking",
+        "description": "Sorting configured_constraints uses params.to_string() for deterministic ordering of Value objects (since Value doesn't implement Ord). This is pragmatic but the serialized JSON key order could theoretically vary across serde_json versions. In practice this is stable with the current serde_json version and the dedup() that follows uses PartialEq which is reliable. No action needed but worth noting for future awareness."
+      }
+    ]
+  },
+  "issues": [
+    {
+      "severity": "non_blocking",
+      "description": "Single canonical category config per project: only one enforce-category policy (lexicographically first module) is active. Mirrors enforce-layer design but limits multi-policy scenarios. Worth documenting for operators."
+    },
+    {
+      "severity": "non_blocking",
+      "description": "Value sorting via to_string() is pragmatic but theoretically sensitive to serde_json serialization order. Stable in practice with current dependencies."
+    }
+  ],
+  "sharedStateObservations": [
+    {
+      "target": "AGENTS.md",
+      "area": "conventions",
+      "observation": "The enforce-category rule follows the same single-canonical-config conflict resolution pattern as enforce-layer (lexicographically first module id wins). This architectural decision applies to both rules but isn't documented in AGENTS.md. If more rules follow this pattern, it may be worth codifying as a project convention.",
+      "evidence": "src/rules/categories.rs:215 and src/rules/layers.rs both use the same canonical-first-module-id conflict resolution strategy"
+    },
+    {
+      "target": "library",
+      "area": "knowledge",
+      "observation": "No .factory/library/ entries exist yet. The worker discovered and correctly followed the pattern of: new rule module in src/rules/, integration in src/cli/analysis.rs, registration in src/spec/validation.rs KNOWN_CONSTRAINT_RULES, DoctorOutput field in src/cli/doctor/types.rs, and Tier A fixture creation. This 'adding a new rule' checklist could be captured as a library entry to accelerate future rule implementations.",
+      "evidence": "Diff touches all 6 integration points: src/rules/categories.rs (new), src/rules/mod.rs (re-export), src/cli/analysis.rs (pipeline), src/cli/types.rs (artifacts), src/cli/doctor/types.rs + overview.rs (doctor), src/spec/validation.rs (known rules)"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The C06 enforce-category rule is a well-executed implementation that correctly isolates cross-category imports between defined member groups. It follows established enforce-layer patterns closely: config parsing with thorough validation, deterministic violation sorting, explicit conflict resolution, and proper integration across the analysis pipeline, doctor output, and spec validation. Test coverage is strong with 8 unit tests and a Tier A golden fixture (intro/fix variants). All verification commands passed (789 tests, clippy clean, fmt clean, CLI manual checks). Two non-blocking observations: (1) single canonical config per project limits multi-policy scenarios, and (2) Value sorting via to_string() is pragmatic but worth monitoring. No blocking issues found."
+}
