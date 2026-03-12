@@ -39,3 +39,10 @@ For each assertion, run the CLI against both `intro` and `fix` variants:
 - Parallel execution is safe.
 - Always use `--format json` for machine-parseable output.
 - Always use `--no-baseline` to get raw violation counts.
+
+## Doctor Commands
+- `specgate doctor governance-consistency --project-root <path> --format json` — Detects contradictory namespace-intent in spec governance configuration.
+- `specgate doctor ownership --project-root <path> --format json` — Validates module ownership: detect overlaps, unclaimed files, orphaned specs, contradictory globs.
+
+## Key Fixture for Doctor Ownership
+- `tests/fixtures/adversarial/ownership-overlap/` — Contains overlapping ownership globs for testing.

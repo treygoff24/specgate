@@ -1,0 +1,39 @@
+{
+  "assertionId": "VAL-DIAG-002",
+  "status": "pass",
+  "scenarios": [
+    {
+      "name": "Identical globs in different specs",
+      "command": "cargo run -- doctor ownership --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output returned status 'findings' with contradictory_globs array containing 1 entry showing both globs ('src/shared/**') and originating spec files (api.spec.yml, ui.spec.yml) with overlapping ownership description."
+    },
+    {
+      "name": "Structural overlap (superset/subset)",
+      "command": "cargo run -- doctor ownership --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output detected contradictory_globs between 'src/api/**' (narrow) and 'src/**' (wide) with overlapping ownership description. Structural analysis works even for subset patterns."
+    },
+    {
+      "name": "Human-readable output",
+      "command": "cargo run -- doctor ownership --project-root <fixture> --format human",
+      "result": "pass",
+      "evidence": "Output contains 'Contradictory ownership globs:' section header, shows glob patterns with module names and spec paths, and includes overlapping ownership description."
+    },
+    {
+      "name": "Clean project (no contradictions)",
+      "command": "cargo run -- doctor ownership --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output returned status 'ok', no contradictory_globs field present (skip_serializing_if empty). Exit code 0."
+    },
+    {
+      "name": "Existing adversarial fixture",
+      "command": "cargo run -- doctor ownership --project-root tests/fixtures/adversarial/ownership-overlap --format json",
+      "result": "pass",
+      "evidence": "Existing fixture correctly detected 1 contradictory glob pair between modules 'api' and 'core' for pattern 'src/shared/**/*' with overlapping ownership description."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["cargo run"]
+}

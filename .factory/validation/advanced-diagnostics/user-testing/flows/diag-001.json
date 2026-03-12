@@ -1,0 +1,33 @@
+{
+  "assertionId": "VAL-DIAG-001",
+  "status": "pass",
+  "scenarios": [
+    {
+      "name": "Conflicting allow/never imports",
+      "command": "cargo run -- doctor governance-consistency --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output returned status 'conflicts', conflict_count 1, conflict_type 'allow_never_overlap' with clear description: \"Module 'core' appears in both allow_imports_from and never_imports for 'app'.\""
+    },
+    {
+      "name": "Private visibility with allow_imported_by",
+      "command": "cargo run -- doctor governance-consistency --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output returned status 'conflicts', conflict_count 1, conflict_type 'private_with_allow_imported_by' with description explaining the contradiction."
+    },
+    {
+      "name": "Human-readable output",
+      "command": "cargo run -- doctor governance-consistency --project-root <fixture> --format human",
+      "result": "pass",
+      "evidence": "Output contains 'Governance Consistency Report:', 'Conflicts: 1', '[allow_never_overlap]', and spec path. Format is clear and structured."
+    },
+    {
+      "name": "Clean project - no contradictions",
+      "command": "cargo run -- doctor governance-consistency --project-root <fixture> --format json",
+      "result": "pass",
+      "evidence": "JSON output returned status 'ok', conflict_count 0, empty conflicts array. Exit code 0."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["cargo run"]
+}

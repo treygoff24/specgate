@@ -1,0 +1,22 @@
+{
+  "milestone": "advanced-diagnostics",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": ["VAL-DIAG-001", "VAL-DIAG-002"],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added doctor command documentation and key fixture location for ownership-overlap",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}
