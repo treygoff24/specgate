@@ -695,10 +695,22 @@ mod tests {
                 .iter()
                 .all(|v| v.rule == HYGIENE_DEEP_THIRD_PARTY_RULE_ID)
         );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.message.contains("@scope/lib/deep/nested/file")),
+            "expected violation message to contain '@scope/lib/deep/nested/file': {violations:?}"
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.message.contains("@scope/lib/shallow")),
+            "expected violation message to contain '@scope/lib/shallow': {violations:?}"
+        );
     }
 
     #[test]
-    fn bidirectional_mode_blocks_test_importing_deep_internal_non_public_files() {
+    fn public_api_boundary_enforced_for_deeply_nested_internal_file() {
         let temp = TempDir::new().expect("tempdir");
         write_test_file(
             temp.path(),

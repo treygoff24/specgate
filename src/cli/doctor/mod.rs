@@ -1,7 +1,7 @@
 mod canonical;
 mod compare;
 mod focus;
-pub(crate) mod governance_consistency;
+mod governance_consistency;
 mod overview;
 mod ownership;
 mod parity;

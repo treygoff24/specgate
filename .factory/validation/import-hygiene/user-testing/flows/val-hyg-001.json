@@ -1,4 +1,5 @@
 {
+  "evidence_disclaimer": "Output samples in this artifact are simplified representations, not verbatim CLI output. Actual VerdictSummary contains additional fields.",
   "assertionId": "VAL-HYG-001",
   "status": "pass",
   "evidence": [

@@ -15,7 +15,9 @@ pub(super) struct DoctorOutput {
     pub(super) graph_edges: usize,
     pub(super) parse_warning_count: usize,
     pub(super) policy_violation_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) layer_config_issues: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) category_config_issues: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) unique_export_config_issues: Vec<String>,

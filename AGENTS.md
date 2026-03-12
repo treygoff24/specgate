@@ -20,3 +20,16 @@ Specgate is a Rust CLI for enforcing architectural boundaries in TS/JS repos. Tr
 
 - This repo is Rust-first. Do not introduce Node-specific workflow assumptions into the core development loop.
 - If a scope change touches rule semantics, document the intended before/after behavior in the PR or ticket notes before editing fixtures.
+
+## Conventions
+
+### Single-Canonical-Config for Governance Rules
+
+When multiple modules declare the same governance constraint rule (e.g., `enforce-layer`, `enforce-category`) with different parameters, the engine resolves the conflict deterministically:
+
+1. Constraints are sorted by `(module_id, params.to_string())`.
+2. Duplicate `(module, params)` pairs are deduplicated.
+3. The first valid config (by lexicographic module ID) becomes the canonical config for the entire rule.
+4. Remaining configs with different params are reported as config issues (non-fatal warnings in the doctor output).
+
+This means the "winning" config is always the one from the module whose ID sorts first alphabetically. This convention applies to all governance rules that use global config (currently `enforce-layer` and `enforce-category`).

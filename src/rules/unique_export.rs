@@ -145,7 +145,7 @@ pub fn evaluate_unique_export(
             .cmp(right_module)
             .then_with(|| left_params.to_string().cmp(&right_params.to_string()))
     });
-    configured_constraints.dedup();
+    configured_constraints.dedup_by(|a, b| a.0 == b.0 && a.1.to_string() == b.1.to_string());
 
     let mut usable_configs: Vec<(String, UniqueExportConfig)> = Vec::new();
 
@@ -539,6 +539,40 @@ mod tests {
         // Should be sorted by export_name: bar before foo
         assert_eq!(report.violations[0].export_name, "bar");
         assert_eq!(report.violations[1].export_name, "foo");
+    }
+
+    #[test]
+    fn duplicate_export_in_different_modules_does_not_trigger_violation() {
+        let temp = TempDir::new().expect("tempdir");
+
+        fs::create_dir_all(temp.path().join("src/payments")).expect("mkdir payments");
+        fs::create_dir_all(temp.path().join("src/billing")).expect("mkdir billing");
+        fs::write(
+            temp.path().join("src/payments/utils.ts"),
+            "export function formatDate(d: Date) { return d.toISOString(); }\n",
+        )
+        .expect("write payments utils");
+        fs::write(
+            temp.path().join("src/billing/utils.ts"),
+            "export function formatDate(d: Date) { return d.toLocaleDateString(); }\n",
+        )
+        .expect("write billing utils");
+
+        // Both modules have the unique_export constraint, but each module's
+        // formatDate export lives in a different module — no intra-module
+        // duplication, so zero violations expected.
+        let specs = vec![
+            spec_with_constraint("payments", "src/payments/**/*", json!({})),
+            spec_with_constraint("billing", "src/billing/**/*", json!({})),
+        ];
+        let graph = build_graph(&temp, &specs);
+        let report = evaluate_unique_export(temp.path(), &specs, &graph);
+
+        assert!(report.config_issues.is_empty());
+        assert!(
+            report.violations.is_empty(),
+            "same export name in different modules must not produce violations: {report:?}"
+        );
     }
 
     #[test]

@@ -245,8 +245,8 @@ pub(crate) fn detect_governance_conflicts(specs: &[SpecFile]) -> Vec<GovernanceC
                         .push(ImportsContractRef {
                             consumer_module: spec.module.clone(),
                             consumer_contract_id: contract.id.clone(),
-                            direction: format!("{:?}", contract.direction),
-                            envelope: format!("{:?}", contract.envelope),
+                            direction: serialize_to_lowercase(&contract.direction),
+                            envelope: serialize_to_lowercase(&contract.envelope),
                             spec_path: spec.spec_path.as_ref().map(|p| p.display().to_string()),
                         });
                 }
@@ -306,6 +306,13 @@ struct ImportsContractRef {
     direction: String,
     envelope: String,
     spec_path: Option<String>,
+}
+
+fn serialize_to_lowercase<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| format!("{value:?}"))
 }
 
 fn render_human(conflicts: &[GovernanceConflict]) -> String {
@@ -729,6 +736,70 @@ mod tests {
         assert!(
             dup_conflicts.is_empty(),
             "same-module duplicates should NOT be flagged by cross-module detector: {conflicts:?}"
+        );
+    }
+
+    // D5 test: direction and envelope in conflict descriptions use lowercase (serde format)
+    #[test]
+    fn conflict_description_uses_lowercase_direction_and_envelope() {
+        let specs = vec![
+            make_spec(
+                "consumer_a",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "my_contract".to_string(),
+                        contract: "contracts/a.json".to_string(),
+                        direction: ContractDirection::Inbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec!["provider:shared_contract".to_string()],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "consumer_b",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "other_contract".to_string(),
+                        contract: "contracts/b.json".to_string(),
+                        direction: ContractDirection::Outbound,
+                        envelope: EnvelopeRequirement::Optional,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec!["provider:shared_contract".to_string()],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+        ];
+
+        let conflicts = detect_governance_conflicts(&specs);
+        assert_eq!(conflicts.len(), 1);
+        let desc = &conflicts[0].description;
+        // Must use lowercase serde form, not PascalCase Debug form
+        assert!(
+            desc.contains("inbound"),
+            "expected lowercase 'inbound' in description, got: {desc}"
+        );
+        assert!(
+            desc.contains("outbound"),
+            "expected lowercase 'outbound' in description, got: {desc}"
+        );
+        assert!(
+            desc.contains("required"),
+            "expected lowercase 'required' in description, got: {desc}"
+        );
+        assert!(
+            desc.contains("optional"),
+            "expected lowercase 'optional' in description, got: {desc}"
+        );
+        assert!(
+            !desc.contains("Inbound"),
+            "must not use PascalCase 'Inbound' in description, got: {desc}"
+        );
+        assert!(
+            !desc.contains("Outbound"),
+            "must not use PascalCase 'Outbound' in description, got: {desc}"
         );
     }
 

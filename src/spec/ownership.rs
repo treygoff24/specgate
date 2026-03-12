@@ -830,4 +830,46 @@ mod tests {
             "short prefix ending with / overlaps with longer path"
         );
     }
+
+    // --- File-witnessed overlap fires when structural overlap returns false ---
+
+    #[test]
+    fn file_witnessed_overlap_detected_when_structural_overlap_is_false() {
+        // glob_a = "src/api-*.ts"  → literal prefix "src/api-"
+        // glob_b = "src/api*.ts"   → literal prefix "src/api"
+        //
+        // globs_structurally_overlap: short="src/api", long="src/api-"
+        //   long.starts_with(short) = true
+        //   long.as_bytes()[short.len()] = b'-', which is NOT b'/'
+        //   short does not end with '/'
+        //   → returns false  (no structural overlap)
+        //
+        // But "src/api-utils.ts" matches both globs, so the file-witnessed
+        // fallback should catch it and report a contradictory pair.
+        assert!(
+            !super::globs_structurally_overlap("src/api-*.ts", "src/api*.ts"),
+            "precondition: these globs must be structurally disjoint"
+        );
+
+        let specs = vec![
+            make_spec("mod_a", Some("src/api-*.ts")),
+            make_spec("mod_b", Some("src/api*.ts")),
+        ];
+        let source = files(&["src/api-utils.ts"]);
+
+        let report = validate_ownership(&root(), &specs, &source);
+
+        assert_eq!(
+            report.contradictory_globs.len(),
+            1,
+            "file-witnessed overlap should be reported as a contradictory pair: {:?}",
+            report.contradictory_globs
+        );
+        let entry = &report.contradictory_globs[0];
+        assert!(
+            entry.description.contains("overlapping ownership"),
+            "description should mention overlapping ownership: {}",
+            entry.description
+        );
+    }
 }

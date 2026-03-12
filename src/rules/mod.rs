@@ -102,6 +102,14 @@ pub trait RuleWithResolver {
 #[cfg(test)]
 pub(crate) mod test_support;
 
+/// Extract the first `/`-delimited segment of a module ID as its architectural grouping.
+/// Used by both `enforce-layer` and `enforce-category` rules.
+pub fn module_group_segment(module_id: &str) -> Option<&str> {
+    module_id
+        .split('/')
+        .find(|segment| !segment.trim().is_empty())
+}
+
 pub(crate) fn sort_violations_stable(violations: &mut [RuleViolation]) {
     violations.sort_by(|a, b| {
         a.from_file

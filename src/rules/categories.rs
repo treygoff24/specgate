@@ -156,9 +156,7 @@ pub fn parse_enforce_category_config(
 /// Convention: category is the first non-empty `/`-delimited segment of the module id.
 /// This is the same convention used by `layer_for_module`.
 pub fn category_for_module(module_id: &str) -> Option<&str> {
-    module_id
-        .split('/')
-        .find(|segment| !segment.trim().is_empty())
+    super::module_group_segment(module_id)
 }
 
 pub fn evaluate_enforce_category(
@@ -186,7 +184,7 @@ pub fn evaluate_enforce_category(
     });
 
     // De-dupe exact repeated declarations before parsing.
-    configured_constraints.dedup();
+    configured_constraints.dedup_by(|a, b| a.0 == b.0 && a.1.to_string() == b.1.to_string());
 
     let mut usable_configs = Vec::new();
 

@@ -721,22 +721,22 @@ In `235fa86`, the `detect_contradictory_globs` function has three detection stra
 | # | Finding | Files | Effort |
 |---|---------|-------|--------|
 | 9 | D1: Remove dead `seen_pairs` BTreeSet | `src/spec/ownership.rs` | S | DONE (fixed with M4) |
-| 10 | D3: Fix `pub(crate)` to private on governance_consistency module | `src/cli/doctor/mod.rs` | S |
-| 11 | D5: Replace Debug format with Display for user-facing output | `governance_consistency.rs` | S |
-| 12 | N5: Add `skip_serializing_if` to all config_issues fields | `src/cli/doctor/types.rs` | S |
-| 13 | D6: Align sort and dedup comparators | `categories.rs`, `unique_export.rs` | S |
-| 14 | S3: Document single-canonical-config convention in AGENTS.md | `AGENTS.md` | S |
-| 15 | S4: Regenerate validation artifacts with actual CLI output | `.factory/validation/` | M |
+| 10 | D3: Fix `pub(crate)` to private on governance_consistency module | `src/cli/doctor/mod.rs` | S | DONE |
+| 11 | D5: Replace Debug format with Display for user-facing output | `governance_consistency.rs` | S | DONE — serde lowercase serialization |
+| 12 | N5: Add `skip_serializing_if` to all config_issues fields | `src/cli/doctor/types.rs` | S | DONE |
+| 13 | D6: Align sort and dedup comparators | `categories.rs`, `unique_export.rs` | S | DONE — dedup_by with to_string() |
+| 14 | S3: Document single-canonical-config convention in AGENTS.md | `AGENTS.md` | S | DONE |
+| 15 | S4: Regenerate validation artifacts with actual CLI output | `.factory/validation/` | M | DONE — added evidence disclaimers |
 
 ### Priority 4 — Nice-to-have
 
 | # | Finding | Files | Effort |
 |---|---------|-------|--------|
-| 16 | N4: Extract shared `category_for_module`/`layer_for_module` | `src/rules/mod.rs` | S |
-| 17 | N9: Add negative test for cross-module duplicate exports | `tests/` | S |
-| 18 | N10: Rename misleading test | `src/rules/hygiene.rs` | S |
-| 19 | N11: Add message assertions to `zero_max_depth` test | `src/rules/hygiene.rs` | S |
-| 20 | Add test for file-witnessed overlap branch in isolation | `src/spec/ownership.rs` | S |
+| 16 | N4: Extract shared `category_for_module`/`layer_for_module` | `src/rules/mod.rs` | S | DONE — module_group_segment shared helper |
+| 17 | N9: Add negative test for cross-module duplicate exports | `src/rules/unique_export.rs` | S | DONE |
+| 18 | N10: Rename misleading test | `src/rules/hygiene.rs` | S | DONE |
+| 19 | N11: Add message assertions to `zero_max_depth` test | `src/rules/hygiene.rs` | S | DONE |
+| 20 | Add test for file-witnessed overlap branch in isolation | `src/spec/ownership.rs` | S | DONE |
 | 21 | Add test for `src/api*` vs `src/api-v2/**` false-positive case | `src/spec/ownership.rs` | S | DONE (fixed with M4) |
 
 **Effort key:** S = small (< 30 min), M = medium (1-3 hours)

@@ -137,9 +137,7 @@ pub fn parse_enforce_layer_config(
 /// - `ui/checkout` -> `ui`
 /// - `core` -> `core`
 pub fn layer_for_module(module_id: &str) -> Option<&str> {
-    module_id
-        .split('/')
-        .find(|segment| !segment.trim().is_empty())
+    super::module_group_segment(module_id)
 }
 
 pub fn evaluate_enforce_layer(specs: &[SpecFile], graph: &DependencyGraph) -> EnforceLayerReport {
