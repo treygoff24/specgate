@@ -1,0 +1,7 @@
+version: "2.2"
+module: tools
+boundaries:
+  path: src/tools/**/*
+constraints:
+  - rule: boundary.unique_export
+    severity: error

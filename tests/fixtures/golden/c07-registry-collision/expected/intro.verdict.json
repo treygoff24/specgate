@@ -1,5 +1,5 @@
 {
   "status": "pass",
   "violations": [],
-  "notes": "Future enhancement - boundary.unique_export rule not yet implemented"
+  "notes": "Duplicate tool names are a runtime data collision, not detectable by static export-name analysis. The boundary.unique_export rule is now implemented but checks export names, not runtime values."
 }

@@ -9,4 +9,4 @@
 New attachment tools added while legacy placeholder tools with same names remained, causing startup crash.
 
 ## Status
-⚠️ **FUTURE ENHANCEMENT** - Requires `boundary.unique_export` rule not yet implemented.
+The `boundary.unique_export` rule is now implemented and enforces export name uniqueness within a module boundary. This fixture demonstrates a runtime data collision (duplicate tool name values in arrays), which is not detectable by static export-name analysis. The export names (`attachmentTools`, `noteTools`, `TOOL_DEFINITIONS`) are unique; the collision is in array element values at runtime.

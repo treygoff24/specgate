@@ -68,6 +68,10 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "c06-category-gov",
             near_miss_variant: None,
         },
+        TierAFixture {
+            id: "c07-unique-export",
+            near_miss_variant: None,
+        },
     ]
 }
 

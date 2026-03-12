@@ -28,6 +28,7 @@ const KNOWN_CONSTRAINT_RULES: &[&str] = &[
     "boundary.contract_ref_invalid",
     BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
     "boundary.envelope_missing",
+    "boundary.unique_export",
     "enforce-category",
 ];
 

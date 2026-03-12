@@ -9,6 +9,7 @@ use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
     DependencyRule, RuleContext, RuleWithResolver, evaluate_enforce_category,
     evaluate_enforce_layer, evaluate_hygiene_rules, evaluate_no_circular_deps,
+    evaluate_unique_export,
 };
 use crate::spec::Severity;
 use crate::verdict::{self, EdgeClassification, PolicyViolation, UnresolvedEdge, VerdictEdge};
@@ -374,6 +375,37 @@ pub(crate) fn analyze_project(
         .collect::<Vec<_>>();
     policy_violations.extend(category_violations);
 
+    let unique_export_report = evaluate_unique_export(&loaded.project_root, &loaded.specs, &graph);
+    let unique_export_violations = unique_export_report
+        .violations
+        .into_iter()
+        .map(|violation| {
+            let first_file = violation
+                .files
+                .first()
+                .cloned()
+                .unwrap_or_else(|| loaded.project_root.clone());
+            let second_file = violation.files.get(1).cloned();
+            PolicyViolation {
+                rule: crate::rules::UNIQUE_EXPORT_RULE_ID.to_string(),
+                severity: Severity::Error,
+                message: violation.message,
+                from_file: first_file,
+                to_file: second_file,
+                from_module: Some(violation.module.clone()),
+                to_module: Some(violation.module),
+                line: None,
+                column: None,
+                expected: None,
+                actual: None,
+                remediation_hint: Some(violation.fix_hint),
+                contract_id: None,
+                edge_type: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    policy_violations.extend(unique_export_violations);
+
     // Evaluate contract rules with affected_modules scoping
     let contract_violations = crate::rules::evaluate_contract_rules(&ctx, affected_modules)
         .into_iter()
@@ -431,6 +463,12 @@ pub(crate) fn analyze_project(
         .map(|issue| format!("{}: {}", issue.module, issue.message))
         .collect::<Vec<_>>();
 
+    let unique_export_config_issues = unique_export_report
+        .config_issues
+        .into_iter()
+        .map(|issue| format!("{}: {}", issue.module, issue.message))
+        .collect::<Vec<_>>();
+
     verdict::sort_policy_violations(&mut policy_violations);
 
     let canonical_import_ids = loaded
@@ -482,6 +520,7 @@ pub(crate) fn analyze_project(
         policy_violations,
         layer_config_issues,
         category_config_issues,
+        unique_export_config_issues,
         module_map_overlaps,
         parse_warning_count,
         graph_nodes: graph.node_count(),
@@ -560,6 +599,14 @@ pub(crate) fn prepare_analysis_for_loaded(
             "config",
             "invalid enforce-category rule configuration",
             artifacts.category_config_issues.clone(),
+        ));
+    }
+
+    if !artifacts.unique_export_config_issues.is_empty() {
+        return Err(runtime_error_json(
+            "config",
+            "invalid boundary.unique_export rule configuration",
+            artifacts.unique_export_config_issues.clone(),
         ));
     }
 

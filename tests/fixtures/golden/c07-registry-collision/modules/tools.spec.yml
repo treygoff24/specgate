@@ -2,5 +2,5 @@ version: "2.2"
 module: tools
 boundaries:
   path: src/**/*
-  # Note: Duplicate export detection requires a future 'boundary.unique_export' rule
+  # Note: boundary.unique_export enforces export name uniqueness; runtime value collisions are not detectable
 constraints: []

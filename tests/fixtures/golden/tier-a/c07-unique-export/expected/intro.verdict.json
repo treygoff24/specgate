@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "boundary.unique_export",
+      "from_module": "tools",
+      "to_module": "tools"
+    }
+  ]
+}

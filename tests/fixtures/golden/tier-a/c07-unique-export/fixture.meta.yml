@@ -1,0 +1,5 @@
+id: c07-unique-export
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.unique_export
+expected_count: 1

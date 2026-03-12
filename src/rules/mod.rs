@@ -23,6 +23,7 @@ pub mod dependencies;
 pub mod envelope;
 pub mod hygiene;
 pub mod layers;
+pub mod unique_export;
 
 pub use crate::spec::rule_ids::{
     BOUNDARY_CANONICAL_IMPORT_RULE_ID, BOUNDARY_CANONICAL_IMPORTS_RULE_ID_ALIAS,
@@ -53,6 +54,11 @@ pub use layers::{
     ENFORCE_LAYER_RULE_ID, EnforceLayerConfig, EnforceLayerReport, LayerConfigIssue,
     LayerConfigParseError, LayerViolation, evaluate_enforce_layer, layer_for_module,
     parse_enforce_layer_config,
+};
+pub use unique_export::{
+    UNIQUE_EXPORT_RULE_ID, UniqueExportConfig, UniqueExportConfigIssue,
+    UniqueExportConfigParseError, UniqueExportReport, UniqueExportViolation,
+    evaluate_unique_export, parse_unique_export_config,
 };
 
 /// Shared evaluation context passed into rules.

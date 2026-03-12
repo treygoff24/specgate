@@ -238,10 +238,12 @@ fn c06_duplicate_key_fix_validates() {
 
 // =============================================================================
 // C07: Registry Collision (Duplicate Tool Definitions)
-// Status: ⚠️ Future Enhancement - requires 'boundary.unique_export' rule
+// Status: ⚠️ Runtime data collision not detectable by static export-name analysis
+// The boundary.unique_export rule is now implemented but checks export names,
+// not runtime values. This fixture's export names are unique.
 // =============================================================================
 
-/// Test that C07 intro validates (rule not yet implemented)
+/// Test that C07 intro validates (runtime collision, not a static export-name issue)
 #[test]
 fn c07_registry_collision_intro_validates() {
     let temp = TempDir::new().expect("tempdir");
@@ -290,7 +292,9 @@ fn c07_registry_collision_intro_validates() {
     )
     .expect("copy config");
 
-    // NOTE: This will PASS until 'boundary.unique_export' rule is implemented
+    // Passes because no boundary.unique_export constraint is declared,
+    // and the export names (attachmentTools, noteTools, TOOL_DEFINITIONS) are unique.
+    // The runtime data collision (duplicate tool names) is not detectable by static analysis.
     let result = run([
         "specgate",
         "check",
@@ -301,7 +305,7 @@ fn c07_registry_collision_intro_validates() {
 
     assert_eq!(
         result.exit_code, EXIT_CODE_PASS,
-        "C07 intro should pass (future enhancement - rule not yet implemented): stdout={}, stderr={}",
+        "C07 intro should pass (runtime collision, not static export-name issue): stdout={}, stderr={}",
         result.stdout, result.stderr
     );
 }

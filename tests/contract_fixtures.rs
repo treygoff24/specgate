@@ -1429,3 +1429,214 @@ constraints: []
     );
     assert_eq!(violations[0]["to_module"].as_str(), Some("legacy/old"));
 }
+
+// =============================================================================
+// C07: Unique-Export and Visibility Edge Cases
+// =============================================================================
+
+/// C07: boundary.unique_export detects duplicate export names within a module.
+///
+/// When two files in the same module boundary both export the same name
+/// and the module has a `boundary.unique_export` constraint, the rule fires.
+#[test]
+fn c07_unique_export_detects_duplicate_exports_within_module() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/tools.spec.yml",
+        "version: \"2.2\"\nmodule: tools\nboundaries:\n  path: src/tools/**/*\nconstraints:\n  - rule: boundary.unique_export\n    severity: error\n",
+    );
+
+    write_file(
+        temp.path(),
+        "src/tools/alpha.ts",
+        "export const getData = () => 'alpha';\nexport const alpha = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/tools/beta.ts",
+        "export const getData = () => 'beta';\nexport const beta = 2;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "should detect duplicate export 'getData': stdout={}, stderr={}",
+        result.stdout, result.stderr
+    );
+
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert_eq!(violations.len(), 1);
+    assert_eq!(
+        violations[0]["rule"].as_str(),
+        Some("boundary.unique_export")
+    );
+    assert!(
+        violations[0]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("duplicate export 'getData'")
+    );
+}
+
+/// C07: boundary.unique_export passes when exports are unique.
+#[test]
+fn c07_unique_export_passes_when_exports_are_unique() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/tools.spec.yml",
+        "version: \"2.2\"\nmodule: tools\nboundaries:\n  path: src/tools/**/*\nconstraints:\n  - rule: boundary.unique_export\n    severity: error\n",
+    );
+
+    write_file(
+        temp.path(),
+        "src/tools/alpha.ts",
+        "export const alphaData = () => 'alpha';\nexport const alpha = 1;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/tools/beta.ts",
+        "export const betaData = () => 'beta';\nexport const beta = 2;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_PASS,
+        "unique exports should pass: stdout={}, stderr={}",
+        result.stdout, result.stderr
+    );
+}
+
+/// C07: boundary.unique_export is not active without the constraint.
+///
+/// When a module does NOT declare the boundary.unique_export constraint,
+/// duplicate exports within the module boundary do not cause violations.
+#[test]
+fn c07_unique_export_inactive_without_constraint() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/tools.spec.yml",
+        "version: \"2.2\"\nmodule: tools\nboundaries:\n  path: src/tools/**/*\nconstraints: []\n",
+    );
+
+    write_file(
+        temp.path(),
+        "src/tools/alpha.ts",
+        "export const getData = () => 'alpha';\n",
+    );
+    write_file(
+        temp.path(),
+        "src/tools/beta.ts",
+        "export const getData = () => 'beta';\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_PASS,
+        "without constraint, duplicate exports should not cause violations: stdout={}, stderr={}",
+        result.stdout, result.stderr
+    );
+}
+
+/// C07: boundary.unique_export with scoped exports only checks listed names.
+#[test]
+fn c07_unique_export_scoped_exports_filter() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/tools.spec.yml",
+        "version: \"2.2\"\nmodule: tools\nboundaries:\n  path: src/tools/**/*\nconstraints:\n  - rule: boundary.unique_export\n    severity: error\n    params:\n      exports:\n        - tracked\n",
+    );
+
+    // Both files export `untracked` (duplicate but not tracked) and `tracked` (tracked)
+    write_file(
+        temp.path(),
+        "src/tools/alpha.ts",
+        "export const untracked = 1;\nexport const tracked = 10;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/tools/beta.ts",
+        "export const untracked = 2;\nexport const tracked = 20;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "should detect duplicate tracked export only: stdout={}, stderr={}",
+        result.stdout, result.stderr
+    );
+
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert_eq!(
+        violations.len(),
+        1,
+        "only 'tracked' should be violated, not 'untracked'"
+    );
+    assert!(
+        violations[0]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("tracked")
+    );
+}
