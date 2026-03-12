@@ -157,7 +157,7 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 - Governance: pick one gate path for PRs - `specgate policy-diff --base <ref>` or `specgate check --since <ref> --deny-widenings`.
 - SARIF: add `specgate check --format sarif > specgate.sarif` when uploading results to code scanning platforms.
-- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json`; the canonical workflow now uploads ownership output. With `strict_ownership: true`, `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs, while `strict_ownership_level: warnings` gates all ownership findings. Both fields are also part of shipped config-governance diffing in `policy-diff`.
+- Ownership diagnostics: add `specgate doctor ownership --project-root . --format json`; the canonical workflow now uploads ownership output. With `strict_ownership: true`, `strict_ownership_level: errors` gates duplicate module ids, invalid ownership globs, and contradictory ownership globs, while `strict_ownership_level: warnings` gates all ownership findings. Both fields are also part of shipped config-governance diffing in `policy-diff`.
 - Fetch depth: when diffing against remote refs, use full history (`fetch-depth: 0`).
 
 ## Project Status
@@ -169,7 +169,10 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 - ✅ `specgate policy-diff` for policy evolution checks, including deterministic spec/config diffing, semantic rename/copy pairing, and opt-in cross-file compensation.
 - ✅ `specgate check --deny-widenings` for single-command governance enforcement when using `--since`.
 - ✅ SARIF reporting via `--format sarif` for CI security scanning workflows.
-- ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement, including `strict_ownership_level` runtime thresholds plus shipped config-governance coverage for `strict_ownership` and `strict_ownership_level`.
+- ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement, including `strict_ownership_level` runtime thresholds, config-governance coverage, and detection of contradictory ownership globs.
+- ✅ `specgate doctor governance-consistency` to detect contradictory namespace-intent across policies.
+- ✅ Rule Expansion: Implemented C02 pattern-aware variants, C06 category-level governance checks, and C07 unique-export/visibility boundaries.
+- ✅ Import Hygiene: Deep package-internal import hygiene scenario coverage to prevent public-API circumvention.
 - ✅ Full monorepo support including workspace discovery, nearest-tsconfig resolution, and `workspace_packages` reporting.
 - ✅ Expanded adversarial and parity fixtures plus coverage in contract/golden/CI test sets.
 - ✅ CLI refactor work for modular command structure and stable command-level diagnostics.
