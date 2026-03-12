@@ -1,0 +1,5 @@
+version: "2.2"
+module: legacy/old
+boundaries:
+  path: src/legacy/old/**/*
+constraints: []

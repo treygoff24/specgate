@@ -691,7 +691,9 @@ pub fn list_tracked_files_scoped(
         ));
     }
 
-    Ok(parse_ls_tree_name_only_z(&output.stdout)?.into_iter().collect())
+    Ok(parse_ls_tree_name_only_z(&output.stdout)?
+        .into_iter()
+        .collect())
 }
 
 pub fn parse_name_status_z(raw: &[u8]) -> Result<DiscoveredSpecFileChanges, PolicyGitError> {

@@ -110,7 +110,11 @@ fn check_fails_closed_on_malformed_workspace_config() {
 
     assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
     assert!(result.stdout.contains("\"status\": \"error\""));
-    assert!(result.stdout.contains("failed to discover workspace packages"));
+    assert!(
+        result
+            .stdout
+            .contains("failed to discover workspace packages")
+    );
 }
 
 #[test]

@@ -1094,3 +1094,338 @@ constraints: []
     let output = parse_json(&result.stdout);
     assert_eq!(output["status"], "ok");
 }
+
+// =============================================================================
+// Contract Test: C02 Pattern-Aware Boundary Rules
+// =============================================================================
+
+/// Test that `allow_imports_from` with glob patterns allows matching modules.
+///
+/// ## Contract
+///
+/// - Entries containing `*`, `?`, `[`, or `{` are treated as glob patterns
+/// - Entries without metacharacters are treated as exact module IDs
+/// - Pattern `shared/*` matches `shared/utils`, `shared/helpers` but not `shared/deep/nested`
+/// - Pattern `infra/**` matches any depth under `infra/`
+#[test]
+fn c02_pattern_aware_allow_imports_from_glob_allows_matching_modules() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from:
+    - "shared/*"
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/shared__utils.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: shared/utils
+boundaries:
+  path: src/shared/utils/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { util } from '../shared/utils/index';\nexport const app = util;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/shared/utils/index.ts",
+        "export const util = 1;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_PASS,
+        "glob pattern 'shared/*' should allow shared/utils"
+    );
+    let output = parse_json(&result.stdout);
+    assert_eq!(output["status"], "pass");
+}
+
+/// Test that `allow_imports_from` with glob patterns blocks non-matching modules.
+#[test]
+fn c02_pattern_aware_allow_imports_from_glob_blocks_non_matching() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from:
+    - "shared/*"
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/legacy__old.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: legacy/old
+boundaries:
+  path: src/legacy/old/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { old } from '../legacy/old/index';\nexport const app = old;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/legacy/old/index.ts",
+        "export const old = 1;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "legacy/old does not match shared/* pattern"
+    );
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert_eq!(violations.len(), 1);
+    assert_eq!(
+        violations[0]["rule"].as_str(),
+        Some("boundary.allow_imports_from")
+    );
+    assert_eq!(violations[0]["to_module"].as_str(), Some("legacy/old"));
+}
+
+/// Test that `never_imports` with glob patterns blocks matching modules.
+#[test]
+fn c02_pattern_aware_never_imports_glob_blocks_matching() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  never_imports:
+    - "legacy/*"
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/legacy__old.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: legacy/old
+boundaries:
+  path: src/legacy/old/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { old } from '../legacy/old/index';\nexport const app = old;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/legacy/old/index.ts",
+        "export const old = 1;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "legacy/old matches legacy/* never_imports pattern"
+    );
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert_eq!(violations.len(), 1);
+    assert_eq!(
+        violations[0]["rule"].as_str(),
+        Some("boundary.never_imports")
+    );
+}
+
+/// Test that mixed exact and glob entries both work correctly.
+#[test]
+fn c02_pattern_aware_mixed_exact_and_glob_entries() {
+    let temp = TempDir::new().expect("tempdir");
+
+    write_file(
+        temp.path(),
+        "modules/app.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: app
+boundaries:
+  path: src/app/**/*
+  allow_imports_from:
+    - core
+    - "shared/*"
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/core.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: core
+boundaries:
+  path: src/core/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/shared__utils.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: shared/utils
+boundaries:
+  path: src/shared/utils/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "modules/legacy__old.spec.yml",
+        &format!(
+            r#"
+version: "{SUPPORTED_SPEC_VERSION}"
+module: legacy/old
+boundaries:
+  path: src/legacy/old/**/*
+constraints: []
+"#,
+        ),
+    );
+
+    write_file(
+        temp.path(),
+        "src/app/main.ts",
+        "import { c } from '../core/index';\nimport { u } from '../shared/utils/index';\nimport { l } from '../legacy/old/index';\nexport const app = c + u + l;\n",
+    );
+    write_file(temp.path(), "src/core/index.ts", "export const c = 1;\n");
+    write_file(
+        temp.path(),
+        "src/shared/utils/index.ts",
+        "export const u = 2;\n",
+    );
+    write_file(
+        temp.path(),
+        "src/legacy/old/index.ts",
+        "export const l = 3;\n",
+    );
+
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
+    );
+
+    let result = run([
+        "specgate",
+        "check",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+        "--no-baseline",
+    ]);
+
+    assert_eq!(
+        result.exit_code, EXIT_CODE_POLICY_VIOLATIONS,
+        "legacy/old matches neither 'core' nor 'shared/*'"
+    );
+    let output = parse_json(&result.stdout);
+    let violations = output["violations"].as_array().expect("violations array");
+    assert_eq!(
+        violations.len(),
+        1,
+        "only legacy/old should be violated; core (exact) and shared/utils (glob) should pass"
+    );
+    assert_eq!(violations[0]["to_module"].as_str(), Some("legacy/old"));
+}

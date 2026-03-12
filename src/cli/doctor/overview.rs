@@ -31,7 +31,7 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
     let status = "ok".to_string();
 
     let workspace_packages = build_workspace_packages_info(&loaded.project_root, &loaded.config);
-    let findings = match canonical_import_findings(&loaded) {
+    let findings = match canonical_import_findings(loaded) {
         Ok(findings) => findings,
         Err(error) => {
             return runtime_error_json(

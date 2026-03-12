@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "boundary.allow_imports_from",
+      "from_module": "app",
+      "to_module": "legacy/old"
+    }
+  ]
+}

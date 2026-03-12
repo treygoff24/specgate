@@ -1,0 +1,8 @@
+commands:
+  install: echo "No install needed for Rust"
+  build: cargo build
+  test: cargo test
+  lint: cargo clippy -- -D warnings
+  format: cargo fmt -- --check
+
+services: {}

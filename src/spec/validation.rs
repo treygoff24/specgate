@@ -399,8 +399,7 @@ fn validate_no_circular_deps_constraint(
         report.push_error(
             spec,
             format!(
-                "invalid no-circular-deps scope value; expected one of {:?}. Remediation: set `params.scope` to one of the supported strings.",
-                VALID_CIRCULAR_SCOPE_VALUES
+                "invalid no-circular-deps scope value; expected one of {VALID_CIRCULAR_SCOPE_VALUES:?}. Remediation: set `params.scope` to one of the supported strings."
             ),
         );
         return;
@@ -410,8 +409,7 @@ fn validate_no_circular_deps_constraint(
         report.push_error(
             spec,
             format!(
-                "invalid no-circular-deps scope '{}'; expected one of {:?}. Remediation: set `params.scope` to `internal`, `external`, or `both`.",
-                scope, VALID_CIRCULAR_SCOPE_VALUES
+                "invalid no-circular-deps scope '{scope}'; expected one of {VALID_CIRCULAR_SCOPE_VALUES:?}. Remediation: set `params.scope` to `internal`, `external`, or `both`."
             ),
         );
     }
@@ -1120,7 +1118,9 @@ mod tests {
         let report = validate_specs(&[spec]);
         assert!(report.has_errors());
         assert!(report.errors().iter().any(|issue| {
-            issue.message.contains("invalid no-circular-deps scope value")
+            issue
+                .message
+                .contains("invalid no-circular-deps scope value")
         }));
     }
 }

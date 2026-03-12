@@ -1,0 +1,5 @@
+id: c02-pattern-aware
+tier: A
+maps_from_tier_b: C02
+target_rule: boundary.allow_imports_from
+expected_count: 1

@@ -419,7 +419,8 @@ fn find_matching_files(ctx: &RuleContext<'_>, matcher: &globset::GlobMatcher) ->
         .files()
         .into_iter()
         .filter_map(|node| {
-            let relative_str = crate::deterministic::normalize_repo_relative(&canonical_root, &node.path);
+            let relative_str =
+                crate::deterministic::normalize_repo_relative(&canonical_root, &node.path);
             matcher.is_match(&relative_str).then(|| node.path.clone())
         })
         .collect()

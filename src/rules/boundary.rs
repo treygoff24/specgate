@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::GlobSet;
+use globset::{Glob, GlobSet};
 
 use crate::deterministic::normalize_repo_relative;
 use crate::graph::{DependencyEdge, EdgeKind};
@@ -238,8 +238,11 @@ struct ImporterBoundaryCheck<'a> {
 }
 
 fn check_importer_side(request: ImporterBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
-    let never_set = as_set(&request.importer_boundaries.never_imports);
-    if never_set.contains(request.provider_module) {
+    // Pattern-aware never_imports check (supports glob patterns)
+    if matches_module_pattern(
+        request.provider_module,
+        &request.importer_boundaries.never_imports,
+    ) {
         violations.push(build_violation(
             "boundary.never_imports",
             format!(
@@ -256,11 +259,13 @@ fn check_importer_side(request: ImporterBoundaryCheck<'_>, violations: &mut Vec<
     }
 
     if let Some(allow_imports_from) = request.importer_boundaries.allow_imports_from.as_deref() {
-        let allow_set = as_set(allow_imports_from);
-        if !allow_set.contains(request.provider_module) {
-            let type_allow_set = as_set(&request.importer_boundaries.allow_type_imports_from);
+        // Pattern-aware allow_imports_from check (supports glob patterns)
+        if !matches_module_pattern(request.provider_module, allow_imports_from) {
             let type_only_carve_out = request.edge_kind == EdgeKind::TypeOnlyImport
-                && type_allow_set.contains(request.provider_module);
+                && matches_module_pattern(
+                    request.provider_module,
+                    &request.importer_boundaries.allow_type_imports_from,
+                );
 
             if !type_only_carve_out {
                 violations.push(build_violation(
@@ -313,8 +318,11 @@ struct ProviderBoundaryCheck<'a> {
 }
 
 fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
-    let deny_set = as_set(&request.provider_boundaries.deny_imported_by);
-    if deny_set.contains(request.importer_module) {
+    // Pattern-aware deny_imported_by check (supports glob patterns)
+    if matches_module_pattern(
+        request.importer_module,
+        &request.provider_boundaries.deny_imported_by,
+    ) {
         violations.push(build_violation(
             "boundary.deny_imported_by",
             format!(
@@ -330,14 +338,18 @@ fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<
         return;
     }
 
-    let allow_set = as_set(&request.provider_boundaries.allow_imported_by);
-    if !allow_set.is_empty() && !allow_set.contains(request.importer_module) {
+    // Pattern-aware allow_imported_by check (supports glob patterns)
+    if has_module_patterns(&request.provider_boundaries.allow_imported_by)
+        && !matches_module_pattern(
+            request.importer_module,
+            &request.provider_boundaries.allow_imported_by,
+        )
+    {
         violations.push(build_violation(
             "boundary.allow_imported_by",
             format!(
                 "module '{}' only allows imports from {:?}",
-                request.provider_module,
-                request.provider_boundaries.allow_imported_by
+                request.provider_module, request.provider_boundaries.allow_imported_by
             ),
             request.from_file,
             Some(request.to_file),
@@ -351,8 +363,11 @@ fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<
     match request.provider_boundaries.visibility_or_default() {
         Visibility::Public => {}
         Visibility::Internal => {
-            let friends = as_set(&request.provider_boundaries.friend_modules);
-            if !friends.contains(request.importer_module) {
+            // Pattern-aware friend_modules check (supports glob patterns)
+            if !matches_module_pattern(
+                request.importer_module,
+                &request.provider_boundaries.friend_modules,
+            ) {
                 violations.push(build_violation(
                     "boundary.visibility.internal",
                     format!(
@@ -448,8 +463,40 @@ fn import_position(
     })
 }
 
-fn as_set(values: &[String]) -> BTreeSet<&str> {
-    values.iter().map(String::as_str).collect()
+/// Returns true when `s` contains glob metacharacters (`*`, `?`, `[`, `{`).
+fn contains_glob_meta(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[') || s.contains('{')
+}
+
+/// Check whether `module_id` matches any entry in `patterns`.
+///
+/// Entries without glob metacharacters are compared by exact (trimmed) equality.
+/// Entries containing `*`, `?`, `[`, or `{` are compiled as glob patterns and
+/// matched against the module id.  Invalid glob patterns are silently skipped
+/// (the user will receive separate config-validation feedback).
+fn matches_module_pattern(module_id: &str, patterns: &[String]) -> bool {
+    for pattern in patterns {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if contains_glob_meta(trimmed) {
+            if let Ok(glob) = Glob::new(trimmed) {
+                let matcher = glob.compile_matcher();
+                if matcher.is_match(module_id) {
+                    return true;
+                }
+            }
+        } else if trimmed == module_id {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check whether `patterns` contains any non-empty entry (exact or glob).
+fn has_module_patterns(patterns: &[String]) -> bool {
+    patterns.iter().any(|p| !p.trim().is_empty())
 }
 
 pub fn is_canonical_import_rule_id(rule_id: &str) -> bool {
@@ -1134,5 +1181,372 @@ export const x = local;
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
+    }
+
+    // === Pattern-aware boundary tests ===
+
+    #[test]
+    fn pattern_allow_imports_from_glob_allows_matching_modules() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { u } from '../shared/utils/index';\nimport { h } from '../shared/helpers/index';\nexport const x = u + h;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/shared/utils/index.ts",
+            "export const u = 1;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/shared/helpers/index.ts",
+            "export const h = 2;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec!["shared/*".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries(
+                "shared/utils",
+                "src/shared/utils/**/*",
+                Boundaries::default(),
+            ),
+            spec_with_boundaries(
+                "shared/helpers",
+                "src/shared/helpers/**/*",
+                Boundaries::default(),
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(
+            violations.is_empty(),
+            "glob pattern 'shared/*' should allow shared/utils and shared/helpers"
+        );
+    }
+
+    #[test]
+    fn pattern_allow_imports_from_glob_blocks_non_matching_modules() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { l } from '../legacy/old/index';\nexport const x = l;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/legacy/old/index.ts",
+            "export const l = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec!["shared/*".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("legacy/old", "src/legacy/old/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.allow_imports_from");
+        assert_eq!(violations[0].to_module.as_deref(), Some("legacy/old"));
+    }
+
+    #[test]
+    fn pattern_never_imports_glob_blocks_matching_modules() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { l } from '../legacy/db/index';\nexport const x = l;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/legacy/db/index.ts",
+            "export const l = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    never_imports: vec!["legacy/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("legacy/db", "src/legacy/db/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.never_imports");
+    }
+
+    #[test]
+    fn pattern_never_imports_glob_allows_non_matching_modules() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { c } from '../core/api/index';\nexport const x = c;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/core/api/index.ts",
+            "export const c = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    never_imports: vec!["legacy/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("core/api", "src/core/api/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(
+            violations.is_empty(),
+            "core/api does not match legacy/* pattern"
+        );
+    }
+
+    #[test]
+    fn pattern_deny_imported_by_glob_blocks_matching_importers() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/ext/plugin/main.ts",
+            "import { s } from '../../secret/index';\nexport const x = s;\n",
+        );
+        write_test_file(temp.path(), "src/secret/index.ts", "export const s = 1;\n");
+
+        let specs = vec![
+            spec_with_boundaries("ext/plugin", "src/ext/plugin/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "secret",
+                "src/secret/**/*",
+                Boundaries {
+                    deny_imported_by: vec!["ext/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.deny_imported_by");
+    }
+
+    #[test]
+    fn pattern_friend_modules_glob_allows_matching_importers() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/team/alpha/main.ts",
+            "import { i } from '../../internal/index';\nexport const x = i;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/internal/index.ts",
+            "export const i = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries("team/alpha", "src/team/alpha/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "internal",
+                "src/internal/**/*",
+                Boundaries {
+                    visibility: Some(Visibility::Internal),
+                    friend_modules: vec!["team/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(
+            violations.is_empty(),
+            "team/alpha should match team/* friend pattern"
+        );
+    }
+
+    #[test]
+    fn pattern_friend_modules_glob_blocks_non_matching_importers() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/stranger/main.ts",
+            "import { i } from '../internal/index';\nexport const x = i;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/internal/index.ts",
+            "export const i = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries("stranger", "src/stranger/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "internal",
+                "src/internal/**/*",
+                Boundaries {
+                    visibility: Some(Visibility::Internal),
+                    friend_modules: vec!["team/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.visibility.internal");
+    }
+
+    #[test]
+    fn pattern_double_star_matches_deeply_nested_modules() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { d } from '../infra/db/postgres/index';\nexport const x = d;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/infra/db/postgres/index.ts",
+            "export const d = 1;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec!["infra/**".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries(
+                "infra/db/postgres",
+                "src/infra/db/postgres/**/*",
+                Boundaries::default(),
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(
+            violations.is_empty(),
+            "infra/** should match deeply nested infra/db/postgres"
+        );
+    }
+
+    #[test]
+    fn pattern_mixed_exact_and_glob_entries_both_work() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { c } from '../core/index';\nimport { u } from '../shared/utils/index';\nimport { l } from '../legacy/old/index';\nexport const x = c + u + l;\n",
+        );
+        write_test_file(temp.path(), "src/core/index.ts", "export const c = 1;\n");
+        write_test_file(
+            temp.path(),
+            "src/shared/utils/index.ts",
+            "export const u = 2;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/legacy/old/index.ts",
+            "export const l = 3;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec!["core".to_string(), "shared/*".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("core", "src/core/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "shared/utils",
+                "src/shared/utils/**/*",
+                Boundaries::default(),
+            ),
+            spec_with_boundaries("legacy/old", "src/legacy/old/**/*", Boundaries::default()),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "boundary.allow_imports_from");
+        assert_eq!(violations[0].to_module.as_deref(), Some("legacy/old"));
+    }
+
+    #[test]
+    fn pattern_type_imports_from_glob_carve_out() {
+        let temp = TempDir::new().expect("tempdir");
+
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import type { T } from '../types/shared/index';\nexport const x: T = 'ok';\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/types/shared/index.ts",
+            "export type T = string;\n",
+        );
+
+        let specs = vec![
+            spec_with_boundaries(
+                "app",
+                "src/app/**/*",
+                Boundaries {
+                    allow_imports_from: Some(vec![]),
+                    allow_type_imports_from: vec!["types/*".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries(
+                "types/shared",
+                "src/types/shared/**/*",
+                Boundaries::default(),
+            ),
+        ];
+
+        let violations = run_engine(&temp, SpecConfig::default(), specs);
+        assert!(
+            violations.is_empty(),
+            "type import from types/shared should match types/* carve-out"
+        );
     }
 }

@@ -481,9 +481,8 @@ mod tests {
             "{\"name\":\"root\",\"workspaces\":17}",
         );
 
-        let error =
-            discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
-                .expect_err("workspace discovery should fail");
+        let error = discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
+            .expect_err("workspace discovery should fail");
 
         assert!(
             error.to_string().contains("workspaces"),
@@ -525,9 +524,8 @@ mod tests {
             "{\"workspaces\":[\"packages/*\"]}",
         );
 
-        let packages =
-            discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
-                .expect("workspace discovery should succeed");
+        let packages = discover_workspace_packages_strict(temp.path(), &SpecConfig::default())
+            .expect("workspace discovery should succeed");
 
         assert!(
             packages.is_empty(),

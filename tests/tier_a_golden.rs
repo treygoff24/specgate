@@ -60,6 +60,10 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "a10-provider-deny-imported-by",
             near_miss_variant: None,
         },
+        TierAFixture {
+            id: "c02-pattern-aware",
+            near_miss_variant: None,
+        },
     ]
 }
 

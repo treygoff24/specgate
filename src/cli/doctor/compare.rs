@@ -22,7 +22,7 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
     let loaded = &prepared.loaded;
     let artifacts = &prepared.artifacts;
 
-    let focus = match build_doctor_compare_focus(&loaded, &artifacts, &args) {
+    let focus = match build_doctor_compare_focus(loaded, artifacts, &args) {
         Ok(focus) => focus,
         Err(error) => {
             return runtime_error_json(
