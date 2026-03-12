@@ -1,0 +1,98 @@
+{
+  "flowId": "rule-checks",
+  "testedAt": "2026-03-12T12:50:00Z",
+  "toolsUsed": ["cargo run"],
+  "assertions": {
+    "VAL-RULE-001": {
+      "status": "pass",
+      "evidence": {
+        "introRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c02-pattern-aware/intro/ --format json --no-baseline",
+          "exitCode": 1,
+          "status": "fail",
+          "totalViolations": 1,
+          "violation": {
+            "rule": "boundary.allow_imports_from",
+            "severity": "error",
+            "message": "module 'app' is not allowed to import from 'legacy/old'",
+            "from_module": "app",
+            "to_module": "legacy/old",
+            "from_file": "src/app/main.ts",
+            "to_file": "src/legacy/old/index.ts"
+          }
+        },
+        "fixRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c02-pattern-aware/fix/ --format json --no-baseline",
+          "exitCode": 0,
+          "status": "pass",
+          "totalViolations": 0,
+          "violations": []
+        },
+        "humanOutput": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c02-pattern-aware/intro/ --format human --no-baseline",
+          "exitCode": 1,
+          "readable": true,
+          "containsViolationDetails": true,
+          "snippet": "✗ error[boundary.allow_imports_from] [NEW] module 'app' is not allowed to import from 'legacy/old'\n  Location: src/app/main.ts:2:0\n  Target: src/legacy/old/index.ts\n  Modules: app → legacy/old"
+        }
+      }
+    },
+    "VAL-RULE-002": {
+      "status": "pass",
+      "evidence": {
+        "introRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c06-category-gov/intro/ --format json --no-baseline",
+          "exitCode": 1,
+          "status": "fail",
+          "totalViolations": 1,
+          "violation": {
+            "rule": "enforce-category",
+            "severity": "error",
+            "message": "forbidden cross-category import: module 'auth/login' (category 'auth') imports 'billing/invoices' (category 'billing') via '../../billing/invoices/index'; category 'domains' isolation policy forbids this",
+            "from_module": "auth/login",
+            "to_module": "billing/invoices",
+            "from_file": "src/auth/login/index.ts",
+            "to_file": "src/billing/invoices/index.ts"
+          }
+        },
+        "fixRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c06-category-gov/fix/ --format json --no-baseline",
+          "exitCode": 0,
+          "status": "pass",
+          "totalViolations": 0,
+          "violations": []
+        }
+      }
+    },
+    "VAL-RULE-003": {
+      "status": "pass",
+      "evidence": {
+        "introRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c07-unique-export/intro/ --format json --no-baseline",
+          "exitCode": 1,
+          "status": "fail",
+          "totalViolations": 1,
+          "violation": {
+            "rule": "boundary.unique_export",
+            "severity": "error",
+            "message": "duplicate export 'getData' in module 'tools' found in 2 files: src/tools/alpha.ts, src/tools/beta.ts",
+            "from_module": "tools",
+            "to_module": "tools",
+            "from_file": "src/tools/alpha.ts",
+            "to_file": "src/tools/beta.ts"
+          }
+        },
+        "fixRun": {
+          "command": "cargo run -- check --project-root tests/fixtures/golden/tier-a/c07-unique-export/fix/ --format json --no-baseline",
+          "exitCode": 0,
+          "status": "pass",
+          "totalViolations": 0,
+          "violations": []
+        }
+      }
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 3 assertions (VAL-RULE-001, VAL-RULE-002, VAL-RULE-003): all 3 passed. Each intro fixture produced exactly 1 violation with correct rule/module names and exit code 1; each fix fixture produced 0 violations with exit code 0. Human-readable output verified for C02 intro — clear and deterministic."
+}
