@@ -709,12 +709,12 @@ In `235fa86`, the `detect_contradictory_globs` function has three detection stra
 
 ### Priority 2 — Major (fix before next minor release)
 
-| # | Finding | Files | Effort |
-|---|---------|-------|--------|
-| 5 | M3: Fix hardcoded severity across 3 rules | `src/cli/analysis.rs` (3 locations) | M |
-| 6 | M2: Pre-compile glob patterns in BoundaryMatcherCache | `src/rules/boundary.rs` | M |
-| 7 | D4: Add CLI integration tests for governance-consistency | `src/cli/doctor/governance_consistency.rs` | M |
-| 8 | N13: Fix README inaccuracies | `README.md` | S |
+| # | Finding | Files | Effort | Status |
+|---|---------|-------|--------|--------|
+| 5 | M3: Fix hardcoded severity across 3 rules | `src/cli/analysis.rs` (3 locations) | M | DONE — severity lookup via severity_for_constraint_rule, 3 tests |
+| 6 | M2: Pre-compile glob patterns in BoundaryMatcherCache | `src/rules/boundary.rs` | M | DONE — CompiledPattern enum + ModulePatternCache, 10 tests |
+| 7 | D4: Add CLI integration tests for governance-consistency | `tests/governance_consistency_integration.rs` | M | DONE — 7 integration tests covering all CLI paths |
+| 8 | N13: Fix README inaccuracies | `README.md` | S | DONE — 3 lines corrected |
 
 ### Priority 3 — Moderate (address in next sprint)
 

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet};
+use globset::{Glob, GlobMatcher, GlobSet};
 
 use crate::deterministic::normalize_repo_relative;
 use crate::graph::{DependencyEdge, EdgeKind};
@@ -36,11 +36,63 @@ enum PublicApiMatcher {
     Invalid,
 }
 
+/// A pre-compiled module pattern — either an exact string or a compiled glob.
+#[derive(Debug)]
+enum CompiledPattern {
+    Exact(String),
+    Glob(GlobMatcher),
+}
+
+/// Pre-compiled pattern sets for a single module's boundary fields.
+#[derive(Debug, Default)]
+struct ModulePatternCache {
+    never_imports: Vec<CompiledPattern>,
+    allow_imports_from: Vec<CompiledPattern>,
+    allow_type_imports_from: Vec<CompiledPattern>,
+    deny_imported_by: Vec<CompiledPattern>,
+    allow_imported_by: Vec<CompiledPattern>,
+    friend_modules: Vec<CompiledPattern>,
+}
+
 #[derive(Debug)]
 struct BoundaryMatcherCache {
     canonical_root: PathBuf,
     test_matcher: Option<GlobSet>,
     public_api_by_module: BTreeMap<String, PublicApiMatcher>,
+    module_patterns: BTreeMap<String, ModulePatternCache>,
+}
+
+/// Compile a slice of raw pattern strings into `CompiledPattern` entries.
+///
+/// Empty (after trimming) entries are skipped. Entries containing glob
+/// metacharacters are compiled via `Glob::new`; invalid globs are silently
+/// skipped (validation.rs surfaces these separately). Plain strings become
+/// `Exact` entries.
+fn compile_module_patterns(patterns: &[String]) -> Vec<CompiledPattern> {
+    patterns
+        .iter()
+        .filter_map(|p| {
+            let trimmed = p.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if contains_glob_meta(trimmed) {
+                Glob::new(trimmed)
+                    .ok()
+                    .map(|g| CompiledPattern::Glob(g.compile_matcher()))
+            } else {
+                Some(CompiledPattern::Exact(trimmed.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// Returns `true` if `module_id` matches any entry in `patterns`.
+fn matches_compiled_patterns(module_id: &str, patterns: &[CompiledPattern]) -> bool {
+    patterns.iter().any(|p| match p {
+        CompiledPattern::Exact(s) => s == module_id,
+        CompiledPattern::Glob(matcher) => matcher.is_match(module_id),
+    })
 }
 
 pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
@@ -106,12 +158,18 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
             // - Importer-side and provider-side checks each short-circuit internally.
             // - Both sides are intentionally evaluated for the same edge so callers can
             //   receive both policy violations when both modules are misconfigured.
+            let importer_pattern_cache =
+                matcher_cache.module_patterns.get(importer_module);
+            let provider_pattern_cache =
+                matcher_cache.module_patterns.get(provider_module);
+
             if !importer_is_test || importer_boundaries.enforce_in_tests {
                 check_importer_side(
                     ImporterBoundaryCheck {
                         edge_kind: edge.kind,
                         importer_module,
                         importer_boundaries: &importer_boundaries,
+                        importer_pattern_cache,
                         provider_module,
                         provider_file: &edge.to,
                         public_api_matcher: matcher_cache.public_api_by_module.get(provider_module),
@@ -130,6 +188,7 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
                         importer_module,
                         provider_module,
                         provider_boundaries: &provider_boundaries,
+                        provider_pattern_cache,
                         edge_kind: edge.kind,
                         from_file: &node.path,
                         to_file: &edge.to,
@@ -209,10 +268,29 @@ fn build_matcher_cache(
         }
     }
 
+    let mut module_patterns = BTreeMap::new();
+    for (module, spec) in spec_by_module {
+        let b = spec.boundaries.as_ref().cloned().unwrap_or_default();
+        let allow_imports_from_patterns = b
+            .allow_imports_from
+            .as_deref()
+            .unwrap_or(&[]);
+        let cache = ModulePatternCache {
+            never_imports: compile_module_patterns(&b.never_imports),
+            allow_imports_from: compile_module_patterns(allow_imports_from_patterns),
+            allow_type_imports_from: compile_module_patterns(&b.allow_type_imports_from),
+            deny_imported_by: compile_module_patterns(&b.deny_imported_by),
+            allow_imported_by: compile_module_patterns(&b.allow_imported_by),
+            friend_modules: compile_module_patterns(&b.friend_modules),
+        };
+        module_patterns.insert((*module).to_string(), cache);
+    }
+
     BoundaryMatcherCache {
         canonical_root,
         test_matcher,
         public_api_by_module,
+        module_patterns,
     }
 }
 
@@ -229,6 +307,7 @@ struct ImporterBoundaryCheck<'a> {
     edge_kind: EdgeKind,
     importer_module: &'a str,
     importer_boundaries: &'a Boundaries,
+    importer_pattern_cache: Option<&'a ModulePatternCache>,
     provider_module: &'a str,
     provider_file: &'a Path,
     public_api_matcher: Option<&'a PublicApiMatcher>,
@@ -238,11 +317,16 @@ struct ImporterBoundaryCheck<'a> {
 }
 
 fn check_importer_side(request: ImporterBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
-    // Pattern-aware never_imports check (supports glob patterns)
-    if matches_module_pattern(
-        request.provider_module,
-        &request.importer_boundaries.never_imports,
-    ) {
+    let never_imports_hit = if let Some(cache) = request.importer_pattern_cache {
+        matches_compiled_patterns(request.provider_module, &cache.never_imports)
+    } else {
+        matches_module_pattern(
+            request.provider_module,
+            &request.importer_boundaries.never_imports,
+        )
+    };
+
+    if never_imports_hit {
         violations.push(build_violation(
             "boundary.never_imports",
             format!(
@@ -258,14 +342,32 @@ fn check_importer_side(request: ImporterBoundaryCheck<'_>, violations: &mut Vec<
         return;
     }
 
-    if let Some(allow_imports_from) = request.importer_boundaries.allow_imports_from.as_deref() {
-        // Pattern-aware allow_imports_from check (supports glob patterns)
-        if !matches_module_pattern(request.provider_module, allow_imports_from) {
-            let type_only_carve_out = request.edge_kind == EdgeKind::TypeOnlyImport
-                && matches_module_pattern(
-                    request.provider_module,
-                    &request.importer_boundaries.allow_type_imports_from,
-                );
+    if request.importer_boundaries.allow_imports_from.is_some() {
+        let allowed = if let Some(cache) = request.importer_pattern_cache {
+            matches_compiled_patterns(request.provider_module, &cache.allow_imports_from)
+        } else {
+            let allow_imports_from = request
+                .importer_boundaries
+                .allow_imports_from
+                .as_deref()
+                .unwrap_or(&[]);
+            matches_module_pattern(request.provider_module, allow_imports_from)
+        };
+
+        if !allowed {
+            let type_only_carve_out = request.edge_kind == EdgeKind::TypeOnlyImport && {
+                if let Some(cache) = request.importer_pattern_cache {
+                    matches_compiled_patterns(
+                        request.provider_module,
+                        &cache.allow_type_imports_from,
+                    )
+                } else {
+                    matches_module_pattern(
+                        request.provider_module,
+                        &request.importer_boundaries.allow_type_imports_from,
+                    )
+                }
+            };
 
             if !type_only_carve_out {
                 violations.push(build_violation(
@@ -311,6 +413,7 @@ struct ProviderBoundaryCheck<'a> {
     importer_module: &'a str,
     provider_module: &'a str,
     provider_boundaries: &'a Boundaries,
+    provider_pattern_cache: Option<&'a ModulePatternCache>,
     edge_kind: EdgeKind,
     from_file: &'a Path,
     to_file: &'a Path,
@@ -318,11 +421,16 @@ struct ProviderBoundaryCheck<'a> {
 }
 
 fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<RuleViolation>) {
-    // Pattern-aware deny_imported_by check (supports glob patterns)
-    if matches_module_pattern(
-        request.importer_module,
-        &request.provider_boundaries.deny_imported_by,
-    ) {
+    let deny_hit = if let Some(cache) = request.provider_pattern_cache {
+        matches_compiled_patterns(request.importer_module, &cache.deny_imported_by)
+    } else {
+        matches_module_pattern(
+            request.importer_module,
+            &request.provider_boundaries.deny_imported_by,
+        )
+    };
+
+    if deny_hit {
         violations.push(build_violation(
             "boundary.deny_imported_by",
             format!(
@@ -338,13 +446,21 @@ fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<
         return;
     }
 
-    // Pattern-aware allow_imported_by check (supports glob patterns)
-    if has_module_patterns(&request.provider_boundaries.allow_imported_by)
-        && !matches_module_pattern(
+    let allow_imported_by_non_empty = if let Some(cache) = request.provider_pattern_cache {
+        !cache.allow_imported_by.is_empty()
+    } else {
+        has_module_patterns(&request.provider_boundaries.allow_imported_by)
+    };
+    let allow_imported_by_hit = if let Some(cache) = request.provider_pattern_cache {
+        matches_compiled_patterns(request.importer_module, &cache.allow_imported_by)
+    } else {
+        matches_module_pattern(
             request.importer_module,
             &request.provider_boundaries.allow_imported_by,
         )
-    {
+    };
+
+    if allow_imported_by_non_empty && !allow_imported_by_hit {
         violations.push(build_violation(
             "boundary.allow_imported_by",
             format!(
@@ -363,11 +479,15 @@ fn check_provider_side(request: ProviderBoundaryCheck<'_>, violations: &mut Vec<
     match request.provider_boundaries.visibility_or_default() {
         Visibility::Public => {}
         Visibility::Internal => {
-            // Pattern-aware friend_modules check (supports glob patterns)
-            if !matches_module_pattern(
-                request.importer_module,
-                &request.provider_boundaries.friend_modules,
-            ) {
+            let friend_hit = if let Some(cache) = request.provider_pattern_cache {
+                matches_compiled_patterns(request.importer_module, &cache.friend_modules)
+            } else {
+                matches_module_pattern(
+                    request.importer_module,
+                    &request.provider_boundaries.friend_modules,
+                )
+            };
+            if !friend_hit {
                 violations.push(build_violation(
                     "boundary.visibility.internal",
                     format!(
@@ -1548,5 +1668,120 @@ export const x = local;
             violations.is_empty(),
             "type import from types/shared should match types/* carve-out"
         );
+    }
+
+    // === CompiledPattern / ModulePatternCache unit tests ===
+
+    #[test]
+    fn compiled_pattern_exact_matches_exact_string() {
+        let patterns = vec![CompiledPattern::Exact("foo".to_string())];
+        assert!(matches_compiled_patterns("foo", &patterns));
+    }
+
+    #[test]
+    fn compiled_pattern_exact_does_not_match_different_string() {
+        let patterns = vec![CompiledPattern::Exact("foo".to_string())];
+        assert!(!matches_compiled_patterns("bar", &patterns));
+    }
+
+    #[test]
+    fn compiled_pattern_glob_matches_within_prefix() {
+        let matcher = Glob::new("shared/*").unwrap().compile_matcher();
+        let patterns = vec![CompiledPattern::Glob(matcher)];
+        assert!(matches_compiled_patterns("shared/utils", &patterns));
+    }
+
+    #[test]
+    fn compiled_pattern_glob_does_not_match_different_prefix() {
+        let matcher = Glob::new("shared/*").unwrap().compile_matcher();
+        let patterns = vec![CompiledPattern::Glob(matcher)];
+        assert!(!matches_compiled_patterns("other/utils", &patterns));
+    }
+
+    #[test]
+    fn matches_compiled_patterns_mixed_exact_and_glob() {
+        let glob_matcher = Glob::new("shared/*").unwrap().compile_matcher();
+        let patterns = vec![
+            CompiledPattern::Exact("core".to_string()),
+            CompiledPattern::Glob(glob_matcher),
+        ];
+        assert!(matches_compiled_patterns("core", &patterns));
+        assert!(matches_compiled_patterns("shared/utils", &patterns));
+        assert!(!matches_compiled_patterns("other", &patterns));
+    }
+
+    #[test]
+    fn matches_compiled_patterns_empty_vec_returns_false() {
+        assert!(!matches_compiled_patterns("anything", &[]));
+    }
+
+    #[test]
+    fn compile_patterns_skips_empty_entries() {
+        let raw = vec!["".to_string(), "  ".to_string(), "core".to_string()];
+        let compiled = compile_module_patterns(&raw);
+        assert_eq!(compiled.len(), 1);
+        assert!(matches!(compiled[0], CompiledPattern::Exact(_)));
+    }
+
+    #[test]
+    fn compile_patterns_skips_invalid_globs() {
+        let raw = vec!["[invalid".to_string(), "valid".to_string()];
+        let compiled = compile_module_patterns(&raw);
+        assert_eq!(compiled.len(), 1);
+        assert!(matches!(compiled[0], CompiledPattern::Exact(_)));
+    }
+
+    #[test]
+    fn compile_patterns_produces_glob_for_glob_meta_pattern() {
+        let raw = vec!["shared/*".to_string()];
+        let compiled = compile_module_patterns(&raw);
+        assert_eq!(compiled.len(), 1);
+        assert!(matches!(compiled[0], CompiledPattern::Glob(_)));
+    }
+
+    #[test]
+    fn module_pattern_cache_built_in_build_matcher_cache_is_populated() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(temp.path(), "src/a/index.ts", "export const a = 1;\n");
+        write_test_file(temp.path(), "src/b/index.ts", "export const b = 2;\n");
+
+        let specs = vec![
+            spec_with_boundaries(
+                "a",
+                "src/a/**/*",
+                Boundaries {
+                    never_imports: vec!["b".to_string()],
+                    allow_imports_from: Some(vec!["shared/*".to_string()]),
+                    ..Boundaries::default()
+                },
+            ),
+            spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
+        ];
+
+        let mut config = SpecConfig::default();
+        config.spec_dirs = vec![".".to_string()];
+        let mut resolver =
+            ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let graph =
+            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("graph");
+        let ctx = RuleContext {
+            project_root: temp.path(),
+            config: &config,
+            specs: &specs,
+            graph: &graph,
+        };
+        let spec_by_module = ctx
+            .specs
+            .iter()
+            .map(|s| (s.module.as_str(), s))
+            .collect::<BTreeMap<_, _>>();
+        let mut violations = Vec::new();
+        let cache = build_matcher_cache(&ctx, &spec_by_module, &mut violations);
+
+        let a_cache = cache.module_patterns.get("a").expect("module a must be in cache");
+        assert_eq!(a_cache.never_imports.len(), 1, "never_imports should have 1 compiled entry");
+        assert_eq!(a_cache.allow_imports_from.len(), 1, "allow_imports_from should have 1 compiled glob entry");
+        assert!(matches!(a_cache.never_imports[0], CompiledPattern::Exact(_)));
+        assert!(matches!(a_cache.allow_imports_from[0], CompiledPattern::Glob(_)));
     }
 }

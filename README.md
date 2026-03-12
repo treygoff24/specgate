@@ -170,9 +170,9 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 - ✅ `specgate check --deny-widenings` for single-command governance enforcement when using `--since`.
 - ✅ SARIF reporting via `--format sarif` for CI security scanning workflows.
 - ✅ `specgate doctor ownership` for ownership diagnostics and strict CI-friendly enforcement, including `strict_ownership_level` runtime thresholds, config-governance coverage, and detection of contradictory ownership globs.
-- ✅ `specgate doctor governance-consistency` to detect contradictory namespace-intent across policies.
-- ✅ Rule Expansion: Implemented C02 pattern-aware variants, C06 category-level governance checks, and C07 unique-export/visibility boundaries.
-- ✅ Import Hygiene: Deep package-internal import hygiene scenario coverage to prevent public-API circumvention.
+- ✅ `specgate doctor governance-consistency` to detect contradictory boundary rules: allow/never import overlaps, allow/deny imported-by overlaps, private modules with allow-lists, cross-module duplicate contract IDs, and conflicting contract import references.
+- ✅ Rule Expansion: Implemented C02 pattern-aware boundary variants (glob support in boundary entry fields), C06 category-level governance checks, and C07 export-name uniqueness enforcement within module boundaries.
+- ✅ Import Hygiene: Expanded test coverage for `boundary.public_api` deep-path enforcement to prevent circumvention of public API boundaries via deeply nested internal imports.
 - ✅ Full monorepo support including workspace discovery, nearest-tsconfig resolution, and `workspace_packages` reporting.
 - ✅ Expanded adversarial and parity fixtures plus coverage in contract/golden/CI test sets.
 - ✅ CLI refactor work for modular command structure and stable command-level diagnostics.

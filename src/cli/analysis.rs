@@ -18,7 +18,7 @@ use super::{
     AnalysisArtifacts, CliRunResult, LoadedProject, boundary_violation_severity,
     build_blast_radius, default_hygiene_rule_severity, dependency_violation_severity,
     derive_blast_edge_pairs, load_project_for_analysis, normalize_repo_relative,
-    runtime_error_json,
+    runtime_error_json, severity_for_constraint_rule,
 };
 
 #[derive(Debug, Clone)]
@@ -335,7 +335,12 @@ pub(crate) fn analyze_project(
         .into_iter()
         .map(|violation| PolicyViolation {
             rule: crate::rules::ENFORCE_LAYER_RULE_ID.to_string(),
-            severity: Severity::Error,
+            severity: spec_by_module
+                .get(violation.from_module.as_str())
+                .and_then(|spec| {
+                    severity_for_constraint_rule(spec, crate::rules::ENFORCE_LAYER_RULE_ID)
+                })
+                .unwrap_or(Severity::Error),
             message: violation.message,
             from_file: violation.from_file,
             to_file: Some(violation.to_file),
@@ -358,7 +363,12 @@ pub(crate) fn analyze_project(
         .into_iter()
         .map(|violation| PolicyViolation {
             rule: crate::rules::ENFORCE_CATEGORY_RULE_ID.to_string(),
-            severity: Severity::Error,
+            severity: spec_by_module
+                .get(violation.from_module.as_str())
+                .and_then(|spec| {
+                    severity_for_constraint_rule(spec, crate::rules::ENFORCE_CATEGORY_RULE_ID)
+                })
+                .unwrap_or(Severity::Error),
             message: violation.message,
             from_file: violation.from_file,
             to_file: Some(violation.to_file),
@@ -388,7 +398,12 @@ pub(crate) fn analyze_project(
             let second_file = violation.files.get(1).cloned();
             PolicyViolation {
                 rule: crate::rules::UNIQUE_EXPORT_RULE_ID.to_string(),
-                severity: Severity::Error,
+                severity: spec_by_module
+                    .get(violation.module.as_str())
+                    .and_then(|spec| {
+                        severity_for_constraint_rule(spec, crate::rules::UNIQUE_EXPORT_RULE_ID)
+                    })
+                    .unwrap_or(Severity::Error),
                 message: violation.message,
                 from_file: first_file,
                 to_file: second_file,
@@ -621,7 +636,7 @@ pub(crate) fn prepare_analysis_for_loaded(
 mod tests {
     use crate::spec::config::UnresolvedEdgePolicy;
 
-    use super::build_edge_classification;
+    use super::{analyze_project, build_edge_classification};
 
     #[test]
     fn ignored_unresolved_import_not_counted_in_classification() {
@@ -817,5 +832,258 @@ mod tests {
             edges.is_empty(),
             "external-like unresolved imports should not emit hygiene edges"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // M3: severity should be read from the spec constraint, not hardcoded Error
+    // ---------------------------------------------------------------------------
+
+    fn minimal_loaded_project(
+        temp: &tempfile::TempDir,
+        specs: Vec<crate::spec::SpecFile>,
+    ) -> crate::cli::LoadedProject {
+        use crate::cli::LoadedProject;
+        use crate::spec::{SpecConfig, ValidationReport};
+        LoadedProject {
+            project_root: temp.path().to_path_buf(),
+            config: SpecConfig::default(),
+            specs,
+            validation: ValidationReport { issues: Vec::new() },
+        }
+    }
+
+    #[test]
+    fn enforce_layer_violation_respects_warning_severity() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::spec::{Boundaries, Constraint, Severity, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("data")).expect("mkdir data");
+        fs::create_dir_all(temp.path().join("ui")).expect("mkdir ui");
+
+        fs::write(
+            temp.path().join("data/store.ts"),
+            "import { comp } from '../ui/comp';\nexport const store = comp;\n",
+        )
+        .expect("write store");
+        fs::write(
+            temp.path().join("ui/comp.ts"),
+            "export const comp = 'comp';\n",
+        )
+        .expect("write comp");
+
+        // layers = ["ui", "data"]: ui is index 0, data is index 1.
+        // data importing ui means to_index(0) < from_index(1) → violation.
+        let layer_params = serde_json::json!({ "layers": ["ui", "data"] });
+
+        let data_spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "data/store".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("data/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: vec![Constraint {
+                rule: "enforce-layer".to_string(),
+                params: layer_params,
+                severity: Severity::Warning,
+                message: None,
+            }],
+            spec_path: None,
+        };
+
+        let ui_spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "ui/comp".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("ui/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: Vec::new(),
+            spec_path: None,
+        };
+
+        let loaded = minimal_loaded_project(&temp, vec![data_spec, ui_spec]);
+        let artifacts = analyze_project(&loaded, None).expect("analyze");
+
+        let layer_violations: Vec<_> = artifacts
+            .policy_violations
+            .iter()
+            .filter(|v| v.rule == "enforce-layer")
+            .collect();
+
+        assert!(
+            !layer_violations.is_empty(),
+            "expected at least one enforce-layer violation"
+        );
+        for v in &layer_violations {
+            assert_eq!(
+                v.severity,
+                Severity::Warning,
+                "enforce-layer severity should be Warning when spec declares it, got {:?}",
+                v.severity
+            );
+        }
+    }
+
+    #[test]
+    fn enforce_category_violation_respects_warning_severity() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::spec::{Boundaries, Constraint, Severity, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("data")).expect("mkdir data");
+        fs::create_dir_all(temp.path().join("ui")).expect("mkdir ui");
+
+        fs::write(
+            temp.path().join("data/store.ts"),
+            "import { comp } from '../ui/comp';\nexport const store = comp;\n",
+        )
+        .expect("write store");
+        fs::write(
+            temp.path().join("ui/comp.ts"),
+            "export const comp = 'comp';\n",
+        )
+        .expect("write comp");
+
+        // Both "data" and "ui" categories are in the governed member set.
+        // data/store (category "data") importing ui/comp (category "ui") crosses
+        // categories within the governed set → violation.
+        let category_params =
+            serde_json::json!({ "category": "backend", "members": ["data", "ui"] });
+
+        let data_spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "data/store".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("data/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: vec![Constraint {
+                rule: "enforce-category".to_string(),
+                params: category_params,
+                severity: Severity::Warning,
+                message: None,
+            }],
+            spec_path: None,
+        };
+
+        let ui_spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "ui/comp".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("ui/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: Vec::new(),
+            spec_path: None,
+        };
+
+        let loaded = minimal_loaded_project(&temp, vec![data_spec, ui_spec]);
+        let artifacts = analyze_project(&loaded, None).expect("analyze");
+
+        let category_violations: Vec<_> = artifacts
+            .policy_violations
+            .iter()
+            .filter(|v| v.rule == "enforce-category")
+            .collect();
+
+        assert!(
+            !category_violations.is_empty(),
+            "expected at least one enforce-category violation"
+        );
+        for v in &category_violations {
+            assert_eq!(
+                v.severity,
+                Severity::Warning,
+                "enforce-category severity should be Warning when spec declares it, got {:?}",
+                v.severity
+            );
+        }
+    }
+
+    #[test]
+    fn unique_export_violation_respects_warning_severity() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        use crate::spec::{Boundaries, Constraint, Severity, SpecFile};
+
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+
+        // Two files in the same module both export `Button` → unique_export violation.
+        fs::write(
+            temp.path().join("src/button-a.ts"),
+            "export const Button = 'ButtonA';\n",
+        )
+        .expect("write button-a");
+        fs::write(
+            temp.path().join("src/button-b.ts"),
+            "export const Button = 'ButtonB';\n",
+        )
+        .expect("write button-b");
+
+        let spec = SpecFile {
+            version: "2.2".to_string(),
+            module: "ui".to_string(),
+            package: None,
+            import_id: None,
+            import_ids: Vec::new(),
+            description: None,
+            boundaries: Some(Boundaries {
+                path: Some("src/**/*".to_string()),
+                ..Boundaries::default()
+            }),
+            constraints: vec![Constraint {
+                rule: "boundary.unique_export".to_string(),
+                params: serde_json::json!({}),
+                severity: Severity::Warning,
+                message: None,
+            }],
+            spec_path: None,
+        };
+
+        let loaded = minimal_loaded_project(&temp, vec![spec]);
+        let artifacts = analyze_project(&loaded, None).expect("analyze");
+
+        let unique_export_violations: Vec<_> = artifacts
+            .policy_violations
+            .iter()
+            .filter(|v| v.rule == "boundary.unique_export")
+            .collect();
+
+        assert!(
+            !unique_export_violations.is_empty(),
+            "expected at least one boundary.unique_export violation"
+        );
+        for v in &unique_export_violations {
+            assert_eq!(
+                v.severity,
+                Severity::Warning,
+                "boundary.unique_export severity should be Warning when spec declares it, got {:?}",
+                v.severity
+            );
+        }
     }
 }
