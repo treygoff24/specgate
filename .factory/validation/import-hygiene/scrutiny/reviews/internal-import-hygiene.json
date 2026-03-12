@@ -1,0 +1,33 @@
+{
+  "featureId": "internal-import-hygiene",
+  "milestone": "import-hygiene",
+  "verdict": "pass",
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "file": "tests/fixtures/golden/tier-a/import-hygiene/expected/intro.verdict.json",
+      "line": null,
+      "severity": "non_blocking",
+      "description": "The two violations in intro.verdict.json are identical objects (same rule, from_module, to_module) with no distinguishing field like file path or import specifier. While this matches the current golden test contract schema, adding a differentiator (e.g. the import target path) would make golden assertions more precise and easier to debug if one violation regresses independently."
+    },
+    {
+      "file": "src/rules/hygiene.rs",
+      "line": 700,
+      "severity": "non_blocking",
+      "description": "The bidirectional_mode_blocks_test_importing_deep_internal_non_public_files test asserts on HYGIENE_TEST_IN_PRODUCTION_RULE_ID rather than boundary.public_api. This is correct behavior (the bidirectional test boundary rule emits hygiene.test_in_production violations when a test imports non-public files cross-module), but the test name mentioning 'deep internal non-public files' could mislead readers into thinking it tests the boundary.public_api rule. This is a minor naming/documentation concern, not a correctness issue."
+    }
+  ],
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The feature adds tests exercising existing rule logic (deep third-party imports, bidirectional test boundaries) with deeper nesting scenarios, plus a Tier A fixture for boundary.public_api. The pattern of pairing unit tests in the rule module with a Tier A golden fixture for integration coverage is well-established and correctly followed here.",
+      "evidence": "4 new unit tests in src/rules/hygiene.rs + import-hygiene Tier A fixture registered in tests/tier_a_golden.rs, consistent with existing fixtures like c07-unique-export."
+    },
+    {
+      "area": "skills",
+      "observation": "Worker followed the rust-worker skill procedure correctly: understood requirements, explored code, used TDD approach with fixture-first development, ran cargo test/clippy/fmt, and manually verified CLI output for both intro and fix variants.",
+      "evidence": "Handoff shows all 5 verification commands passed (cargo test 461 tests, clippy clean, fmt clean, CLI intro exit 1 with 2 violations, CLI fix exit 0). skillFeedback.followedProcedure is true with no deviations."
+    }
+  ],
+  "summary": "The internal-import-hygiene feature is well-implemented. It adds 4 targeted unit tests in hygiene.rs covering deep third-party import depth counting, scoped package blocking with max_depth=0, bidirectional test boundary enforcement for deeply nested non-public files, and a direct test of the subpath_depth utility function. The Tier A golden fixture (import-hygiene) correctly validates that boundary.public_api blocks deep internal file imports (internal/helpers/format.ts, internal/services/auth/token.ts) in the intro variant and passes when imports are routed through the public API entrypoint in the fix variant. All 10 hygiene unit tests pass, the tier_a_golden integration test passes, and the code is clean (clippy + fmt). The implementation adds only test coverage for existing rule logic with deeper nesting scenarios — no new production logic was needed, which is appropriate. No blocking issues found."
+}
