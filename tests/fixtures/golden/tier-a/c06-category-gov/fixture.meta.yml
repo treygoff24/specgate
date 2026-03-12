@@ -1,0 +1,5 @@
+id: c06-category-gov
+tier: A
+maps_from_tier_b: C06
+target_rule: enforce-category
+expected_count: 1

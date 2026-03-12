@@ -1,0 +1,5 @@
+version: "2.2"
+module: billing/invoices
+boundaries:
+  path: src/billing/invoices/**/*
+constraints: []

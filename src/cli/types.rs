@@ -56,6 +56,7 @@ pub(crate) struct LoadedProject {
 pub(crate) struct AnalysisArtifacts {
     pub(crate) policy_violations: Vec<PolicyViolation>,
     pub(crate) layer_config_issues: Vec<String>,
+    pub(crate) category_config_issues: Vec<String>,
     pub(crate) module_map_overlaps: Vec<ModuleMapOverlap>,
     pub(crate) parse_warning_count: usize,
     pub(crate) graph_nodes: usize,

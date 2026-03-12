@@ -16,6 +16,7 @@ pub(super) struct DoctorOutput {
     pub(super) parse_warning_count: usize,
     pub(super) policy_violation_count: usize,
     pub(super) layer_config_issues: Vec<String>,
+    pub(super) category_config_issues: Vec<String>,
     pub(super) module_map_overlaps: Vec<DoctorOverlapOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) findings: Vec<DoctorFindingOutput>,

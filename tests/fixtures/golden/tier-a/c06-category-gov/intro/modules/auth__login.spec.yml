@@ -1,0 +1,12 @@
+version: "2.2"
+module: auth/login
+boundaries:
+  path: src/auth/login/**/*
+constraints:
+  - rule: enforce-category
+    severity: error
+    params:
+      category: domains
+      members:
+        - auth
+        - billing

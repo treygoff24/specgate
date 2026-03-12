@@ -1,0 +1,11 @@
+{
+  "status": "fail",
+  "expected_count": 1,
+  "violations": [
+    {
+      "rule": "enforce-category",
+      "from_module": "auth/login",
+      "to_module": "billing/invoices"
+    }
+  ]
+}

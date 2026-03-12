@@ -64,6 +64,10 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "c02-pattern-aware",
             near_miss_variant: None,
         },
+        TierAFixture {
+            id: "c06-category-gov",
+            near_miss_variant: None,
+        },
     ]
 }
 

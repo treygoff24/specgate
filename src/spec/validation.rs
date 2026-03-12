@@ -28,6 +28,7 @@ const KNOWN_CONSTRAINT_RULES: &[&str] = &[
     "boundary.contract_ref_invalid",
     BOUNDARY_CONTRACT_VERSION_MISMATCH_RULE_ID,
     "boundary.envelope_missing",
+    "enforce-category",
 ];
 
 const VALID_CIRCULAR_SCOPE_VALUES: &[&str] = &["internal", "external", "both"];

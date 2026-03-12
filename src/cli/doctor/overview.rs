@@ -59,6 +59,7 @@ pub(super) fn handle_doctor_overview(args: CommonProjectArgs) -> CliRunResult {
         parse_warning_count: artifacts.parse_warning_count,
         policy_violation_count: artifacts.policy_violations.len(),
         layer_config_issues: artifacts.layer_config_issues.clone(),
+        category_config_issues: artifacts.category_config_issues.clone(),
         module_map_overlaps: overlaps,
         findings,
         workspace_packages,

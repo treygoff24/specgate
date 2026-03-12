@@ -16,6 +16,7 @@ fn severity_sort_rank(severity: Option<Severity>) -> u8 {
 }
 
 pub mod boundary;
+pub mod categories;
 pub mod circular;
 pub mod contracts;
 pub mod dependencies;
@@ -30,6 +31,11 @@ pub use crate::spec::rule_ids::{
     BOUNDARY_MATCH_UNRESOLVED_RULE_ID,
 };
 pub use boundary::is_canonical_import_rule_id;
+pub use categories::{
+    CategoryConfigIssue, CategoryConfigParseError, CategoryViolation, ENFORCE_CATEGORY_RULE_ID,
+    EnforceCategoryConfig, EnforceCategoryReport, category_for_module, evaluate_enforce_category,
+    parse_enforce_category_config,
+};
 pub use circular::{
     CircularDependencyViolation, CircularScopeParam, NO_CIRCULAR_DEPS_RULE_ID,
     evaluate_no_circular_deps,

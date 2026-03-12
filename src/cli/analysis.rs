@@ -7,8 +7,8 @@ use crate::resolver::{ModuleResolver, ModuleResolverOptions};
 use crate::rules::HYGIENE_UNRESOLVED_IMPORT_RULE_ID;
 use crate::rules::boundary::evaluate_boundary_rules;
 use crate::rules::{
-    DependencyRule, RuleContext, RuleWithResolver, evaluate_enforce_layer, evaluate_hygiene_rules,
-    evaluate_no_circular_deps,
+    DependencyRule, RuleContext, RuleWithResolver, evaluate_enforce_category,
+    evaluate_enforce_layer, evaluate_hygiene_rules, evaluate_no_circular_deps,
 };
 use crate::spec::Severity;
 use crate::verdict::{self, EdgeClassification, PolicyViolation, UnresolvedEdge, VerdictEdge};
@@ -351,6 +351,29 @@ pub(crate) fn analyze_project(
         .collect::<Vec<_>>();
     policy_violations.extend(layer_violations);
 
+    let category_report = evaluate_enforce_category(&loaded.specs, &graph);
+    let category_violations = category_report
+        .violations
+        .into_iter()
+        .map(|violation| PolicyViolation {
+            rule: crate::rules::ENFORCE_CATEGORY_RULE_ID.to_string(),
+            severity: Severity::Error,
+            message: violation.message,
+            from_file: violation.from_file,
+            to_file: Some(violation.to_file),
+            from_module: Some(violation.from_module),
+            to_module: Some(violation.to_module),
+            line: None,
+            column: None,
+            expected: None,
+            actual: None,
+            remediation_hint: Some(violation.fix_hint),
+            contract_id: None,
+            edge_type: None,
+        })
+        .collect::<Vec<_>>();
+    policy_violations.extend(category_violations);
+
     // Evaluate contract rules with affected_modules scoping
     let contract_violations = crate::rules::evaluate_contract_rules(&ctx, affected_modules)
         .into_iter()
@@ -397,6 +420,12 @@ pub(crate) fn analyze_project(
     policy_violations.extend(hygiene_violations);
 
     let layer_config_issues = layer_report
+        .config_issues
+        .into_iter()
+        .map(|issue| format!("{}: {}", issue.module, issue.message))
+        .collect::<Vec<_>>();
+
+    let category_config_issues = category_report
         .config_issues
         .into_iter()
         .map(|issue| format!("{}: {}", issue.module, issue.message))
@@ -452,6 +481,7 @@ pub(crate) fn analyze_project(
     Ok(AnalysisArtifacts {
         policy_violations,
         layer_config_issues,
+        category_config_issues,
         module_map_overlaps,
         parse_warning_count,
         graph_nodes: graph.node_count(),
@@ -522,6 +552,14 @@ pub(crate) fn prepare_analysis_for_loaded(
             "config",
             "invalid enforce-layer rule configuration",
             artifacts.layer_config_issues.clone(),
+        ));
+    }
+
+    if !artifacts.category_config_issues.is_empty() {
+        return Err(runtime_error_json(
+            "config",
+            "invalid enforce-category rule configuration",
+            artifacts.category_config_issues.clone(),
         ));
     }
 
