@@ -622,4 +622,136 @@ mod tests {
         let violations = run_hygiene(&temp, config, specs);
         assert!(violations.is_empty());
     }
+
+    #[test]
+    fn deep_third_party_import_catches_deeply_nested_subpaths() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { a } from 'pkg/internal/services/auth/token';\nimport { b } from 'pkg/utils';\nexport const x = a + b;\n",
+        );
+
+        let specs = vec![spec_with_boundaries(
+            "app",
+            "src/app/**/*",
+            Boundaries::default(),
+        )];
+        let config = SpecConfig {
+            import_hygiene: ImportHygieneConfig {
+                deny_deep_imports: vec![DenyDeepImportEntry {
+                    pattern: "pkg".to_string(),
+                    max_depth: 1,
+                    severity: Some(Severity::Error),
+                }],
+                ..ImportHygieneConfig::default()
+            },
+            ..SpecConfig::default()
+        };
+
+        let violations = run_hygiene(&temp, config, specs);
+        // "pkg/internal/services/auth/token" has depth 4, exceeds max_depth 1
+        // "pkg/utils" has depth 1, within max_depth 1
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, HYGIENE_DEEP_THIRD_PARTY_RULE_ID);
+        assert!(
+            violations[0]
+                .message
+                .contains("pkg/internal/services/auth/token")
+        );
+    }
+
+    #[test]
+    fn deep_third_party_import_with_zero_max_depth_blocks_all_subpaths() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(
+            temp.path(),
+            "src/app/main.ts",
+            "import { a } from '@scope/lib/deep/nested/file';\nimport { b } from '@scope/lib/shallow';\nexport const x = a + b;\n",
+        );
+
+        let specs = vec![spec_with_boundaries(
+            "app",
+            "src/app/**/*",
+            Boundaries::default(),
+        )];
+        let config = SpecConfig {
+            import_hygiene: ImportHygieneConfig {
+                deny_deep_imports: vec![DenyDeepImportEntry {
+                    pattern: "@scope/lib".to_string(),
+                    max_depth: 0,
+                    severity: None,
+                }],
+                ..ImportHygieneConfig::default()
+            },
+            ..SpecConfig::default()
+        };
+
+        let violations = run_hygiene(&temp, config, specs);
+        // Both imports have subpaths exceeding max_depth 0
+        assert_eq!(violations.len(), 2);
+        assert!(
+            violations
+                .iter()
+                .all(|v| v.rule == HYGIENE_DEEP_THIRD_PARTY_RULE_ID)
+        );
+    }
+
+    #[test]
+    fn bidirectional_mode_blocks_test_importing_deep_internal_non_public_files() {
+        let temp = TempDir::new().expect("tempdir");
+        write_test_file(
+            temp.path(),
+            "src/app/feature.test.ts",
+            "import { helper } from '../core/internal/services/helpers/deep';\nexport const val = helper;\n",
+        );
+        write_test_file(
+            temp.path(),
+            "src/core/internal/services/helpers/deep.ts",
+            "export const helper = 42;\n",
+        );
+        write_test_file(temp.path(), "src/core/index.ts", "export const api = 1;\n");
+
+        let specs = vec![
+            spec_with_boundaries("app", "src/app/**/*", Boundaries::default()),
+            spec_with_boundaries(
+                "core",
+                "src/core/**/*",
+                Boundaries {
+                    public_api: vec!["src/core/index.ts".to_string()],
+                    ..Boundaries::default()
+                },
+            ),
+        ];
+        let config = SpecConfig {
+            import_hygiene: ImportHygieneConfig {
+                test_boundary: TestBoundaryConfig {
+                    enabled: true,
+                    mode: TestBoundaryMode::Bidirectional,
+                    test_patterns: Vec::new(),
+                },
+                ..ImportHygieneConfig::default()
+            },
+            ..SpecConfig::default()
+        };
+
+        let violations = run_hygiene(&temp, config, specs);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, HYGIENE_TEST_IN_PRODUCTION_RULE_ID);
+        assert!(violations[0].message.contains("non-public file"));
+        assert!(
+            violations[0]
+                .message
+                .contains("internal/services/helpers/deep.ts")
+        );
+    }
+
+    #[test]
+    fn subpath_depth_counts_nested_segments_correctly() {
+        assert_eq!(subpath_depth("a"), 1);
+        assert_eq!(subpath_depth("a/b"), 2);
+        assert_eq!(subpath_depth("a/b/c"), 3);
+        assert_eq!(subpath_depth("internal/services/auth/token"), 4);
+        assert_eq!(subpath_depth(""), 0);
+    }
 }

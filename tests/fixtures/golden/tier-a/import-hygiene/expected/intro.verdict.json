@@ -1,0 +1,16 @@
+{
+  "status": "fail",
+  "expected_count": 2,
+  "violations": [
+    {
+      "rule": "boundary.public_api",
+      "from_module": "consumer",
+      "to_module": "provider"
+    },
+    {
+      "rule": "boundary.public_api",
+      "from_module": "consumer",
+      "to_module": "provider"
+    }
+  ]
+}

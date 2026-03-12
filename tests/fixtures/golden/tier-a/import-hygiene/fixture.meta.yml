@@ -1,0 +1,5 @@
+id: import-hygiene
+tier: A
+maps_from_tier_b: null
+target_rule: boundary.public_api
+expected_count: 2

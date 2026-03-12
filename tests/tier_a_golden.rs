@@ -72,6 +72,10 @@ fn fixtures() -> Vec<TierAFixture> {
             id: "c07-unique-export",
             near_miss_variant: None,
         },
+        TierAFixture {
+            id: "import-hygiene",
+            near_miss_variant: None,
+        },
     ]
 }
 
