@@ -1,6 +1,7 @@
 mod canonical;
 mod compare;
 mod focus;
+pub(crate) mod governance_consistency;
 mod overview;
 mod ownership;
 mod parity;
@@ -33,6 +34,8 @@ pub(crate) enum DoctorCommand {
     Compare(DoctorCompareArgs),
     /// Validate module ownership: detect overlaps, unclaimed files, orphaned specs.
     Ownership(ownership::DoctorOwnershipArgs),
+    /// Detect contradictory namespace-intent in spec governance configuration.
+    GovernanceConsistency(governance_consistency::DoctorGovernanceConsistencyArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -91,6 +94,9 @@ pub(super) fn handle_doctor(args: DoctorArgs) -> CliRunResult {
         Some(DoctorCommand::Compare(compare_args)) => compare::handle_doctor_compare(compare_args),
         Some(DoctorCommand::Ownership(ownership_args)) => {
             ownership::handle_doctor_ownership(ownership_args)
+        }
+        Some(DoctorCommand::GovernanceConsistency(gc_args)) => {
+            governance_consistency::handle_doctor_governance_consistency(gc_args)
         }
 
         None => overview::handle_doctor_overview(args.common),
