@@ -1,0 +1,50 @@
+{
+  "featureId": "doctor-namespace-intent",
+  "reviewedAt": "2026-03-12T18:20:00.000Z",
+  "commitId": "2282c4e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid implementation of `specgate doctor governance-consistency` that detects 5 categories of contradictory namespace-intent: allow/never import overlap, allow/deny imported_by overlap, private visibility with allow_imported_by, duplicate contract IDs, and conflicting imports_contract references. Both JSON and human-readable output formats are implemented correctly. The code follows existing doctor subcommand patterns (ownership.rs), uses BTreeMap for deterministic ordering, sorts and deduplicates conflicts, and handles error cases (project load failure, validation errors) consistently with sibling commands. 11 unit tests cover all conflict types, edge cases (no boundaries, empty specs), deterministic ordering, false positive prevention, and both output formats. All tests, clippy, and fmt pass clean.",
+    "issues": [
+      {
+        "file": "src/cli/doctor/mod.rs",
+        "line": 4,
+        "severity": "non_blocking",
+        "description": "Module `governance_consistency` is declared `pub(crate)` while all other doctor submodules (canonical, compare, focus, overview, ownership, parity, trace_io, trace_parser, trace_types, types) are private (`mod`). This visibility inconsistency exists so `GovernanceConflict` and `detect_governance_conflicts` can be used from outside the doctor module, but the ownership module achieves external access by placing its types in `spec::ownership` instead. Consider aligning with the existing pattern."
+      },
+      {
+        "file": "src/cli/doctor/governance_consistency.rs",
+        "severity": "non_blocking",
+        "description": "No CLI integration tests. The sibling ownership.rs has integration tests using `run([\"specgate\", \"doctor\", \"ownership\", ...])` with tempdir fixtures to verify CLI routing, argument parsing, and exit codes end-to-end. The governance_consistency tests are all inline unit tests that call `detect_governance_conflicts()` and `render_human()` directly. This means the clap argument wiring, exit code behavior, and JSON serialization path are only verified manually, not in CI. The mission AGENTS.md states 'Automated testing relies heavily on the integration test suite.'"
+      },
+      {
+        "file": "src/cli/doctor/governance_consistency.rs",
+        "line": 232,
+        "severity": "non_blocking",
+        "description": "The `imports_contract_conflict` detection only compares each reference against the first reference (`refs[0]`), not pairwise across all consumers. If consumers A, B, and C all reference the same contract with different settings, only A-vs-B and A-vs-C conflicts are reported, not B-vs-C. This is a minor gap that won't affect the common 2-consumer case but could miss conflicts in larger graphs."
+      },
+      {
+        "file": "src/cli/doctor/governance_consistency.rs",
+        "line": 225,
+        "severity": "non_blocking",
+        "description": "Direction and envelope values in conflict descriptions use Rust's `Debug` format (`format!(\"{:?}\", contract.direction)`) which produces strings like `Inbound`, `Required`. This works but couples user-facing output to Rust trait implementations. A dedicated `Display` impl or explicit string mapping would be more resilient to future refactors."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The mission AGENTS.md says 'Automated testing relies heavily on the integration test suite' and references tests/contract_fixtures.rs for programmatic testing. The worker used only inline unit tests for the governance_consistency feature, while the sibling ownership doctor command has proper CLI integration tests using the `run()` helper. This testing pattern discrepancy isn't documented clearly enough to guide workers toward integration-style tests for doctor subcommands.",
+      "evidence": "src/cli/doctor/ownership.rs tests use `crate::cli::run()` with tempdir fixtures. src/cli/doctor/governance_consistency.rs tests only call `detect_governance_conflicts()` directly. Mission AGENTS.md Testing section: 'Automated testing relies heavily on the integration test suite.'"
+    },
+    {
+      "area": "conventions",
+      "observation": "Doctor submodule visibility conventions are inconsistent. The new governance_consistency module is pub(crate) while all others are private. If future features need to reference GovernanceConflict externally, this sets an inconsistent precedent vs the ownership module pattern (which uses spec::ownership for external types).",
+      "evidence": "src/cli/doctor/mod.rs line 4: `pub(crate) mod governance_consistency` vs all other entries: `mod canonical`, `mod compare`, etc."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The implementation correctly fulfills VAL-DIAG-001: `specgate doctor governance-consistency` detects contradictory namespace-intent across 5 conflict categories with JSON and human-readable output. Code is clean, deterministic, and well-tested with 11 unit tests. Four non-blocking issues identified: pub(crate) visibility inconsistency with sibling modules, lack of CLI integration tests (only unit tests), incomplete pairwise comparison for 3+ imports_contract consumers, and Debug-format coupling in user-facing messages. None of these affect correctness for the stated requirements."
+}

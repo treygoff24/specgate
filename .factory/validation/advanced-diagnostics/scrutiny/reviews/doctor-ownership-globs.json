@@ -1,0 +1,40 @@
+{
+  "featureId": "doctor-ownership-globs",
+  "reviewedAt": "2026-03-12T18:30:00.000Z",
+  "commitId": "235fa86",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid implementation of contradictory ownership glob detection across three detection strategies (identical patterns, structural prefix overlap, file-witnessed overlap). The code is well-structured, thoroughly tested (15 new tests), deterministic, and correctly integrated into both human and JSON output paths. Contradictory globs are properly classified as error-level findings gating CI with strict_ownership. The existing test that would have been broken by the new behavior was correctly updated to use a simpler fixture.",
+    "issues": [
+      {
+        "file": "src/spec/ownership.rs",
+        "line": 290,
+        "severity": "non_blocking",
+        "description": "globs_structurally_overlap may produce false positives at path boundaries. For example, 'src/api/**' vs 'src/api-v2/**' would be flagged as overlapping because the literal prefix 'src/api' starts with 'src/api' (the shorter prefix). These are actually disjoint directory trees. A path-boundary-aware comparison (splitting on '/') would eliminate this edge case. Acceptable as-is since the diagnostic is conservative (over-reporting is preferable to under-reporting)."
+      },
+      {
+        "file": "src/spec/ownership.rs",
+        "line": 230,
+        "severity": "non_blocking",
+        "description": "The seen_pairs BTreeSet is redundant. Since the nested loop uses i < j, each (i, j) pair is visited exactly once. The contains/insert checks add minor overhead but never actually prevent a duplicate. Not harmful, just unnecessary code."
+      },
+      {
+        "file": null,
+        "line": null,
+        "severity": "non_blocking",
+        "description": "README.md describes strict_ownership_level: errors as gating 'duplicate module ids and invalid ownership globs' but now contradictory_globs is also an error-level finding. The README description is slightly stale. AGENTS.md says 'If a change affects CLI flags, verdict wording, or install/release behavior, update the operator docs in README.md in the same patch.' This is arguably a new finding type rather than changed behavior, so it's borderline."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "README.md line describing strict_ownership_level: errors gates 'duplicate module ids and invalid ownership globs' should now also mention 'contradictory ownership globs' since they are classified as error-level findings. AGENTS.md requires README updates when CLI output changes, though this is a new diagnostic addition rather than a change to existing output.",
+      "evidence": "README.md: 'strict_ownership_level: errors gates duplicate module ids and invalid ownership globs' — now incomplete after contradictory_globs was added as error-level in src/cli/doctor/ownership.rs:45"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The doctor-ownership-globs feature is well-implemented with comprehensive test coverage (10 unit tests + 5 integration tests), correct error-level classification, deterministic output, and proper JSON/human rendering. Three non-blocking issues noted: (1) structural overlap heuristic can produce false positives at path boundaries like src/api/** vs src/api-v2/**, (2) redundant seen_pairs dedup set, (3) README description of error-level findings is slightly stale. None of these block the feature."
+}

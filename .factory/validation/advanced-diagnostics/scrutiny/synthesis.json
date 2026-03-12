@@ -1,0 +1,40 @@
+{
+  "milestone": "advanced-diagnostics",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy -- -D warnings", "exitCode": 0 },
+    "format": { "passed": true, "command": "cargo fmt -- --check", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guidance that doctor subcommands should include CLI integration tests (using `crate::cli::run()` with tempdir fixtures), not just inline unit tests. The governance-consistency feature only has unit tests while the sibling ownership command has proper integration tests.",
+      "evidence": "doctor-namespace-intent review: src/cli/doctor/governance_consistency.rs tests only call detect_governance_conflicts() directly, while src/cli/doctor/ownership.rs tests use crate::cli::run() with tempdir fixtures for end-to-end CLI verification.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify doctor submodule visibility conventions: new doctor submodules should be declared as private `mod` (not `pub(crate) mod`) and expose external types through dedicated modules (e.g., src/spec/) if needed, following the ownership pattern.",
+      "evidence": "doctor-namespace-intent review: src/cli/doctor/mod.rs line 4 declares `pub(crate) mod governance_consistency` while all other doctor submodules are private `mod`. The ownership module achieves external access via src/spec/ownership.rs instead.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Remind workers that adding new error-level diagnostic findings to doctor subcommands should be accompanied by a README update to the relevant configuration option description, per the existing AGENTS.md rule about updating operator docs when CLI output changes.",
+      "evidence": "doctor-ownership-globs review: README.md describes strict_ownership_level: errors as gating 'duplicate module ids and invalid ownership globs' but contradictory_globs is now also error-level. AGENTS.md rule: 'If a change affects CLI flags, verdict wording, or install/release behavior, update the operator docs in README.md in the same patch.'",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}
