@@ -185,9 +185,10 @@ pub(crate) fn detect_governance_conflicts(specs: &[SpecFile]) -> Vec<GovernanceC
                 if contract.id.is_empty() {
                     continue;
                 }
-                let key = format!("{}:{}", spec.module, contract.id);
+                // Group by contract ID only (not namespaced by module) to detect cross-module collisions.
+                // Same-module duplicates are already caught by validation before this function runs.
                 contract_sources
-                    .entry(key)
+                    .entry(contract.id.clone())
                     .or_default()
                     .push(ContractSource {
                         provider_module: spec.module.clone(),
@@ -197,21 +198,33 @@ pub(crate) fn detect_governance_conflicts(specs: &[SpecFile]) -> Vec<GovernanceC
         }
     }
 
-    // Detect duplicate contract IDs within same module (namespace collision)
-    for (key, sources) in &contract_sources {
-        if sources.len() > 1 {
-            let spec_paths: Vec<String> =
-                sources.iter().filter_map(|s| s.spec_path.clone()).collect();
+    // Detect cross-module duplicate contract IDs: two or more distinct modules publishing the same
+    // contract ID string is a governance conflict. Same-module duplicates are handled by validation.
+    for (contract_id, sources) in &contract_sources {
+        // Collect the distinct modules that define this contract ID
+        let mut distinct_modules: Vec<&ContractSource> = Vec::new();
+        for source in sources {
+            if !distinct_modules
+                .iter()
+                .any(|s| s.provider_module == source.provider_module)
+            {
+                distinct_modules.push(source);
+            }
+        }
+        if distinct_modules.len() > 1 {
+            let module_names: Vec<&str> = distinct_modules
+                .iter()
+                .map(|s| s.provider_module.as_str())
+                .collect();
             conflicts.push(GovernanceConflict {
-                module: sources[0].provider_module.clone(),
+                module: distinct_modules[0].provider_module.clone(),
                 conflict_type: "duplicate_contract_id".to_string(),
                 description: format!(
-                    "Contract '{}' is defined {} times within module '{}'. Each contract ID must be unique within a module.",
-                    key,
-                    sources.len(),
-                    sources[0].provider_module,
+                    "Contract ID '{}' is published by multiple modules: [{}]. Each contract ID must be unique across modules.",
+                    contract_id,
+                    module_names.join(", "),
                 ),
-                spec_path: spec_paths.first().cloned(),
+                spec_path: distinct_modules[0].spec_path.clone(),
             });
         }
     }
@@ -243,27 +256,32 @@ pub(crate) fn detect_governance_conflicts(specs: &[SpecFile]) -> Vec<GovernanceC
 
     for (target_ref, refs) in &imports_contract_refs {
         if refs.len() > 1 {
-            // Check if the consumers have conflicting expectations
-            let first = &refs[0];
-            for other in &refs[1..] {
-                if first.direction != other.direction || first.envelope != other.envelope {
-                    conflicts.push(GovernanceConflict {
-                        module: target_ref.clone(),
-                        conflict_type: "imports_contract_conflict".to_string(),
-                        description: format!(
-                            "Conflicting imports_contract references to '{}': consumer '{}' (contract '{}', direction={}, envelope={}) vs consumer '{}' (contract '{}', direction={}, envelope={}).",
-                            target_ref,
-                            first.consumer_module,
-                            first.consumer_contract_id,
-                            first.direction,
-                            first.envelope,
-                            other.consumer_module,
-                            other.consumer_contract_id,
-                            other.direction,
-                            other.envelope,
-                        ),
-                        spec_path: first.spec_path.clone(),
-                    });
+            // Proper pairwise comparison: check every i < j pair so no conflict is silently missed.
+            // For example, given consumers [A, B, C] where A+B agree but C conflicts with B,
+            // comparing only A-vs-rest would miss the B-vs-C conflict.
+            for i in 0..refs.len() {
+                for j in (i + 1)..refs.len() {
+                    let a = &refs[i];
+                    let b = &refs[j];
+                    if a.direction != b.direction || a.envelope != b.envelope {
+                        conflicts.push(GovernanceConflict {
+                            module: target_ref.clone(),
+                            conflict_type: "imports_contract_conflict".to_string(),
+                            description: format!(
+                                "Conflicting imports_contract references to '{}': consumer '{}' (contract '{}', direction={}, envelope={}) vs consumer '{}' (contract '{}', direction={}, envelope={}).",
+                                target_ref,
+                                a.consumer_module,
+                                a.consumer_contract_id,
+                                a.direction,
+                                a.envelope,
+                                b.consumer_module,
+                                b.consumer_contract_id,
+                                b.direction,
+                                b.envelope,
+                            ),
+                            spec_path: a.spec_path.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -503,31 +521,39 @@ mod tests {
     }
 
     #[test]
-    fn detects_duplicate_contract_id_within_module() {
-        let specs = vec![make_spec(
-            "provider",
-            Some(Boundaries {
-                contracts: vec![
-                    BoundaryContract {
+    fn detects_duplicate_contract_id_across_modules() {
+        // Two distinct modules publishing the same contract ID — cross-module collision.
+        // Same-module duplicates are caught by validation (not this detector).
+        let specs = vec![
+            make_spec(
+                "provider_x",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
                         id: "dup_contract".to_string(),
                         contract: "contracts/a.json".to_string(),
                         direction: ContractDirection::Inbound,
                         r#match: ContractMatch::default(),
                         envelope: EnvelopeRequirement::Optional,
                         imports_contract: vec![],
-                    },
-                    BoundaryContract {
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "provider_y",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
                         id: "dup_contract".to_string(),
                         contract: "contracts/b.json".to_string(),
                         direction: ContractDirection::Outbound,
                         r#match: ContractMatch::default(),
                         envelope: EnvelopeRequirement::Required,
                         imports_contract: vec![],
-                    },
-                ],
-                ..Default::default()
-            }),
-        )];
+                    }],
+                    ..Default::default()
+                }),
+            ),
+        ];
 
         let conflicts = detect_governance_conflicts(&specs);
         assert_eq!(conflicts.len(), 1);
@@ -592,5 +618,208 @@ mod tests {
     fn human_output_no_conflicts() {
         let output = render_human(&[]);
         assert!(output.contains("No conflicts detected."));
+    }
+
+    // B1 tests: cross-module duplicate contract ID detection
+
+    #[test]
+    fn detects_cross_module_duplicate_contract_id() {
+        // module_a and module_b both publish contract ID "shared_api" — governance conflict
+        let specs = vec![
+            make_spec(
+                "module_a",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "shared_api".to_string(),
+                        contract: "contracts/a.json".to_string(),
+                        direction: ContractDirection::Outbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec![],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "module_b",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "shared_api".to_string(),
+                        contract: "contracts/b.json".to_string(),
+                        direction: ContractDirection::Inbound,
+                        envelope: EnvelopeRequirement::Optional,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec![],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "module_c",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "unique_api".to_string(),
+                        contract: "contracts/c.json".to_string(),
+                        direction: ContractDirection::Outbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec![],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+        ];
+
+        let conflicts = detect_governance_conflicts(&specs);
+        let dup_conflicts: Vec<_> = conflicts
+            .iter()
+            .filter(|c| c.conflict_type == "duplicate_contract_id")
+            .collect();
+        assert_eq!(
+            dup_conflicts.len(),
+            1,
+            "expected 1 cross-module duplicate_contract_id conflict, got: {conflicts:?}"
+        );
+        assert!(
+            dup_conflicts[0].description.contains("shared_api"),
+            "description should mention the contract id"
+        );
+        assert!(
+            dup_conflicts[0].description.contains("module_a")
+                || dup_conflicts[0].description.contains("module_b"),
+            "description should mention the conflicting modules"
+        );
+    }
+
+    #[test]
+    fn same_module_duplicate_contract_id_does_not_trigger_cross_module_detector() {
+        // Same module with duplicate contract IDs — handled by validation, NOT by this detector.
+        // After the fix, the key is grouped by contract.id only, but both entries are from the
+        // SAME module, so the cross-module check (2+ distinct modules) must NOT fire.
+        let specs = vec![make_spec(
+            "provider",
+            Some(Boundaries {
+                contracts: vec![
+                    BoundaryContract {
+                        id: "dup_contract".to_string(),
+                        contract: "contracts/a.json".to_string(),
+                        direction: ContractDirection::Inbound,
+                        envelope: EnvelopeRequirement::Optional,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec![],
+                    },
+                    BoundaryContract {
+                        id: "dup_contract".to_string(),
+                        contract: "contracts/b.json".to_string(),
+                        direction: ContractDirection::Outbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec![],
+                    },
+                ],
+                ..Default::default()
+            }),
+        )];
+
+        let conflicts = detect_governance_conflicts(&specs);
+        let dup_conflicts: Vec<_> = conflicts
+            .iter()
+            .filter(|c| c.conflict_type == "duplicate_contract_id")
+            .collect();
+        assert!(
+            dup_conflicts.is_empty(),
+            "same-module duplicates should NOT be flagged by cross-module detector: {conflicts:?}"
+        );
+    }
+
+    // B2 test: pairwise comparison for imports_contract conflicts
+
+    #[test]
+    fn detects_all_pairwise_imports_contract_conflicts() {
+        // Consumer A: Inbound + Required
+        // Consumer B: Inbound + Required  (agrees with A)
+        // Consumer C: Outbound + Optional (conflicts with both A and B)
+        // Current buggy code: finds A-vs-C (1 conflict)
+        // Fixed code: finds A-vs-C AND B-vs-C (at least 2 conflicts)
+        let specs = vec![
+            make_spec(
+                "consumer_a",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "contract_a".to_string(),
+                        contract: "contracts/a.json".to_string(),
+                        direction: ContractDirection::Inbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec!["provider:shared_api".to_string()],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "consumer_b",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "contract_b".to_string(),
+                        contract: "contracts/b.json".to_string(),
+                        direction: ContractDirection::Inbound,
+                        envelope: EnvelopeRequirement::Required,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec!["provider:shared_api".to_string()],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            make_spec(
+                "consumer_c",
+                Some(Boundaries {
+                    contracts: vec![BoundaryContract {
+                        id: "contract_c".to_string(),
+                        contract: "contracts/c.json".to_string(),
+                        direction: ContractDirection::Outbound,
+                        envelope: EnvelopeRequirement::Optional,
+                        r#match: ContractMatch::default(),
+                        imports_contract: vec!["provider:shared_api".to_string()],
+                    }],
+                    ..Default::default()
+                }),
+            ),
+        ];
+
+        let conflicts = detect_governance_conflicts(&specs);
+        let ic_conflicts: Vec<_> = conflicts
+            .iter()
+            .filter(|c| c.conflict_type == "imports_contract_conflict")
+            .collect();
+        assert!(
+            ic_conflicts.len() >= 2,
+            "expected at least 2 pairwise conflicts (A-vs-C and B-vs-C), got {}: {conflicts:?}",
+            ic_conflicts.len()
+        );
+
+        // Verify B-vs-C conflict is present
+        let has_b_c_conflict = ic_conflicts.iter().any(|c| {
+            (c.description.contains("consumer_b") && c.description.contains("consumer_c"))
+                || (c.description.contains("consumer_c") && c.description.contains("consumer_b"))
+        });
+        assert!(
+            has_b_c_conflict,
+            "expected a B-vs-C conflict to be reported, got: {conflicts:?}"
+        );
+
+        // Also verify both consumers' spec paths are included (not just first)
+        // For each pairwise conflict the description should mention both consumers
+        for conflict in &ic_conflicts {
+            let has_two_consumers = ["consumer_a", "consumer_b", "consumer_c"]
+                .iter()
+                .filter(|&&name| conflict.description.contains(name))
+                .count()
+                >= 2;
+            assert!(
+                has_two_consumers,
+                "each conflict description should mention both consumers: {}",
+                conflict.description
+            );
+        }
     }
 }

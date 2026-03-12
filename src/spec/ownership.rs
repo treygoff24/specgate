@@ -215,10 +215,7 @@ fn detect_contradictory_globs(
     source_files: &[PathBuf],
     project_root: &Path,
 ) -> Vec<ContradictoryGlob> {
-    use std::collections::BTreeSet;
-
     let mut contradictions = Vec::new();
-    let mut seen_pairs: BTreeSet<(usize, usize)> = BTreeSet::new();
 
     for i in 0..spec_matchers.len() {
         for j in (i + 1)..spec_matchers.len() {
@@ -227,12 +224,6 @@ fn detect_contradictory_globs(
 
             // Skip pairs within the same module — not a cross-module contradiction.
             if module_a == module_b {
-                continue;
-            }
-
-            // Deterministic pair key to avoid duplicates.
-            let pair_key = (i, j);
-            if seen_pairs.contains(&pair_key) {
                 continue;
             }
 
@@ -252,8 +243,6 @@ fn detect_contradictory_globs(
             };
 
             if is_contradictory {
-                seen_pairs.insert(pair_key);
-
                 // Deterministic ordering: sort the pair by (module, glob) tuple.
                 let (ma, ga, spa, mb, gb, spb) = if (module_a, glob_a) <= (module_b, glob_b) {
                     (module_a, glob_a, spec_path_a, module_b, glob_b, spec_path_b)
@@ -299,15 +288,28 @@ fn globs_structurally_overlap(glob_a: &str, glob_b: &str) -> bool {
     let prefix_a = literal_prefix(glob_a);
     let prefix_b = literal_prefix(glob_b);
 
-    // If one prefix starts with the other AND the longer pattern uses a glob
-    // suffix, they structurally overlap.
     if prefix_a.is_empty() || prefix_b.is_empty() {
         // A pattern with no literal prefix (e.g., `**/*.ts`) is a wildcard
         // that can match anything — it overlaps with any other pattern.
         return true;
     }
 
-    prefix_a.starts_with(&prefix_b) || prefix_b.starts_with(&prefix_a)
+    let (short, long) = if prefix_a.len() <= prefix_b.len() {
+        (&prefix_a, &prefix_b)
+    } else {
+        (&prefix_b, &prefix_a)
+    };
+
+    if !long.starts_with(short.as_str()) {
+        return false;
+    }
+
+    // Require the divergence point to fall on a path-separator boundary.
+    // This prevents "src/api" from matching "src/api-v2/" as an overlap,
+    // since those are disjoint path components despite sharing a prefix string.
+    long.len() == short.len()
+        || long.as_bytes()[short.len()] == b'/'
+        || short.ends_with('/')
 }
 
 /// Extract the literal (non-glob) prefix of a glob pattern.
@@ -779,5 +781,53 @@ mod tests {
         ));
         // Wildcard prefix matches everything.
         assert!(super::globs_structurally_overlap("**/*.ts", "src/api/**"));
+    }
+
+    // --- M4: path-boundary false positives in globs_structurally_overlap ---
+
+    #[test]
+    fn test_globs_no_overlap_when_diverge_at_non_separator() {
+        // "src/api" is a prefix of "src/api-v2/" but they diverge mid-component.
+        assert!(
+            !super::globs_structurally_overlap("src/api*", "src/api-v2/**"),
+            "src/api* and src/api-v2/** are disjoint and should not overlap"
+        );
+    }
+
+    #[test]
+    fn test_globs_no_overlap_packages_diverge_at_non_separator() {
+        assert!(
+            !super::globs_structurally_overlap(
+                "packages/app*",
+                "packages/app-utils/**"
+            ),
+            "packages/app* and packages/app-utils/** are disjoint and should not overlap"
+        );
+    }
+
+    #[test]
+    fn test_globs_overlap_at_path_separator_boundary() {
+        // Divergence is at a '/' — genuine subset relationship.
+        assert!(
+            super::globs_structurally_overlap("src/api/**", "src/api/v2/**"),
+            "src/api/** and src/api/v2/** genuinely overlap"
+        );
+    }
+
+    #[test]
+    fn test_globs_overlap_wide_contains_narrow() {
+        assert!(
+            super::globs_structurally_overlap("src/**", "src/api/**"),
+            "src/** contains src/api/** — genuine overlap"
+        );
+    }
+
+    #[test]
+    fn test_globs_overlap_short_prefix_ends_with_separator() {
+        // Short prefix ends with '/' — safe boundary.
+        assert!(
+            super::globs_structurally_overlap("src/", "src/api/**"),
+            "short prefix ending with / overlaps with longer path"
+        );
     }
 }

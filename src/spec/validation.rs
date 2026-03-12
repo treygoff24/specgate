@@ -341,6 +341,33 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             }
         }
 
+        // Validate glob syntax in the 6 boundary entry list fields.
+        // Only entries containing glob metacharacters are validated — plain module names are skipped.
+        let entry_fields: &[(&str, &[String])] = &[
+            ("never_imports", &boundaries.never_imports),
+            (
+                "allow_imports_from",
+                boundaries.allow_imports_from.as_deref().unwrap_or(&[]),
+            ),
+            ("allow_type_imports_from", &boundaries.allow_type_imports_from),
+            ("deny_imported_by", &boundaries.deny_imported_by),
+            ("allow_imported_by", &boundaries.allow_imported_by),
+            ("friend_modules", &boundaries.friend_modules),
+        ];
+        for (field_name, entries) in entry_fields {
+            for entry in *entries {
+                if contains_glob_meta(entry) && Glob::new(entry).is_err() {
+                    report.push_warning(
+                        spec,
+                        format!(
+                            "invalid glob pattern in boundaries.{field_name}: '{entry}'. Remediation: provide a valid glob pattern or use a plain module name."
+                        ),
+                    );
+                }
+            }
+        }
+
+        // TODO: overlap check uses exact string matching; does not detect semantic glob overlaps
         let allow_set: BTreeSet<&str> = boundaries
             .allow_imports_from
             .as_deref()
@@ -386,6 +413,10 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             );
         }
     }
+}
+
+fn contains_glob_meta(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[') || s.contains('{')
 }
 
 fn validate_no_circular_deps_constraint(
@@ -1086,6 +1117,176 @@ mod tests {
                 .iter()
                 .any(|issue| issue.message.contains("contract_ref_invalid")),
             "valid imports_contract format should not produce error"
+        );
+    }
+
+    // === Glob Validation for Boundary Entry Fields ===
+
+    #[test]
+    fn invalid_glob_in_never_imports_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            never_imports: vec!["valid_module".to_string(), "legacy/**{".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0, "invalid glob in never_imports should not be an error");
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.never_imports")
+                    && issue.message.contains("legacy/**{")
+            }),
+            "should warn about invalid glob in never_imports"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_in_allow_imports_from_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imports_from: Some(vec!["shared/**{".to_string()]),
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0, "invalid glob in allow_imports_from should not be an error");
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.allow_imports_from")
+                    && issue.message.contains("shared/**{")
+            }),
+            "should warn about invalid glob in allow_imports_from"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_in_allow_type_imports_from_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_type_imports_from: vec!["types/**{".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.allow_type_imports_from")
+                    && issue.message.contains("types/**{")
+            }),
+            "should warn about invalid glob in allow_type_imports_from"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_in_deny_imported_by_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            deny_imported_by: vec!["ui/**{".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.deny_imported_by")
+                    && issue.message.contains("ui/**{")
+            }),
+            "should warn about invalid glob in deny_imported_by"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_in_allow_imported_by_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imported_by: vec!["api/**{".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.allow_imported_by")
+                    && issue.message.contains("api/**{")
+            }),
+            "should warn about invalid glob in allow_imported_by"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_in_friend_modules_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            friend_modules: vec!["bad_glob_[".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(
+            report.warnings().iter().any(|issue| {
+                issue.message.contains("invalid glob pattern in boundaries.friend_modules")
+                    && issue.message.contains("bad_glob_[")
+            }),
+            "should warn about invalid glob in friend_modules"
+        );
+    }
+
+    #[test]
+    fn plain_module_names_in_entry_fields_produce_no_warnings() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            never_imports: vec!["payments".to_string(), "legacy/utils".to_string()],
+            allow_imports_from: Some(vec!["shared".to_string(), "core/domain".to_string()]),
+            allow_type_imports_from: vec!["@types/shared".to_string()],
+            deny_imported_by: vec!["ui/legacy".to_string()],
+            allow_imported_by: vec!["api/handlers".to_string()],
+            friend_modules: vec!["test/helpers".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        let glob_warnings: Vec<_> = report
+            .warnings()
+            .into_iter()
+            .filter(|issue| issue.message.contains("invalid glob pattern in boundaries."))
+            .collect();
+        assert!(
+            glob_warnings.is_empty(),
+            "plain module names should not produce glob warnings, got: {:?}",
+            glob_warnings
+        );
+    }
+
+    #[test]
+    fn valid_globs_in_entry_fields_produce_no_warnings() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            never_imports: vec!["legacy/**".to_string()],
+            allow_imports_from: Some(vec!["shared/*".to_string()]),
+            allow_type_imports_from: vec!["types/**".to_string()],
+            deny_imported_by: vec!["ui/**".to_string()],
+            allow_imported_by: vec!["api/*".to_string()],
+            friend_modules: vec!["test/**".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        let glob_warnings: Vec<_> = report
+            .warnings()
+            .into_iter()
+            .filter(|issue| issue.message.contains("invalid glob pattern in boundaries."))
+            .collect();
+        assert!(
+            glob_warnings.is_empty(),
+            "valid globs should not produce warnings, got: {:?}",
+            glob_warnings
         );
     }
 
