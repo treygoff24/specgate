@@ -370,25 +370,23 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
             }
         }
 
-        // TODO: overlap check uses exact string matching; does not detect semantic glob overlaps
-        let allow_set: BTreeSet<&str> = boundaries
-            .allow_imports_from
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .map(String::as_str)
-            .collect();
-        let deny_set: BTreeSet<&str> = boundaries
-            .never_imports
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let allow_entries = boundaries.allow_imports_from.as_deref().unwrap_or(&[]);
+        let mut reported_allow_deny_overlaps: BTreeSet<(&str, &str)> = BTreeSet::new();
 
-        for overlap in allow_set.intersection(&deny_set) {
-            report.push_warning(
-                spec,
-                format!("module '{overlap}' is in both allow_imports_from and never_imports. Remediation: keep each module in only one list."),
-            );
+        for allow_entry in allow_entries {
+            for deny_entry in &boundaries.never_imports {
+                if globs_structurally_overlap(allow_entry, deny_entry)
+                    && reported_allow_deny_overlaps
+                        .insert((allow_entry.as_str(), deny_entry.as_str()))
+                {
+                    report.push_warning(
+                        spec,
+                        format!(
+                            "module pattern '{allow_entry}' in allow_imports_from structurally overlaps with '{deny_entry}' in never_imports. Remediation: keep overlapping module patterns in only one list."
+                        ),
+                    );
+                }
+            }
         }
 
         let allow_imported_by_set: BTreeSet<&str> = boundaries
@@ -420,6 +418,46 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
 
 fn contains_glob_meta(s: &str) -> bool {
     s.contains('*') || s.contains('?') || s.contains('[') || s.contains('{')
+}
+
+/// Structural overlap check for two glob-or-module patterns.
+///
+/// Returns `true` when one pattern can overlap the other based on shared
+/// literal prefixes that diverge only at a path boundary.
+fn globs_structurally_overlap(glob_a: &str, glob_b: &str) -> bool {
+    let prefix_a = literal_prefix(glob_a);
+    let prefix_b = literal_prefix(glob_b);
+
+    if prefix_a.is_empty() || prefix_b.is_empty() {
+        // Patterns with no literal prefix (for example `**/*.ts`) can overlap
+        // with anything.
+        return true;
+    }
+
+    let (short, long) = if prefix_a.len() <= prefix_b.len() {
+        (&prefix_a, &prefix_b)
+    } else {
+        (&prefix_b, &prefix_a)
+    };
+
+    if !long.starts_with(short.as_str()) {
+        return false;
+    }
+
+    long.len() == short.len() || long.as_bytes()[short.len()] == b'/' || short.ends_with('/')
+}
+
+/// Extract the literal (non-glob) prefix of a pattern.
+/// Stops at the first glob metacharacter (`*`, `?`, `[`, `{`).
+fn literal_prefix(pattern: &str) -> String {
+    let mut prefix = String::new();
+    for ch in pattern.chars() {
+        if ch == '*' || ch == '?' || ch == '[' || ch == '{' {
+            break;
+        }
+        prefix.push(ch);
+    }
+    prefix
 }
 
 fn validate_no_circular_deps_constraint(
@@ -524,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn overlap_is_warning() {
+    fn exact_allow_deny_overlap_is_warning() {
         let mut spec = base_spec("orders");
         spec.boundaries = Some(Boundaries {
             allow_imports_from: Some(vec!["payments".to_string()]),
@@ -537,7 +575,64 @@ mod tests {
         assert!(report.warnings().iter().any(|issue| {
             issue
                 .message
-                .contains("both allow_imports_from and never_imports")
+                .contains("allow_imports_from structurally overlaps")
+                && issue.message.contains("payments")
+        }));
+    }
+
+    #[test]
+    fn prefix_glob_allow_deny_overlap_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imports_from: Some(vec!["api/**".to_string()]),
+            never_imports: vec!["api/handlers/**".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert_eq!(report.errors().len(), 0);
+        assert!(report.warnings().iter().any(|issue| {
+            issue
+                .message
+                .contains("allow_imports_from structurally overlaps")
+                && issue.message.contains("api/**")
+                && issue.message.contains("api/handlers/**")
+        }));
+    }
+
+    #[test]
+    fn non_overlapping_globs_are_not_flagged_for_allow_deny_overlap() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imports_from: Some(vec!["api/**".to_string()]),
+            never_imports: vec!["ui/**".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(!report.warnings().iter().any(|issue| {
+            issue
+                .message
+                .contains("allow_imports_from structurally overlaps")
+        }));
+    }
+
+    #[test]
+    fn plain_module_prefix_overlap_is_warning() {
+        let mut spec = base_spec("orders");
+        spec.boundaries = Some(Boundaries {
+            allow_imports_from: Some(vec!["api".to_string()]),
+            never_imports: vec!["api/handlers".to_string()],
+            ..Boundaries::default()
+        });
+
+        let report = validate_specs(&[spec]);
+        assert!(report.warnings().iter().any(|issue| {
+            issue
+                .message
+                .contains("allow_imports_from structurally overlaps")
+                && issue.message.contains("api")
+                && issue.message.contains("api/handlers")
         }));
     }
 
