@@ -158,10 +158,8 @@ pub fn evaluate_boundary_rules(ctx: &RuleContext<'_>) -> Vec<RuleViolation> {
             // - Importer-side and provider-side checks each short-circuit internally.
             // - Both sides are intentionally evaluated for the same edge so callers can
             //   receive both policy violations when both modules are misconfigured.
-            let importer_pattern_cache =
-                matcher_cache.module_patterns.get(importer_module);
-            let provider_pattern_cache =
-                matcher_cache.module_patterns.get(provider_module);
+            let importer_pattern_cache = matcher_cache.module_patterns.get(importer_module);
+            let provider_pattern_cache = matcher_cache.module_patterns.get(provider_module);
 
             if !importer_is_test || importer_boundaries.enforce_in_tests {
                 check_importer_side(
@@ -271,10 +269,7 @@ fn build_matcher_cache(
     let mut module_patterns = BTreeMap::new();
     for (module, spec) in spec_by_module {
         let b = spec.boundaries.as_ref().cloned().unwrap_or_default();
-        let allow_imports_from_patterns = b
-            .allow_imports_from
-            .as_deref()
-            .unwrap_or(&[]);
+        let allow_imports_from_patterns = b.allow_imports_from.as_deref().unwrap_or(&[]);
         let cache = ModulePatternCache {
             never_imports: compile_module_patterns(&b.never_imports),
             allow_imports_from: compile_module_patterns(allow_imports_from_patterns),
@@ -1758,12 +1753,12 @@ export const x = local;
             spec_with_boundaries("b", "src/b/**/*", Boundaries::default()),
         ];
 
-        let mut config = SpecConfig::default();
-        config.spec_dirs = vec![".".to_string()];
-        let mut resolver =
-            ModuleResolver::new(temp.path(), &specs).expect("resolver");
-        let graph =
-            DependencyGraph::build(temp.path(), &mut resolver, &config).expect("graph");
+        let config = SpecConfig {
+            spec_dirs: vec![".".to_string()],
+            ..Default::default()
+        };
+        let mut resolver = ModuleResolver::new(temp.path(), &specs).expect("resolver");
+        let graph = DependencyGraph::build(temp.path(), &mut resolver, &config).expect("graph");
         let ctx = RuleContext {
             project_root: temp.path(),
             config: &config,
@@ -1778,10 +1773,27 @@ export const x = local;
         let mut violations = Vec::new();
         let cache = build_matcher_cache(&ctx, &spec_by_module, &mut violations);
 
-        let a_cache = cache.module_patterns.get("a").expect("module a must be in cache");
-        assert_eq!(a_cache.never_imports.len(), 1, "never_imports should have 1 compiled entry");
-        assert_eq!(a_cache.allow_imports_from.len(), 1, "allow_imports_from should have 1 compiled glob entry");
-        assert!(matches!(a_cache.never_imports[0], CompiledPattern::Exact(_)));
-        assert!(matches!(a_cache.allow_imports_from[0], CompiledPattern::Glob(_)));
+        let a_cache = cache
+            .module_patterns
+            .get("a")
+            .expect("module a must be in cache");
+        assert_eq!(
+            a_cache.never_imports.len(),
+            1,
+            "never_imports should have 1 compiled entry"
+        );
+        assert_eq!(
+            a_cache.allow_imports_from.len(),
+            1,
+            "allow_imports_from should have 1 compiled glob entry"
+        );
+        assert!(matches!(
+            a_cache.never_imports[0],
+            CompiledPattern::Exact(_)
+        ));
+        assert!(matches!(
+            a_cache.allow_imports_from[0],
+            CompiledPattern::Glob(_)
+        ));
     }
 }

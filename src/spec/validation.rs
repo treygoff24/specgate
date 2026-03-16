@@ -349,7 +349,10 @@ fn validate_single_spec(spec: &SpecFile, report: &mut ValidationReport) {
                 "allow_imports_from",
                 boundaries.allow_imports_from.as_deref().unwrap_or(&[]),
             ),
-            ("allow_type_imports_from", &boundaries.allow_type_imports_from),
+            (
+                "allow_type_imports_from",
+                &boundaries.allow_type_imports_from,
+            ),
             ("deny_imported_by", &boundaries.deny_imported_by),
             ("allow_imported_by", &boundaries.allow_imported_by),
             ("friend_modules", &boundaries.friend_modules),
@@ -1131,10 +1134,16 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert_eq!(report.errors().len(), 0, "invalid glob in never_imports should not be an error");
+        assert_eq!(
+            report.errors().len(),
+            0,
+            "invalid glob in never_imports should not be an error"
+        );
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.never_imports")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.never_imports")
                     && issue.message.contains("legacy/**{")
             }),
             "should warn about invalid glob in never_imports"
@@ -1150,10 +1159,16 @@ mod tests {
         });
 
         let report = validate_specs(&[spec]);
-        assert_eq!(report.errors().len(), 0, "invalid glob in allow_imports_from should not be an error");
+        assert_eq!(
+            report.errors().len(),
+            0,
+            "invalid glob in allow_imports_from should not be an error"
+        );
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.allow_imports_from")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.allow_imports_from")
                     && issue.message.contains("shared/**{")
             }),
             "should warn about invalid glob in allow_imports_from"
@@ -1172,7 +1187,9 @@ mod tests {
         assert_eq!(report.errors().len(), 0);
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.allow_type_imports_from")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.allow_type_imports_from")
                     && issue.message.contains("types/**{")
             }),
             "should warn about invalid glob in allow_type_imports_from"
@@ -1191,7 +1208,9 @@ mod tests {
         assert_eq!(report.errors().len(), 0);
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.deny_imported_by")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.deny_imported_by")
                     && issue.message.contains("ui/**{")
             }),
             "should warn about invalid glob in deny_imported_by"
@@ -1210,7 +1229,9 @@ mod tests {
         assert_eq!(report.errors().len(), 0);
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.allow_imported_by")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.allow_imported_by")
                     && issue.message.contains("api/**{")
             }),
             "should warn about invalid glob in allow_imported_by"
@@ -1229,7 +1250,9 @@ mod tests {
         assert_eq!(report.errors().len(), 0);
         assert!(
             report.warnings().iter().any(|issue| {
-                issue.message.contains("invalid glob pattern in boundaries.friend_modules")
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.friend_modules")
                     && issue.message.contains("bad_glob_[")
             }),
             "should warn about invalid glob in friend_modules"
@@ -1254,12 +1277,15 @@ mod tests {
         let glob_warnings: Vec<_> = report
             .warnings()
             .into_iter()
-            .filter(|issue| issue.message.contains("invalid glob pattern in boundaries."))
+            .filter(|issue| {
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.")
+            })
             .collect();
         assert!(
             glob_warnings.is_empty(),
-            "plain module names should not produce glob warnings, got: {:?}",
-            glob_warnings
+            "plain module names should not produce glob warnings, got: {glob_warnings:?}",
         );
     }
 
@@ -1281,12 +1307,15 @@ mod tests {
         let glob_warnings: Vec<_> = report
             .warnings()
             .into_iter()
-            .filter(|issue| issue.message.contains("invalid glob pattern in boundaries."))
+            .filter(|issue| {
+                issue
+                    .message
+                    .contains("invalid glob pattern in boundaries.")
+            })
             .collect();
         assert!(
             glob_warnings.is_empty(),
-            "valid globs should not produce warnings, got: {:?}",
-            glob_warnings
+            "valid globs should not produce warnings, got: {glob_warnings:?}",
         );
     }
 

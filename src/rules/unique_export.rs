@@ -145,7 +145,7 @@ pub fn evaluate_unique_export(
             .cmp(right_module)
             .then_with(|| left_params.to_string().cmp(&right_params.to_string()))
     });
-    configured_constraints.dedup_by(|a, b| a.0 == b.0 && a.1.to_string() == b.1.to_string());
+    configured_constraints.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
 
     let mut usable_configs: Vec<(String, UniqueExportConfig)> = Vec::new();
 

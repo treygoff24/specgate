@@ -63,7 +63,11 @@ fn no_conflicts_returns_pass() {
     );
     write_file(temp.path(), "src/alpha/index.ts", "export const x = 1;\n");
     write_file(temp.path(), "src/beta/index.ts", "export const y = 2;\n");
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (exit_code, json) = run_governance_json(temp.path());
 
@@ -82,7 +86,11 @@ fn allow_never_overlap_detected_via_cli() {
         "version: \"2.2\"\nmodule: app\nboundaries:\n  path: \"src/app/**\"\n  allow_imports_from: [\"core\"]\n  never_imports: [\"core\"]\nconstraints: []\n",
     );
     write_file(temp.path(), "src/app/index.ts", "export const x = 1;\n");
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (exit_code, json) = run_governance_json(temp.path());
 
@@ -116,7 +124,11 @@ fn private_with_allow_imported_by_detected_via_cli() {
         "src/internal/index.ts",
         "export const x = 1;\n",
     );
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (exit_code, json) = run_governance_json(temp.path());
 
@@ -170,7 +182,11 @@ fn cross_module_duplicate_contract_id_detected_via_cli() {
         "contracts/api2.json",
         "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}\n",
     );
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (exit_code, json) = run_governance_json(temp.path());
 
@@ -195,7 +211,11 @@ fn json_output_has_schema_version() {
         "version: \"2.2\"\nmodule: app\nboundaries:\n  path: \"src/app/**\"\nconstraints: []\n",
     );
     write_file(temp.path(), "src/app/index.ts", "export const x = 1;\n");
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (_, json) = run_governance_json(temp.path());
 
@@ -216,7 +236,11 @@ fn human_output_format_works() {
         "version: \"2.2\"\nmodule: app\nboundaries:\n  path: \"src/app/**\"\n  allow_imports_from: [\"core\"]\n  never_imports: [\"core\"]\nconstraints: []\n",
     );
     write_file(temp.path(), "src/app/index.ts", "export const x = 1;\n");
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let (exit_code, output) = run_governance_human(temp.path());
 
@@ -242,7 +266,11 @@ fn validation_errors_return_runtime_error() {
         "version: \"2.0\"\nmodule: app\nboundaries:\n  path: \"src/app/**\"\nconstraints: []\n",
     );
     write_file(temp.path(), "src/app/index.ts", "export const x = 1;\n");
-    write_file(temp.path(), "specgate.config.yml", "spec_dirs:\n  - specs\n");
+    write_file(
+        temp.path(),
+        "specgate.config.yml",
+        "spec_dirs:\n  - specs\n",
+    );
 
     let result = run([
         "specgate",

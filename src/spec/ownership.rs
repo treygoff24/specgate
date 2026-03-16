@@ -307,9 +307,7 @@ fn globs_structurally_overlap(glob_a: &str, glob_b: &str) -> bool {
     // Require the divergence point to fall on a path-separator boundary.
     // This prevents "src/api" from matching "src/api-v2/" as an overlap,
     // since those are disjoint path components despite sharing a prefix string.
-    long.len() == short.len()
-        || long.as_bytes()[short.len()] == b'/'
-        || short.ends_with('/')
+    long.len() == short.len() || long.as_bytes()[short.len()] == b'/' || short.ends_with('/')
 }
 
 /// Extract the literal (non-glob) prefix of a glob pattern.
@@ -797,10 +795,7 @@ mod tests {
     #[test]
     fn test_globs_no_overlap_packages_diverge_at_non_separator() {
         assert!(
-            !super::globs_structurally_overlap(
-                "packages/app*",
-                "packages/app-utils/**"
-            ),
+            !super::globs_structurally_overlap("packages/app*", "packages/app-utils/**"),
             "packages/app* and packages/app-utils/** are disjoint and should not overlap"
         );
     }
