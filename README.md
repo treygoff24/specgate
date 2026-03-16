@@ -9,6 +9,12 @@ If you're running AI coding agents on production codebases and don't have struct
 ## Install
 
 ```bash
+# Via npm (easiest)
+npx @treygoff/specgate check
+
+# Or install globally
+npm install -g @treygoff/specgate
+
 # From source (requires Rust)
 cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.1
 
