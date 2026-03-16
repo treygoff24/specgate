@@ -33,9 +33,10 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of unacceptable behavior may be reported to the project maintainers
-at the email address listed in the GitHub repository settings. All complaints
-will be reviewed and investigated and will result in a response that is deemed
-necessary and appropriate to the circumstances.
+via [GitHub private vulnerability reporting](https://github.com/treygoff24/specgate/security/advisories/new)
+or by opening a GitHub issue. All complaints will be reviewed and investigated
+and will result in a response that is deemed necessary and appropriate to the
+circumstances.
 
 ## Attribution
 
