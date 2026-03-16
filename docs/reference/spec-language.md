@@ -131,7 +131,7 @@ telemetry:
 ```
 
 - `stale_baseline` follows canonical baseline policy (warn-by-default, opt-in fail via `stale_baseline: fail`, no auto-prune); see [baseline-policy.md](../design/baseline-policy.md).
-- `release_channel: beta` enables beta-only doctor compare legacy trace fallback.
+- `release_channel` sets the project's rollout channel (`stable` or `beta`).
 - telemetry is opt-in by default and can be toggled per run with `--telemetry` / `--no-telemetry`.
 - `strict_ownership: true` enables blocking ownership checks in `specgate doctor ownership`.
 - `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs.
@@ -162,14 +162,13 @@ By default this command is diagnostic-only and exits `0`. With `strict_ownership
 # Structured snapshots only
 specgate doctor compare --parser-mode structured --structured-snapshot-in trace.json
 
-# Auto: structured first, then beta-only legacy fallback
-specgate doctor compare --parser-mode auto --tsc-trace trace.log
+# Auto mode (default): still requires structured JSON input
+specgate doctor compare --parser-mode auto --tsc-trace trace.json
 ```
 
 Modes:
 - `structured`: requires structured JSON snapshot payload.
-- `auto`: prefers structured parsing and falls back to raw trace text only in `beta` channel.
-- `legacy`: raw `tsc --traceResolution` text only (beta channel only).
+- `auto`: runs the structured parser with auto-selection semantics.
 
 ### Shell Command Execution
 
@@ -178,7 +177,7 @@ Modes:
 specgate doctor compare --tsc-command "npx tsc --traceResolution" --allow-shell
 
 # Write normalized trace output to a file
-specgate doctor compare --tsc-trace trace.log --structured-snapshot-out snapshots/normalized.json
+specgate doctor compare --tsc-trace trace.json --structured-snapshot-out snapshots/normalized.json
 ```
 
 #### `--tsc-command` and `--allow-shell`

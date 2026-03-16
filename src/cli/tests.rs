@@ -340,20 +340,9 @@ fn doctor_compare_skips_gracefully_when_tsc_missing() {
 }
 
 #[test]
-fn doctor_compare_legacy_parser_mode_requires_beta_channel() {
+fn doctor_compare_legacy_parser_mode_is_rejected_by_cli() {
     let temp = TempDir::new().expect("tempdir");
     write_basic_project_with_edge(temp.path());
-    let from = temp.path().join("src/app/main.ts");
-    let to = temp.path().join("src/core/index.ts");
-    write_file(
-        temp.path(),
-        "trace.log",
-        &format!(
-            "======== Resolving module '../core/index' from '{}'. ========\n======== Module name '../core/index' was successfully resolved to '{}'. ========\n",
-            from.display(),
-            to.display()
-        ),
-    );
 
     let result = run([
         "specgate",
@@ -361,18 +350,21 @@ fn doctor_compare_legacy_parser_mode_requires_beta_channel() {
         "compare",
         "--project-root",
         temp.path().to_str().expect("utf8 path"),
-        "--tsc-trace",
-        temp.path().join("trace.log").to_str().expect("utf8 path"),
         "--parser-mode",
         "legacy",
     ]);
 
     assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
-    assert!(result.stdout.contains("beta-only"));
+    assert!(result.stderr.contains("invalid value 'legacy'"));
+    assert!(
+        result
+            .stderr
+            .contains("[possible values: auto, structured]")
+    );
 }
 
 #[test]
-fn doctor_compare_legacy_parser_mode_succeeds_with_beta_channel() {
+fn doctor_compare_auto_mode_fails_on_raw_trace_text_even_with_beta_channel() {
     let temp = TempDir::new().expect("tempdir");
     write_basic_project_with_edge(temp.path());
     write_file(
@@ -401,16 +393,16 @@ fn doctor_compare_legacy_parser_mode_succeeds_with_beta_channel() {
         "--tsc-trace",
         temp.path().join("trace.log").to_str().expect("utf8 path"),
         "--parser-mode",
-        "legacy",
+        "auto",
     ]);
 
-    assert_eq!(result.exit_code, EXIT_CODE_PASS);
-    assert!(result.stdout.contains("\"status\": \"match\""));
+    assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
     assert!(
         result
             .stdout
-            .contains("\"trace_parser\": \"legacy_trace_text\"")
+            .contains("parser mode `auto` failed structured parsing")
     );
+    assert!(!result.stdout.contains("beta-only"));
 }
 
 #[test]

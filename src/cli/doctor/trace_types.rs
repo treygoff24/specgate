@@ -59,14 +59,12 @@ pub(super) struct TraceResolutionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TraceParserKind {
     StructuredSnapshot,
-    LegacyTraceText,
 }
 
 impl TraceParserKind {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::StructuredSnapshot => "structured_snapshot",
-            Self::LegacyTraceText => "legacy_trace_text",
         }
     }
 }

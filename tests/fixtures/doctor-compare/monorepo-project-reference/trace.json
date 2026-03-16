@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "edges": [
+    {
+      "from": "packages/web/src/app.ts",
+      "to": "packages/shared/src/util.ts"
+    }
+  ],
+  "resolutions": [
+    {
+      "from": "packages/web/src/app.ts",
+      "import_specifier": "@shared/util",
+      "result_kind": "first_party",
+      "resolved_to": "packages/shared/src/util.ts",
+      "trace": [
+        "Loading module '@shared/util' from 'paths' option.",
+        "Module name '@shared/util' was successfully resolved to 'packages/shared/src/util.ts'."
+      ]
+    }
+  ]
+}

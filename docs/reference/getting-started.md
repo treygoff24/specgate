@@ -217,11 +217,10 @@ specgate doctor compare \
   --project-root . \
   --from src/app/main.ts \
   --import @core/utils \
-  --tsc-trace trace.log
+  --tsc-trace trace.json
 ```
 
-`--tsc-trace` accepts JSON edge payloads on stable, and raw `tsc --traceResolution`
-text only when using the beta-channel legacy fallback modes.
+`--tsc-trace` accepts structured JSON trace payloads.
 Look for:
 - `parity_verdict` (`MATCH`/`DIFF`)
 - `specgate_resolution` and `tsc_trace_resolution`

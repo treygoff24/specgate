@@ -880,7 +880,7 @@ fn doctor_compare_structured_snapshot_round_trip_multiple_edges() {
 }
 
 #[test]
-fn doctor_compare_auto_mode_blocks_raw_trace_text_without_beta_hook() {
+fn doctor_compare_auto_mode_rejects_raw_trace_text_payload() {
     let temp = TempDir::new().expect("tempdir");
     write_project_with_edge(temp.path());
 
@@ -905,11 +905,16 @@ fn doctor_compare_auto_mode_blocks_raw_trace_text_without_beta_hook() {
 
     assert_eq!(result.exit_code, EXIT_CODE_RUNTIME_ERROR);
     assert!(result.stdout.contains("\"status\": \"error\""));
-    assert!(result.stdout.contains("beta-only"));
+    assert!(
+        result
+            .stdout
+            .contains("parser mode `auto` failed structured parsing")
+    );
+    assert!(!result.stdout.contains("beta-only"));
 }
 
 #[test]
-fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
+fn doctor_compare_focus_supports_structured_trace_payload_in_monorepo_layout() {
     let temp = TempDir::new().expect("tempdir");
 
     write_file(
@@ -925,7 +930,7 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
     write_file(
         temp.path(),
         "specgate.config.yml",
-        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\nrelease_channel: beta\n",
+        "spec_dirs:\n  - modules\nexclude: []\ntest_patterns: []\n",
     );
     write_file(
         temp.path(),
@@ -965,15 +970,29 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
         "packages/web/src/app.ts",
         "import { util } from '@shared/util';\nexport const app = util;\n",
     );
-
-    let web_app = temp.path().join("packages/web/src/app.ts");
-    let shared_util = temp.path().join("packages/shared/src/util.ts");
-    let trace = format!(
-        "======== Resolving module '@shared/util' from '{}'. ========\nLoading module '@shared/util' from 'paths' option.\n======== Module name '@shared/util' was successfully resolved to '{}'. ========\n",
-        web_app.display(),
-        shared_util.display(),
+    write_file(
+        temp.path(),
+        "trace.json",
+        r#"{
+  "schema_version": "1",
+  "edges": [
+    {
+      "from": "packages/web/src/app.ts",
+      "to": "packages/shared/src/util.ts"
+    }
+  ],
+  "resolutions": [
+    {
+      "from": "packages/web/src/app.ts",
+      "import_specifier": "@shared/util",
+      "result_kind": "first_party",
+      "resolved_to": "packages/shared/src/util.ts",
+      "trace": ["fixture"]
+    }
+  ]
+}
+"#,
     );
-    write_file(temp.path(), "trace.log", &trace);
 
     let result = run([
         "specgate",
@@ -982,7 +1001,7 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
         "--project-root",
         temp.path().to_str().expect("utf8"),
         "--tsc-trace",
-        temp.path().join("trace.log").to_str().expect("utf8"),
+        temp.path().join("trace.json").to_str().expect("utf8"),
         "--from",
         "packages/web/src/app.ts",
         "--import",
@@ -996,7 +1015,7 @@ fn doctor_compare_focus_supports_raw_tsc_trace_text_in_monorepo_layout() {
 }
 
 #[test]
-fn doctor_compare_focus_supports_project_reference_trace_fixture() {
+fn doctor_compare_focus_supports_project_reference_structured_trace_fixture() {
     let fixture = fixture_root("doctor-compare/monorepo-project-reference");
 
     let result = run([
@@ -1006,7 +1025,7 @@ fn doctor_compare_focus_supports_project_reference_trace_fixture() {
         "--project-root",
         fixture.to_str().expect("utf8"),
         "--tsc-trace",
-        fixture.join("trace.log").to_str().expect("utf8"),
+        fixture.join("trace.json").to_str().expect("utf8"),
         "--from",
         "packages/web/src/app.ts",
         "--import",

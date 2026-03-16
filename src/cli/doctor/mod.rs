@@ -51,7 +51,7 @@ pub(crate) struct DoctorCompareArgs {
     /// Write normalized structured trace snapshot JSON to this path.
     #[arg(long)]
     pub(super) structured_snapshot_out: Option<PathBuf>,
-    /// Trace payload file: JSON edge data or raw `tsc --traceResolution` output text.
+    /// Trace payload file: structured JSON trace data.
     #[arg(long)]
     pub(super) tsc_trace: Option<PathBuf>,
     /// Command that emits compatible JSON to stdout.
@@ -76,7 +76,6 @@ pub(crate) struct DoctorCompareArgs {
 pub(crate) enum DoctorCompareParserMode {
     Auto,
     Structured,
-    Legacy,
 }
 
 impl DoctorCompareParserMode {
@@ -84,7 +83,6 @@ impl DoctorCompareParserMode {
         match self {
             Self::Auto => "auto",
             Self::Structured => "structured",
-            Self::Legacy => "legacy",
         }
     }
 }

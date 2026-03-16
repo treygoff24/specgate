@@ -8,7 +8,7 @@ use super::DoctorCompareArgs;
 use super::focus::{build_doctor_compare_focus, filter_edges_for_focus};
 use super::parity::{
     build_actionable_mismatch_hint, classify_doctor_compare_mismatch, derive_tsc_focus_resolution,
-    doctor_compare_beta_channel_enabled, parity_verdict_for_status,
+    parity_verdict_for_status,
 };
 use super::trace_io::{load_trace_source, write_structured_snapshot};
 use super::trace_parser::parse_trace_data;
@@ -44,7 +44,6 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         }
     };
 
-    let legacy_trace_allowed = doctor_compare_beta_channel_enabled(&loaded.config);
     let compare_specgate_edges = filter_edges_for_focus(&artifacts.edge_pairs, focus.as_ref());
     let specgate_resolution = focus
         .as_ref()
@@ -85,7 +84,6 @@ pub(super) fn handle_doctor_compare(args: DoctorCompareArgs) -> CliRunResult {
         &loaded.project_root,
         &trace_source_payload,
         args.parser_mode,
-        legacy_trace_allowed,
     ) {
         Ok(trace) => trace,
         Err(error) => {

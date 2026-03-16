@@ -1,5 +1,3 @@
-use crate::spec::config::{ReleaseChannel, SpecConfig};
-
 use super::focus::DoctorCompareFocus;
 use super::trace_types::{ParsedTraceData, TraceResultKind};
 use super::types::{CompareStatus, DoctorCompareResolutionOutput, MismatchCategory};
@@ -258,10 +256,6 @@ pub(super) fn build_actionable_mismatch_hint(
             "Focused parity mismatch detected; {shared_guidance}."
         )),
     }
-}
-
-pub(super) fn doctor_compare_beta_channel_enabled(config: &SpecConfig) -> bool {
-    config.release_channel == ReleaseChannel::Beta
 }
 
 #[cfg(test)]
