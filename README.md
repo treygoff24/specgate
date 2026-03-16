@@ -1,12 +1,26 @@
 # Specgate
 
-**File-edge structural policy engine with deterministic output contract.**
+**Stop AI agents from silently destroying your architecture.**
 
-Specgate enforces architecture boundaries, layer constraints, and dependency rules for TypeScript/JavaScript projects with byte-identical output for CI reliability.
+Specgate is a Rust CLI that enforces module boundaries, dependency rules, and architectural intent for TypeScript/JavaScript projects. It produces byte-identical CI output, tracks when rules change (so agents can't quietly weaken them), and adopts incrementally via baselines.
+
+If you're running AI coding agents on production codebases and don't have structural enforcement, you're accumulating architectural debt at the rate your agents can write code.
+
+## Install
+
+```bash
+# From source (requires Rust)
+cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.1
+
+# Or download a pre-built binary from the latest release:
+# https://github.com/treygoff24/specgate/releases
+```
+
+See [Getting Started](docs/reference/getting-started.md) for the full install path with checksum verification.
 
 Agent entrypoint: [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md)
 
-## Quick Start (First 15 Minutes)
+## Quick start
 
 ```bash
 # 1. Initialize a new project
@@ -90,9 +104,7 @@ specgate baseline audit --project-root . --format json
 
 ## Install options
 
-- Preferred path: download the release tarball + `.sha256` for your tag (for example `vX.Y.Z`) and run the checksum check before using `specgate`.
-- Fallback path: `cargo install --locked --git https://github.com/treygoff24/specgate --tag vX.Y.Z`.
-- See the full copy-paste command flow in [Getting Started](docs/reference/getting-started.md#minute-0-2-build-and-install).
+See [Getting Started](docs/reference/getting-started.md) for the full install path including pre-built binary download, SHA-256 checksum verification, and cargo fallback.
 
 ## Key Concepts
 

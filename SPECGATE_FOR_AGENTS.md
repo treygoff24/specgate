@@ -26,7 +26,7 @@ Do not position it as a generic linter, formatter, or type checker. It complemen
 
 ## Current Release
 
-- Current published release tag in this repo: `v0.3.0`
+- Current published release tag in this repo: `v0.3.1`
 - Source of truth for the release version: `Cargo.toml`
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 
@@ -38,7 +38,7 @@ Preferred path:
 Fallback path:
 
 ```bash
-cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.0
+cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.1
 ```
 
 For the full release-asset flow, use:
