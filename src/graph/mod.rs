@@ -16,7 +16,7 @@ use crate::spec::{JestMockMode, SpecConfig};
 
 pub mod discovery;
 
-use discovery::{DiscoveryWarning, discover_source_files};
+use discovery::{DiscoveryWarning, discover_source_files_with_options};
 
 #[derive(Debug, Clone)]
 pub struct FileNode {
@@ -202,7 +202,11 @@ impl DependencyGraph {
         let project_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
 
-        let discovery = discover_source_files(&project_root, &config.exclude)?;
+        let discovery = discover_source_files_with_options(
+            &project_root,
+            &config.exclude,
+            &config.include_dirs,
+        )?;
         let files = discovery.files;
 
         let mut graph = DiGraph::<FileNode, EdgeRecord>::new();

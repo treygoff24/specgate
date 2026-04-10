@@ -1,6 +1,6 @@
 # Specgate Release Channels (TS/JS v1)
 
-This document defines release-channel behavior for the TypeScript/JavaScript v1 distribution surface (GitHub binaries + npm wrapper package).
+This document defines release-channel behavior for the TypeScript and JavaScript v1 distribution surface, GitHub binaries plus the npm wrapper package.
 
 For authoritative channel semantics, tier definitions, and downgrade behavior, see [support-matrix-v1](../reference/support-matrix-v1.md). This document focuses on semver policy and promotion gates.
 
@@ -16,7 +16,7 @@ CI-gating tool consumers should expect this contract: any version bump follows t
 
 ## Promotion Gate
 
-The "gate" refers to the merge gate and CI pipeline that must pass before beta can promote to stable:
+The "gate" here means the merge gate and CI pipeline that must pass before beta can promote to stable:
 
 - All merge-required status checks (CI tests, linting, type checking)
 - Governance hygiene on `.spec.yml` changes:

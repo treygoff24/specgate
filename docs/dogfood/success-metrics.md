@@ -1,5 +1,7 @@
 # Specgate Dogfood Success Metrics
 
+This document defines what a healthy dogfood rollout looks like in practice.
+
 ## Primary gate health
 
 Examples below use `origin/main` as shorthand for the consumer repo's default

@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
+use std::path::{Component, Path};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::deterministic::normalize_path;
 use crate::spec::types::Severity;
 
 fn default_deep_import_max_depth() -> usize {
@@ -343,13 +346,19 @@ fn default_envelope_function_pattern() -> String {
 
 pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     "node_modules",
+    ".next",
+    ".turbo",
+    ".nuxt",
+    ".svelte-kit",
+    ".astro",
+    ".output",
     "dist",
     "build",
-    ".git",
+    "coverage",
     "generated",
     "target",
-    "coverage",
     "vendor",
+    ".git",
 ];
 
 fn default_excludes() -> Vec<String> {
@@ -378,6 +387,48 @@ pub fn include_dir_set(include_dirs: &[String]) -> BTreeSet<String> {
         .iter()
         .filter_map(|entry| normalize_dir_token(entry))
         .collect()
+}
+
+pub fn build_exclude_matcher(patterns: &[String]) -> std::result::Result<GlobSet, globset::Error> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
+    }
+    builder.build()
+}
+
+pub fn path_matches_exclude(
+    project_root: &Path,
+    path: &Path,
+    is_dir: bool,
+    exclude_matcher: &GlobSet,
+) -> bool {
+    let normalized_relative = match path.strip_prefix(project_root) {
+        Ok(relative) => normalize_path(relative),
+        Err(_) => normalize_path(path),
+    };
+
+    exclude_matcher.is_match(&normalized_relative)
+        || (is_dir && exclude_matcher.is_match(format!("{normalized_relative}/")))
+}
+
+pub fn should_skip_default_dir(
+    project_root: &Path,
+    path: &Path,
+    include_dirs: &BTreeSet<String>,
+) -> bool {
+    let Ok(relative) = path.strip_prefix(project_root) else {
+        return false;
+    };
+
+    relative.components().any(|component| {
+        let Component::Normal(name) = component else {
+            return false;
+        };
+        let name = name.to_string_lossy();
+        let segment = name.as_ref();
+        DEFAULT_EXCLUDED_DIRS.contains(&segment) && !include_dirs.contains(segment)
+    })
 }
 
 fn default_test_patterns() -> Vec<String> {
@@ -473,9 +524,19 @@ mod tests {
         assert!(!config.baseline.require_metadata);
         assert_eq!(config.strict_ownership_level, StrictOwnershipLevel::Errors);
         assert!(config.exclude.iter().any(|g| g == "**/node_modules/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.next/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.turbo/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.nuxt/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.svelte-kit/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.astro/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.output/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/dist/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/build/**"));
         assert!(config.exclude.iter().any(|g| g == "**/target/**"));
         assert!(config.exclude.iter().any(|g| g == "**/coverage/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/generated/**"));
         assert!(config.exclude.iter().any(|g| g == "**/vendor/**"));
+        assert!(config.exclude.iter().any(|g| g == "**/.git/**"));
     }
 
     #[test]

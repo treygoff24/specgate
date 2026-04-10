@@ -1,8 +1,6 @@
 # Getting Started with Specgate
 
-**Your first 15 minutes with Specgate.**
-
-This guide walks you through installing, configuring, and running your first architecture checks.
+This guide gets you from zero to a first working `specgate check` in about 15 minutes.
 
 ---
 
@@ -65,9 +63,40 @@ Generated `specgate.config.yml`:
 ```yaml
 spec_dirs:
   - "modules"
-exclude: []
-test_patterns: []
+exclude:
+  - "**/node_modules/**"
+  - "**/.next/**"
+  - "**/.turbo/**"
+  - "**/.nuxt/**"
+  - "**/.svelte-kit/**"
+  - "**/.astro/**"
+  - "**/.output/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "**/target/**"
+  - "**/vendor/**"
+  - "**/.git/**"
+test_patterns:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/__tests__/**"
+  - "**/__mocks__/**"
 ```
+
+`specgate init` renders the current runtime defaults explicitly for `exclude`
+and `test_patterns`. If you customize `exclude`, keep any default entries you
+still want because the field replaces the built-in list rather than merging
+with it.
+
+Glob semantics that matter in monorepos:
+- `foo/**` is root-relative and only matches a top-level `foo/`.
+- `**/foo/**` matches nested workspace copies such as `apps/web/foo/`.
+- `include_dirs` is only for intentionally re-including a default-excluded
+  directory name such as `vendor`.
 
 ### Minute 6-10: Create Your First Spec
 
@@ -88,7 +117,7 @@ boundaries:
     - infrastructure/db
 ```
 
-Key concepts:
+The important pieces:
 - **`version`** — Supported values are `"2.2"` and `"2.3"`; use `"2.3"` when you need boundary contracts
 - **`module`** — Unique identifier (e.g., `layer/name`)
 - **`public_api`** — Files other modules can import (glob patterns)

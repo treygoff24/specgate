@@ -2,15 +2,15 @@
 
 ## Reporting a vulnerability
 
-If you discover a security vulnerability in Specgate, please report it responsibly.
+If you find a security issue in Specgate, please report it privately.
 
 **Do not file a public GitHub issue for security vulnerabilities.**
 
-Instead, use [GitHub's private vulnerability reporting](https://github.com/treygoff24/specgate/security/advisories/new) to submit your report. This ensures the issue is triaged privately before any public disclosure.
+Use [GitHub's private vulnerability reporting](https://github.com/treygoff24/specgate/security/advisories/new) so the issue can be triaged before anything becomes public.
 
 ## Scope
 
-Specgate is a static analysis CLI tool. It reads source files and spec files from disk, parses them, and produces diagnostic output. It does not run user code, open network connections, or execute shell commands (except via the explicit `--allow-shell` flag on `doctor compare --tsc-command`).
+Specgate is a static analysis CLI. It reads source files and spec files from disk, parses them, and produces diagnostics. It does not run user code, open network connections, or execute shell commands, except through the explicit `--allow-shell` path on `doctor compare --tsc-command`.
 
 Security-relevant areas include:
 
@@ -20,7 +20,7 @@ Security-relevant areas include:
 
 ## Response
 
-We aim to acknowledge reports within 48 hours and provide an initial assessment within 7 days. Fixes for confirmed vulnerabilities will be released as patch versions.
+We aim to acknowledge reports within 48 hours and provide an initial assessment within 7 days. Confirmed vulnerabilities are fixed in patch releases when possible.
 
 ## Supported versions
 

@@ -5,7 +5,7 @@ use crate::cli::{
     CliRunResult, CommonProjectArgs, EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, load_project,
     runtime_error_json,
 };
-use crate::graph::discovery::discover_source_files;
+use crate::graph::discovery::discover_source_files_with_options;
 use crate::spec::config::StrictOwnershipLevel;
 use crate::spec::ownership::{OwnershipReport, validate_ownership};
 
@@ -96,7 +96,11 @@ pub(super) fn handle_doctor_ownership(args: DoctorOwnershipArgs) -> CliRunResult
         let _ = ownership_errors;
     }
 
-    let discovery = match discover_source_files(&loaded.project_root, &loaded.config.exclude) {
+    let discovery = match discover_source_files_with_options(
+        &loaded.project_root,
+        &loaded.config.exclude,
+        &loaded.config.include_dirs,
+    ) {
         Ok(d) => d,
         Err(error) => {
             return runtime_error_json(

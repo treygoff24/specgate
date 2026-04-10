@@ -1,8 +1,6 @@
 # Specgate Operator Guide
 
-**The definitive onboarding path for Specgate operators.**
-
-This guide connects all key concepts: Wave 0 contract, Tier A gates, golden corpus, and the MVP roadmap. Read this to understand how Specgate works and how to use it effectively.
+This is the main onboarding document for people operating Specgate in real repositories. It ties together the contract surface, merge gate, ownership checks, and rollout guidance in one place.
 
 ---
 
@@ -54,6 +52,42 @@ specgate init
 This creates:
 - `specgate.config.yml` — Project configuration
 - `modules/` — Directory for spec files
+
+Generated `specgate.config.yml`:
+
+```yaml
+spec_dirs:
+  - "modules"
+exclude:
+  - "**/node_modules/**"
+  - "**/.next/**"
+  - "**/.turbo/**"
+  - "**/.nuxt/**"
+  - "**/.svelte-kit/**"
+  - "**/.astro/**"
+  - "**/.output/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "**/target/**"
+  - "**/vendor/**"
+  - "**/.git/**"
+test_patterns:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/__tests__/**"
+  - "**/__mocks__/**"
+```
+
+`specgate init` renders the built-in `exclude` and `test_patterns` defaults so
+new repos inherit the same runtime behavior users get without a config file.
+When customizing `exclude`, keep any defaults you still want because the field
+is explicit rather than additive. Use recursive globs such as `**/node_modules/**`
+for nested workspace directories, and reserve `include_dirs` for intentionally
+re-including a default-excluded directory name like `vendor`.
 
 ### Step 2: Create Your First Spec (5 min)
 
@@ -325,7 +359,7 @@ Mapping:
 
 ## Release Status
 
-**Current: `v0.3.1` is released from `master`; release-closeout publication is complete, and the remaining items are limited to genuine unimplemented Tier 2/Tier 3 backlog beyond this release.**
+**Current: `v0.3.2` is released from `master`; release-closeout publication is complete, and the remaining items are limited to genuine unimplemented Tier 2 and Tier 3 backlog beyond this release.**
 
 Current command surface summary:
 

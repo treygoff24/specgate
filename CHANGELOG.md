@@ -4,6 +4,20 @@ All notable changes to Specgate are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-10
+
+### Performance + defaults
+
+- Pruned default-excluded directories during source discovery so nested workspace paths like `node_modules` no longer inflate analysis cost.
+- Reused graph analyses in dependency-rule evaluation instead of rediscovering and reparsing the project.
+- Expanded built-in excluded directories to include modern JS build and cache outputs such as `.next`, `.turbo`, `.nuxt`, `.svelte-kit`, `.astro`, and `.output`.
+- Updated `specgate init` to render the live built-in `exclude` and `test_patterns` defaults instead of scaffolding empty lists that disabled the safer defaults.
+
+### Docs
+
+- Refreshed the operator, getting-started, spec-language, and supporting docs so they now match the current runtime defaults and explain root-relative versus recursive glob behavior more clearly.
+- Polished the active human-facing documentation surface for tone, clarity, and release-line accuracy.
+
 ## [0.3.1] - 2026-03-11
 
 - Documentation/workflow parity fixes for governance, ownership diagnostics, install fallback, release checksum guidance, and baseline metadata commands.

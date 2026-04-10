@@ -1,6 +1,6 @@
 # SARIF Output & GitHub Code Scanning
 
-specgate can output violations in SARIF 2.1.0 format for integration with GitHub Code Scanning.
+Specgate can emit SARIF 2.1.0 output for GitHub Code Scanning.
 
 ## Usage
 
@@ -35,7 +35,7 @@ jobs:
           sarif_file: specgate.sarif
 ```
 
-## How It Works
+## How it works
 
 - Each policy violation becomes a SARIF `result`
 - Rule IDs map to SARIF `reportingDescriptor` entries

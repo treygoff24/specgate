@@ -1,22 +1,17 @@
 # CI Gate Understanding
 
-**How Specgate works as a reliable CI merge gate.**
-
 This document explains the CI patterns, exit codes, and deterministic contracts that make Specgate reliable in automated pipelines.
 
 ---
 
-## The Problem Specgate Solves
+## The problem Specgate solves
 
-Traditional architecture tests suffer from:
-- **Flaky output** — Timestamps, paths, ordering vary between runs
-- **Noise** — Existing violations hide new problems
-- **Blast radius** — One file change shouldn't require full re-check
+Traditional architecture checks tend to fail in predictable ways:
+- output changes from run to run because ordering or formatting drifts
+- existing violations drown out the one new problem that matters
+- a small change forces a full re-check of the whole repo
 
-Specgate solves these with:
-- **Deterministic output** — Byte-identical for same inputs
-- **Baseline fingerprinting** — Suppress known violations
-- **Git-aware blast-radius** — Only check affected modules
+Specgate addresses those problems with deterministic output, baseline fingerprinting, and git-aware blast-radius analysis.
 
 ## Gate taxonomy
 

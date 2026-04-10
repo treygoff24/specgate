@@ -1,6 +1,6 @@
 # cli/
 
-Wave 2C command wiring.
+This module owns command wiring, command-level contracts, and CLI-facing behavior.
 
 Implemented commands:
 - `check`

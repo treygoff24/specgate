@@ -1,10 +1,10 @@
 # Specgate
 
-**Stop AI agents from silently destroying your architecture.**
+**Keep AI agents from quietly eroding your architecture.**
 
-Specgate is a Rust CLI that enforces module boundaries, dependency rules, and architectural intent for TypeScript/JavaScript projects. It produces byte-identical CI output, tracks when rules change (so agents can't quietly weaken them), and adopts incrementally via baselines.
+Specgate is a Rust CLI for enforcing module boundaries, dependency rules, and architectural intent in TypeScript and JavaScript repositories. It gives you deterministic CI output, tracks policy changes so rules cannot be quietly weakened, and supports incremental rollout through baselines.
 
-If you're running AI coding agents on production codebases and don't have structural enforcement, you're accumulating architectural debt at the rate your agents can write code.
+If you are letting AI coding agents work in production codebases without structural guardrails, architectural debt accumulates at the same speed they generate code.
 
 ## Install
 
@@ -16,7 +16,7 @@ npx @treygoff/specgate check
 npm install -g @treygoff/specgate
 
 # From source (requires Rust)
-cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.1
+cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.2
 
 # Or download a pre-built binary from the latest release:
 # https://github.com/treygoff24/specgate/releases
@@ -50,6 +50,12 @@ specgate check
 # 4. See violations (if any)
 specgate check --baseline-diff
 ```
+
+`specgate init` writes `specgate.config.yml` with the current built-in `exclude`
+and `test_patterns` defaults so nested workspace directories like
+`node_modules`, `.next`, and `.turbo` stay pruned unless you intentionally
+override them. When you do customize `exclude`, keep any default entries you
+still want because `exclude` is an explicit list, not an additive merge.
 
 See [First 15 Minutes Guide](docs/reference/getting-started.md#first-15-minutes) for the full walkthrough.
 
@@ -180,7 +186,7 @@ See [Policy diff reference](docs/reference/policy-diff.md) for format details, e
 
 ## Project Status
 
-**Status (as of 2026-03-11): `v0.3.1` is the current release from `master`, with Phase 5 envelope checks, `policy-diff` config governance, opt-in cross-file compensation, `check --deny-widenings`, SARIF output, doctor ownership, monorepo support, adversarial fixtures, and CLI refactor updates all shipped. Current roadmap items are now limited to genuinely unimplemented Tier 2/Tier 3 backlog work beyond the `v0.3.1` release.**
+**Status (as of 2026-04-10): `v0.3.2` is the current release from `master`. It includes the earlier governance and monorepo work plus the new performance hardening, safer init defaults, expanded built-in excludes, and docs cleanup. Current roadmap items are limited to the remaining Tier 2 and Tier 3 backlog beyond `v0.3.2`.**
 
 ### Completed
 - ✅ Envelope validation in Phase 5: contract `envelope` rules, scoped function matching, and static boundary checks.

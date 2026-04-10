@@ -1,6 +1,6 @@
 # baseline/
 
-Wave 2C baseline support.
+This module handles baseline storage, fingerprinting, and classification.
 
 ## Responsibilities
 
@@ -9,9 +9,9 @@ Wave 2C baseline support.
 - Classify violations as `new` vs `baseline` for report-only behavior
 - Track stale baseline entries for hygiene visibility
 
-## Baseline Lifecycle
+## Baseline lifecycle
 
-### Initial Creation
+### Initial creation
 
 ```bash
 specgate baseline --write .specgate-baseline.json
@@ -19,7 +19,7 @@ specgate baseline --write .specgate-baseline.json
 
 This creates a baseline file containing fingerprints for all current violations.
 
-### CI Integration
+### CI integration
 
 1. Check with baseline classification:
    ```bash
@@ -30,7 +30,7 @@ This creates a baseline file containing fingerprints for all current violations.
    - **New**: Not in baseline → enforced by severity
    - **Baseline**: Fingerprint matches → report-only (does not fail CI)
 
-### Stale Entry Hygiene
+### Stale entry hygiene
 
 The check output includes `stale_baseline_entries` in the summary when baseline
 entries no longer match any current violations. This indicates:
@@ -47,7 +47,7 @@ git add .specgate-baseline.json
 git commit -m "chore: update baseline"
 ```
 
-### Fingerprint Stability
+### Fingerprint stability
 
 Fingerprints are stable across runs when:
 - File paths (repo-relative) are unchanged
@@ -59,7 +59,7 @@ Fingerprints may change when:
 - Rules are refactored (new rule IDs)
 - Violation details (line numbers, messages) change
 
-### Governance Fields
+### Governance fields
 
 The verdict output includes these baseline-related fields:
 

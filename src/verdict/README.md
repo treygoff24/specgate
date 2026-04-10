@@ -1,6 +1,6 @@
 # verdict/
 
-Wave 2C verdict assembly.
+This module assembles `check` results into the final verdict formats.
 
 Responsibilities:
 - Build deterministic JSON output for `check` results

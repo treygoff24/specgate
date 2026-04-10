@@ -1,5 +1,7 @@
 # Specgate Dogfood Rollout Checklist
 
+This checklist is the default rollout path for a new Specgate consumer.
+
 ## Pre-launch prerequisites
 
 Examples below use `origin/main` as shorthand for the consumer repo's default
@@ -23,7 +25,7 @@ branch ref. Substitute your actual default branch ref when it differs.
 - Track baseline creation and any drift in `summary.stale_baseline_entries`.
 - Verify spec violations flow to GitHub code scanning when SARIF is enabled.
 
-## Week 1–2 (steady-state)
+## Week 1-2 (steady state)
 
 1. Enable blast-radius mode for PR checks (`--since origin/main`).
 2. Require `baseline` updates only through PR-approved maintenance windows.

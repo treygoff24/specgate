@@ -8,6 +8,7 @@ use tempfile::TempDir;
 use super::test_support::{write_basic_project, write_basic_project_with_edge, write_file};
 use crate::cli::doctor::STRUCTURED_TRACE_SCHEMA_VERSION;
 use crate::cli::{EXIT_CODE_PASS, EXIT_CODE_POLICY_VIOLATIONS, EXIT_CODE_RUNTIME_ERROR, run};
+use crate::spec::SpecConfig;
 
 fn parse_json(stdout: &str) -> Value {
     serde_json::from_str(stdout).expect("cli output json")
@@ -585,6 +586,32 @@ fn init_scaffold_includes_version_2_3_and_empty_contracts() {
     assert!(spec_content.contains("module: \"app\""));
     assert!(spec_content.contains("boundaries:"));
     assert!(spec_content.contains("constraints: []"));
+}
+
+#[test]
+fn init_scaffold_renders_current_runtime_defaults() {
+    let temp = TempDir::new().expect("tempdir");
+
+    let result = run([
+        "specgate",
+        "init",
+        "--project-root",
+        temp.path().to_str().expect("utf8 path"),
+    ]);
+    assert_eq!(result.exit_code, EXIT_CODE_PASS);
+
+    let config_content =
+        fs::read_to_string(temp.path().join("specgate.config.yml")).expect("read scaffold config");
+    let parsed: SpecConfig = yaml_serde::from_str(&config_content).expect("parse scaffold config");
+    let expected = SpecConfig {
+        spec_dirs: vec!["modules".to_string()],
+        ..SpecConfig::default()
+    };
+
+    assert_eq!(parsed, expected);
+    assert!(config_content.contains("\"**/.next/**\""));
+    assert!(config_content.contains("\"**/.turbo/**\""));
+    assert!(config_content.contains("\"**/*.test.ts\""));
 }
 
 fn run_git(root: &Path, args: &[&str]) -> String {

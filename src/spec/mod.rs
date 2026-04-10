@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::GlobSet;
 use miette::Diagnostic;
 use thiserror::Error;
 use walkdir::WalkDir;
@@ -29,6 +29,9 @@ pub use types::{Boundaries, Constraint, Severity, SpecFile, Visibility};
 pub use validation::{ValidationIssue, ValidationLevel, ValidationReport, validate_specs};
 
 use crate::deterministic::normalize_path;
+use crate::spec::config::{
+    build_exclude_matcher, include_dir_set, path_matches_exclude, should_skip_default_dir,
+};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum SpecError {
@@ -127,7 +130,12 @@ pub fn load_spec(path: &Path) -> Result<SpecFile> {
 
 /// Discover all `.spec.yml` files under configured directories in deterministic order.
 pub fn discover_specs(project_root: &Path, config: &SpecConfig) -> Result<Vec<SpecFile>> {
-    let exclude_matcher = build_globset(&config.exclude)?;
+    let exclude_matcher =
+        build_exclude_matcher(&config.exclude).map_err(|source| SpecError::InvalidGlob {
+            pattern: "<globset>".to_string(),
+            source,
+        })?;
+    let include_dirs = include_dir_set(&config.include_dirs);
 
     let mut specs = Vec::new();
     let mut seen = BTreeSet::new();
@@ -138,7 +146,19 @@ pub fn discover_specs(project_root: &Path, config: &SpecConfig) -> Result<Vec<Sp
             continue;
         }
 
-        for entry in WalkDir::new(&absolute_dir).follow_links(true).into_iter() {
+        for entry in WalkDir::new(&absolute_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|entry| {
+                !should_skip_spec_entry(
+                    project_root,
+                    entry.path(),
+                    entry.file_type().is_dir(),
+                    &include_dirs,
+                    &exclude_matcher,
+                )
+            })
+        {
             let entry = entry.map_err(|source| SpecError::WorkspaceTraversal {
                 path: absolute_dir.clone(),
                 source,
@@ -148,11 +168,11 @@ pub fn discover_specs(project_root: &Path, config: &SpecConfig) -> Result<Vec<Sp
             }
 
             let path = entry.path();
-            let normalized_relative = normalize_relative(project_root, path);
-            if exclude_matcher.is_match(&normalized_relative) {
+            if path_matches_exclude(project_root, path, false, &exclude_matcher) {
                 continue;
             }
 
+            let normalized_relative = normalize_relative(project_root, path);
             if !normalized_relative.ends_with(".spec.yml") {
                 continue;
             }
@@ -176,6 +196,24 @@ pub fn discover_specs(project_root: &Path, config: &SpecConfig) -> Result<Vec<Sp
     Ok(specs)
 }
 
+fn should_skip_spec_entry(
+    project_root: &Path,
+    path: &Path,
+    is_dir: bool,
+    include_dirs: &BTreeSet<String>,
+    exclude_matcher: &GlobSet,
+) -> bool {
+    if should_skip_default_dir(project_root, path, include_dirs) {
+        return true;
+    }
+
+    if !is_dir {
+        return false;
+    }
+
+    path_matches_exclude(project_root, path, true, exclude_matcher)
+}
+
 /// Discover + validate specs. Validation warnings are retained in report.
 pub fn discover_and_validate(
     project_root: &Path,
@@ -184,22 +222,6 @@ pub fn discover_and_validate(
     let specs = discover_specs(project_root, config)?;
     let report = validate_specs(&specs);
     Ok((specs, report))
-}
-
-fn build_globset(patterns: &[String]) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = Glob::new(pattern).map_err(|source| SpecError::InvalidGlob {
-            pattern: pattern.clone(),
-            source,
-        })?;
-        builder.add(glob);
-    }
-
-    builder.build().map_err(|source| SpecError::InvalidGlob {
-        pattern: "<globset>".to_string(),
-        source,
-    })
 }
 
 fn normalize_relative(project_root: &Path, path: &Path) -> String {

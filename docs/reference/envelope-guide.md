@@ -1,6 +1,6 @@
 # Envelope Enforcement Guide
 
-This guide explains how Specgate enforces runtime validation site coverage for boundary contracts.
+This guide explains how Specgate checks runtime validation coverage for boundary contracts.
 
 ## What it does
 
@@ -13,13 +13,13 @@ Concretely, it looks for calls equivalent to `boundary.validate('create_user', .
 
 If the check cannot find both parts in the matched scope, it emits `boundary.envelope_missing` as a **warning**.
 
-## Why a wrapper package (instead of direct `zod.parse()`)
+## Why a wrapper package instead of direct `zod.parse()`
 
 Specgate’s AST check needs deterministic static evidence that the contract you declared is the same contract the code is validating.
 
 Without a wrapper call that includes a contract ID literal, Specgate can’t confidently link code to a specific contract. For example, `zod.parse(data)` may validate data but does not declare **which** contract is being enforced.
 
-A wrapper call gives a mechanical anchor:
+A wrapper call gives the checker something concrete to match:
 
 - first argument must be a literal string contract ID (e.g. `"create_user"`)
 - that exact string is compared to the contract `id`
@@ -38,7 +38,7 @@ envelope:
 
 ## Supported patterns
 
-Specgate’s envelope check is intentionally practical and supports the following invocation shapes:
+The envelope check is deliberately practical and supports the following invocation shapes:
 
 - ESM import: `import { boundary } from 'specgate-envelope'`
 - Destructured import: `import { validate } from 'specgate-envelope'`

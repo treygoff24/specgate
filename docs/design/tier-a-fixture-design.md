@@ -1,4 +1,4 @@
-# Tier A Fixture Design v1 (Catchable-Now CI Gate)
+# Tier A Fixture Design v1
 
 ## Objective
 
@@ -8,7 +8,7 @@ Define a Tier A fixture set that is:
 3. Product-useful (guards real failure classes),
 4. Distinct from Tier B future/proxy corpus.
 
-Tier B remains valuable roadmap evidence, but Tier A is the merge gate.
+Tier B remains roadmap evidence. Tier A is the merge gate.
 
 ---
 

@@ -1,8 +1,8 @@
 # Adversarial Testing Catalog
 
-This catalog summarizes behavior validated by `tests/fixtures/adversarial/*` and what to expect from Specgate today.
+This catalog summarizes what the adversarial fixtures in `tests/fixtures/adversarial/*` prove today, along with the gaps that are still open.
 
-## What specgate catches today
+## What Specgate catches today
 
 | Scenario | Rule exercised | Why this is caught |
 |---|---|---|
@@ -14,7 +14,7 @@ This catalog summarizes behavior validated by `tests/fixtures/adversarial/*` and
 | `aliased-deep-import` | `boundary.never_imports` | `oxc_resolver` consumes `tsconfig` path aliases, allowing alias targets to be resolved correctly before boundary checks. |
 | `ownership-overlap` | Doctor ownership diagnostic | Spec overlaps are surfaced by `specgate doctor ownership` when module ownership globs intersect. |
 
-## What specgate cannot catch yet (known gaps)
+## What Specgate cannot catch yet
 
 For each known gap, this lists (1) why it is currently unhandled, (2) whether there is a planned fix, and (3) available mitigations.
 

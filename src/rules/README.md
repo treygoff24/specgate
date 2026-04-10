@@ -1,6 +1,5 @@
 # rules/
 
-Deferred to later phases.
+This module contains rule evaluation for boundaries, dependencies, layers, cycles, and related policy checks.
 
-Rule evaluation (boundary enforcement, dependency policy, layers, cycles) depends on the
-Phase 1 foundation modules and will be implemented next.
+It sits on top of the parser, resolver, spec, and graph layers and turns their data into deterministic violations.

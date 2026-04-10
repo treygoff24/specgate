@@ -1,8 +1,8 @@
 # graph/
 
-Phase 2A dependency graph substrate.
+This module builds the dependency graph that the rest of Specgate reasons over.
 
-This module provides deterministic project-wide graph construction on top of parser + resolver outputs:
+It provides deterministic, project-wide graph construction on top of parser and resolver output:
 
 - source file discovery (`discovery.rs`)
 - module membership lookup (`DependencyGraph::module_of_file`, `files_in_module`)

@@ -1,8 +1,8 @@
 # MVP Merge Gate (CI)
 
-**One operator-facing definition of “safe to merge” for Specgate.**
+This document defines what "safe to merge" means for Specgate itself.
 
-This repository defines a single merge-ready gate for contract-sensitive changes.
+The repository has one merge-ready gate for contract-sensitive changes.
 
 - Workflow: `.github/workflows/mvp-merge-gate.yml`
 - Runner script: `scripts/ci/mvp_gate.sh`

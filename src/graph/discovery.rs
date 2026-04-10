@@ -2,13 +2,15 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::GlobSet;
 use miette::Diagnostic;
 use thiserror::Error;
 use walkdir::Error as WalkDirError;
 use walkdir::WalkDir;
 
-use crate::deterministic::normalize_path;
+use crate::spec::config::{
+    build_exclude_matcher, include_dir_set, path_matches_exclude, should_skip_default_dir,
+};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum DiscoveryError {
@@ -42,7 +44,25 @@ pub fn discover_source_files(
     project_root: &Path,
     exclude_patterns: &[String],
 ) -> Result<DiscoveryResult> {
-    let exclude_matcher = build_globset(exclude_patterns)?;
+    discover_source_files_with_options(project_root, exclude_patterns, &[])
+}
+
+/// Discover all TypeScript/JavaScript source files with directory-pruning options.
+///
+/// In addition to explicit exclude globs, this always prunes Specgate's default
+/// excluded directories (for example nested `node_modules`) unless they are
+/// re-included through `include_dirs`.
+pub fn discover_source_files_with_options(
+    project_root: &Path,
+    exclude_patterns: &[String],
+    include_dirs: &[String],
+) -> Result<DiscoveryResult> {
+    let exclude_matcher =
+        build_exclude_matcher(exclude_patterns).map_err(|source| DiscoveryError::InvalidGlob {
+            pattern: "<globset>".to_string(),
+            source,
+        })?;
+    let include_dirs = include_dir_set(include_dirs);
 
     let mut files = BTreeSet::new();
     let mut warnings = Vec::new();
@@ -51,6 +71,15 @@ pub fn discover_source_files(
         .follow_links(true)
         .sort_by_file_name()
         .into_iter()
+        .filter_entry(|entry| {
+            !should_skip_entry(
+                project_root,
+                entry.path(),
+                entry.file_type().is_dir(),
+                &include_dirs,
+                &exclude_matcher,
+            )
+        })
     {
         let entry = match entry {
             Ok(entry) => entry,
@@ -69,8 +98,7 @@ pub fn discover_source_files(
             continue;
         }
 
-        let normalized_relative = normalize_relative(project_root, path);
-        if exclude_matcher.is_match(&normalized_relative) {
+        if path_matches_exclude(project_root, path, false, &exclude_matcher) {
             continue;
         }
 
@@ -84,6 +112,24 @@ pub fn discover_source_files(
         files: files.into_iter().collect(),
         warnings,
     })
+}
+
+fn should_skip_entry(
+    project_root: &Path,
+    path: &Path,
+    is_dir: bool,
+    include_dirs: &BTreeSet<String>,
+    exclude_matcher: &GlobSet,
+) -> bool {
+    if should_skip_default_dir(project_root, path, include_dirs) {
+        return true;
+    }
+
+    if !is_dir {
+        return false;
+    }
+
+    path_matches_exclude(project_root, path, true, exclude_matcher)
 }
 
 fn warning_from_walkdir_error(project_root: &Path, error: &WalkDirError) -> DiscoveryWarning {
@@ -100,31 +146,6 @@ fn warning_from_walkdir_error(project_root: &Path, error: &WalkDirError) -> Disc
     }
 }
 
-fn build_globset(patterns: &[String]) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = Glob::new(pattern).map_err(|source| DiscoveryError::InvalidGlob {
-            pattern: pattern.clone(),
-            source,
-        })?;
-        builder.add(glob);
-    }
-
-    builder
-        .build()
-        .map_err(|source| DiscoveryError::InvalidGlob {
-            pattern: "<globset>".to_string(),
-            source,
-        })
-}
-
-fn normalize_relative(project_root: &Path, path: &Path) -> String {
-    match path.strip_prefix(project_root) {
-        Ok(relative) => normalize_path(relative),
-        Err(_) => normalize_path(path),
-    }
-}
-
 fn is_source_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|ext| ext.to_str()),
@@ -137,6 +158,8 @@ mod tests {
     use std::fs;
 
     use tempfile::TempDir;
+
+    use crate::deterministic::normalize_path;
 
     use super::*;
 
@@ -201,5 +224,57 @@ mod tests {
                 .map(|path| path.to_string_lossy().contains("src/loop/back"))
                 .unwrap_or(false)
         }));
+    }
+
+    #[test]
+    fn discover_source_files_prunes_nested_default_excluded_dirs() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("apps/web/node_modules/pkg")).expect("mkdir nested");
+        fs::create_dir_all(temp.path().join("src")).expect("mkdir src");
+
+        fs::write(temp.path().join("src/main.ts"), "export const main = 1;\n").expect("write");
+        fs::write(
+            temp.path().join("apps/web/node_modules/pkg/index.js"),
+            "module.exports = {};\n",
+        )
+        .expect("write nested dep");
+
+        let result =
+            discover_source_files_with_options(temp.path(), &["node_modules/**".to_string()], &[])
+                .expect("discover");
+
+        let canonical_root = fs::canonicalize(temp.path()).expect("canonical root");
+        let rel: Vec<_> = result
+            .files
+            .iter()
+            .map(|path| {
+                normalize_path(
+                    path.strip_prefix(&canonical_root)
+                        .expect("path should be under temp root"),
+                )
+            })
+            .collect();
+
+        assert_eq!(rel, vec!["src/main.ts".to_string()]);
+    }
+
+    #[test]
+    fn discover_source_files_can_reinclude_default_excluded_dirs() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(temp.path().join("vendor/pkg")).expect("mkdir vendor");
+        fs::write(
+            temp.path().join("vendor/pkg/index.ts"),
+            "export const v = 1;\n",
+        )
+        .expect("write vendor file");
+
+        let result = discover_source_files_with_options(temp.path(), &[], &["vendor".to_string()])
+            .expect("discover");
+
+        assert_eq!(result.files.len(), 1);
+        assert!(
+            result.files[0].ends_with(Path::new("vendor/pkg/index.ts")),
+            "vendor file should remain discoverable when re-included"
+        );
     }
 }

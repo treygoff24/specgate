@@ -10,11 +10,11 @@
 
 ## Origin
 
-Paul Bohm's thesis: when AI agents generate code at scale, the bottleneck shifts from writing to verification. The winning pattern is contract-driven boundary enforcement that makes entire classes of bugs structurally impossible. Specgate already embodies most of this at the specification layer. This extension closes the gap between "module boundaries are declared" and "data crossing those boundaries is validated."
+Paul Bohm's thesis was simple: once AI agents can write code quickly, the bottleneck moves from writing to verification. The useful pattern is contract-driven boundary enforcement that makes whole classes of bugs structurally impossible. Specgate already did most of that at the specification layer. This extension closes the gap between "module boundaries are declared" and "data crossing those boundaries is validated."
 
-## Dogfooding Context (2026-03-02)
+## Dogfooding context (2026-03-02)
 
-Specgate was dogfooded on the Hearth codebase (React + Node.js, ~156 source files, 386 import edges). Key learnings that inform this spec:
+Specgate was dogfooded on the Hearth codebase, React plus Node.js, roughly 156 source files and 386 import edges. These were the main lessons that shaped the spec:
 
 1. **Zero-violation baseline is achievable.** A well-structured codebase passes on first run. The prescriptive approach (define ideal architecture, then enforce) works better than the descriptive approach (baseline current state).
 2. **Glob semantics matter.** Found and fixed a `literal_separator` bug where `*` matched across directory separators. Any new glob-based matching (like `match.files`) must use `literal_separator(true)`.
@@ -22,7 +22,7 @@ Specgate was dogfooded on the Hearth codebase (React + Node.js, ~156 source file
 4. **CI integration is straightforward.** Blast-radius mode (`--since origin/main`) works well for PR checks. Contract violations should integrate seamlessly with existing `--since` filtering.
 5. **The tool is fast enough.** 325ms for 156 files / 386 edges. Contract file existence checks add negligible overhead. AST-based envelope checks (Phase 5) need to be similarly fast.
 
-## Design Principles
+## Design principles
 
 1. **Transport-agnostic contracts.** Specgate doesn't care *how* data crosses a boundary, only *that* it crosses through a validated choke point. The contract is a refinement type: `Unvalidated<T> → Validated<T>`.
 

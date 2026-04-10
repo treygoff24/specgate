@@ -1,6 +1,6 @@
 # Specgate TS/JS v1 Support Matrix
 
-This matrix defines support commitments for the TypeScript/JavaScript v1 surface of Specgate across GitHub binary artifacts and the npm wrapper package.
+This matrix defines support commitments for the TypeScript and JavaScript v1 surface of Specgate across GitHub binary artifacts and the npm wrapper package.
 
 Here, `v1` refers to the TS/JS support-policy surface, not the `.spec.yml` schema version.
 

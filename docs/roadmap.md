@@ -1,6 +1,6 @@
 # Specgate Roadmap
 
-This is the current operator-facing source of truth for post-`v0.3.1` roadmap status. Historical plans stay in `docs/plans/` and `docs/archive/`, but active status belongs here.
+This is the current operator-facing source of truth for post-`v0.3.2` roadmap status. Historical plans stay in `docs/plans/` and `docs/archive/`. Active status belongs here.
 
 ## Landed
 
@@ -18,11 +18,11 @@ This is the current operator-facing source of truth for post-`v0.3.1` roadmap st
 
 ## Released
 
-- `v0.3.1` is the current release cut from `master` after re-running the merge gate, verifying `policy-diff` against `origin/master`, building with `--release --locked`, smoke-checking the binary, and generating a SHA-256 checksum.
+- `v0.3.2` is the current release cut from `master` after re-running the merge gate, verifying `policy-diff` against `origin/master`, building with `--release --locked`, smoke-checking the binary, and generating a SHA-256 checksum.
 
 ## Current Status
 
-- The `v0.3.1` release-closeout work is complete.
+- The `v0.3.2` release-closeout work is complete.
 - Remaining items below are genuine unimplemented Tier 2/Tier 3 backlog, not unfinished release-publication work.
 
 ## Remaining Tier 2 / Tier 3 Backlog

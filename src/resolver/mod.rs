@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use miette::Diagnostic;
@@ -14,7 +14,7 @@ use crate::resolver::classify::{
 };
 use crate::spec::{
     SpecFile,
-    config::{DEFAULT_EXCLUDED_DIRS, include_dir_set},
+    config::{include_dir_set, should_skip_default_dir},
 };
 
 pub mod classify;
@@ -510,27 +510,12 @@ pub(crate) fn nearest_tsconfig_for_dir_uncached(
     None
 }
 
-pub(crate) fn excluded_dir_names() -> &'static [&'static str] {
-    DEFAULT_EXCLUDED_DIRS
-}
-
 fn should_skip_module_map_entry(
     project_root: &Path,
     path: &Path,
     include_dirs: &BTreeSet<String>,
 ) -> bool {
-    let Ok(relative) = path.strip_prefix(project_root) else {
-        return false;
-    };
-
-    relative.components().any(|component| {
-        let Component::Normal(name) = component else {
-            return false;
-        };
-        let name = name.to_string_lossy();
-        let segment = name.as_ref();
-        excluded_dir_names().contains(&segment) && !include_dirs.contains(segment)
-    })
+    should_skip_default_dir(project_root, path, include_dirs)
 }
 
 fn containing_dir(from_file: &Path, project_root: &Path) -> PathBuf {
@@ -751,18 +736,6 @@ mod tests {
             resolver.cache_len(),
             0,
             "read-only explanation should not populate the resolution cache"
-        );
-    }
-
-    #[test]
-    fn resolver_and_workspace_discovery_share_default_excluded_dirs() {
-        assert_eq!(
-            excluded_dir_names(),
-            crate::spec::workspace_discovery::excluded_dir_names()
-        );
-        assert_eq!(
-            excluded_dir_names(),
-            crate::spec::config::DEFAULT_EXCLUDED_DIRS
         );
     }
 

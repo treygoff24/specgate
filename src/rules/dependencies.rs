@@ -69,7 +69,7 @@ impl RuleWithResolver for DependencyRule {
         ctx: &RuleContext<'_>,
         resolver: &mut ModuleResolver,
     ) -> Result<Vec<RuleViolation>> {
-        let typed = evaluate_dependency_rules(ctx.project_root, resolver, ctx.specs, ctx.config)?;
+        let typed = evaluate_dependency_rules_with_graph(ctx, resolver)?;
         Ok(typed_violations_to_rule_violations(typed))
     }
 }
@@ -94,15 +94,60 @@ pub fn evaluate_dependency_rules(
     specs: &[SpecFile],
     config: &SpecConfig,
 ) -> Result<Vec<DependencyViolation>> {
+    let discovered = discovery::discover_source_files(project_root, &config.exclude)?;
+    let analyzed_files = discovered
+        .files
+        .into_iter()
+        .map(|file| {
+            let analysis = parser::parse_file(&file)?;
+            Ok((file, analysis))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    evaluate_dependency_rules_from_sources(
+        project_root,
+        resolver,
+        specs,
+        config,
+        analyzed_files
+            .iter()
+            .map(|(file, analysis)| (file.as_path(), analysis)),
+    )
+}
+
+fn evaluate_dependency_rules_with_graph(
+    ctx: &RuleContext<'_>,
+    resolver: &mut ModuleResolver,
+) -> Result<Vec<DependencyViolation>> {
+    evaluate_dependency_rules_from_sources(
+        ctx.project_root,
+        resolver,
+        ctx.specs,
+        ctx.config,
+        ctx.graph
+            .files()
+            .into_iter()
+            .map(|node| (node.path.as_path(), &node.analysis)),
+    )
+}
+
+fn evaluate_dependency_rules_from_sources<'a, I>(
+    project_root: &Path,
+    resolver: &mut ModuleResolver,
+    specs: &[SpecFile],
+    config: &SpecConfig,
+    sources: I,
+) -> Result<Vec<DependencyViolation>>
+where
+    I: IntoIterator<Item = (&'a Path, &'a parser::FileAnalysis)>,
+{
     let policies = module_policies(specs);
     let test_matcher = build_test_globset(&config.test_patterns)?;
 
-    let discovered = discovery::discover_source_files(project_root, &config.exclude)?;
-
     let mut violations = Vec::new();
 
-    for file in discovered.files {
-        let Some(module_id) = resolver.module_for_file(&file).map(ToString::to_string) else {
+    for (file, analysis) in sources {
+        let Some(module_id) = resolver.module_for_file(file).map(ToString::to_string) else {
             continue;
         };
 
@@ -114,15 +159,14 @@ pub fn evaluate_dependency_rules(
             continue;
         }
 
-        let analysis = parser::parse_file(&file)?;
-        let is_test = matches_test_file(project_root, &file, test_matcher.as_ref());
+        let is_test = matches_test_file(project_root, file, test_matcher.as_ref());
 
-        for (specifier, has_runtime_usage) in dependency_specifiers_with_runtime_usage(&analysis) {
+        for (specifier, has_runtime_usage) in dependency_specifiers_with_runtime_usage(analysis) {
             if !has_runtime_usage && !config.enforce_type_only_imports {
                 continue;
             }
 
-            let ResolvedImport::ThirdParty { package_name } = resolver.resolve(&file, &specifier)
+            let ResolvedImport::ThirdParty { package_name } = resolver.resolve(file, &specifier)
             else {
                 continue;
             };
@@ -130,7 +174,7 @@ pub fn evaluate_dependency_rules(
             if policy.forbidden_dependencies.contains(&package_name) {
                 violations.push(DependencyViolation {
                     module_id: module_id.clone(),
-                    file: file.clone(),
+                    file: file.to_path_buf(),
                     specifier,
                     package_name,
                     kind: DependencyViolationKind::ForbiddenDependency,
@@ -150,7 +194,7 @@ pub fn evaluate_dependency_rules(
             if !policy.allowed_dependencies.contains(&package_name) {
                 violations.push(DependencyViolation {
                     module_id: module_id.clone(),
-                    file: file.clone(),
+                    file: file.to_path_buf(),
                     specifier,
                     package_name,
                     kind: DependencyViolationKind::DependencyNotAllowed,

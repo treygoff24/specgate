@@ -1,6 +1,6 @@
 # Releasing Specgate
 
-This document defines how to cut a Specgate release candidate and final release.
+This is the release runbook for Specgate. Use it when you are cutting either a release candidate or a final release.
 
 ## Versioning
 
@@ -10,12 +10,12 @@ Specgate uses [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 - **MINOR**: backward-compatible feature additions.
 - **PATCH**: backward-compatible fixes and documentation-only corrections.
 
-Use `Cargo.toml` as the source of truth for the Rust crate version and tag, and keep `npm/specgate/package.json` aligned before stable npm wrapper releases.
+Treat `Cargo.toml` as the source of truth for the Rust crate version and tag. Keep `npm/specgate/package.json` aligned before shipping a stable npm wrapper release.
 
 ## Release checklist
 
 1. Ensure the working tree is clean and pinned to the intended release branch/tag commit.
-2. Run merge/release readiness gates:
+2. Run the release-readiness gates:
    - `./scripts/ci/mvp_gate.sh`
    - Governance gate for the Specgate repo release commit:
      - `cargo run --quiet -- policy-diff --base origin/master --format json`
@@ -24,7 +24,7 @@ Use `Cargo.toml` as the source of truth for the Rust crate version and tag, and 
      - `docs/examples/specgate-consumer-github-actions.yml`
      - `docs/reference/sarif-github-actions.md`
      - `docs/reference/operator-guide.md`
-3. Confirm release notes and upgrade guidance are aligned for the release:
+3. Confirm the release notes and upgrade guidance are aligned:
    - `CHANGELOG.md`
    - `README.md`
    - `docs/roadmap.md`
@@ -38,7 +38,7 @@ Use `Cargo.toml` as the source of truth for the Rust crate version and tag, and 
    - `shasum -a 256 dist/specgate-${TAG}-${TARGET}.tar.gz`
 7. Create an annotated tag for the release (for example `vX.Y.Z-rc1`):
    - `git tag -a vX.Y.Z-rc1 -m "Specgate vX.Y.Z-rc1"`
-8. Push branch + tag and publish release artifacts/notes in CI.
+8. Push the branch and tag, then publish release artifacts and notes in CI.
 
 ## Repo-specific note
 

@@ -1,6 +1,6 @@
 # Specgate for Agents
 
-If you are an agent helping a user install, evaluate, or integrate Specgate, start here.
+If you are an agent helping someone install, evaluate, or integrate Specgate, start here.
 
 ## What Specgate Is
 
@@ -12,7 +12,7 @@ It checks things like:
 - whether policy changes widen or narrow architecture rules,
 - whether ownership coverage is missing or overlapping.
 
-The CLI is designed for deterministic CI use. Output shape, fixture behavior, and golden files are treated as product contracts.
+The CLI is built for deterministic CI use. Output shape, fixture behavior, and golden files are treated as product contracts.
 
 ## What It Is For
 
@@ -22,23 +22,23 @@ Use Specgate when a repo needs:
 - policy-governance checks across `.spec.yml` changes,
 - ownership diagnostics for module/spec coverage.
 
-Do not position it as a generic linter, formatter, or type checker. It complements those tools.
+Do not describe it as a generic linter, formatter, or type checker. It complements those tools.
 
 ## Current Release
 
-- Current published release tag in this repo: `v0.3.1`
+- Current published release tag in this repo: `v0.3.2`
 - Source of truth for the release version: `Cargo.toml`
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ## Install
 
 Preferred path:
-- install the published release artifact for an explicit tag and verify its `.sha256` checksum before use
+- install the published release artifact for an explicit tag and verify its `.sha256` checksum before using it
 
 Fallback path:
 
 ```bash
-cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.1
+cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.3.2
 ```
 
 For the full release-asset flow, use:
@@ -77,9 +77,9 @@ Use in-band widening enforcement instead of a separate policy-diff step:
 specgate check --since origin/main --deny-widenings
 ```
 
-In consumer-repo examples, `origin/main` is shorthand for the target repo's
-default branch ref. Replace it with the real base ref when needed (for example
-`origin/master`).
+In consumer repo examples, `origin/main` is shorthand for the target repo's
+default branch ref. Replace it with the real base ref when needed, for example
+`origin/master`.
 
 Inspect ownership coverage:
 
@@ -116,7 +116,7 @@ If you are working inside the Specgate repo itself, do not treat `specgate check
 
 This repository contains intentionally invalid and duplicate fixture specs under `tests/fixtures/` for contract coverage. Those fixtures can make self-directed `specgate check` or `specgate doctor ownership` runs fail validation even when the product is healthy.
 
-For validating the Specgate product repo itself, prefer:
+When validating the Specgate product repo itself, prefer:
 
 ```bash
 ./scripts/ci/mvp_gate.sh

@@ -3,7 +3,7 @@
 use clap::Args;
 
 use super::*;
-use crate::spec::types::CURRENT_SPEC_VERSION;
+use crate::spec::{SpecConfig, types::CURRENT_SPEC_VERSION};
 
 #[derive(Debug, Clone, Args)]
 pub struct InitArgs {
@@ -55,10 +55,7 @@ pub(super) fn handle_init(args: InitArgs) -> CliRunResult {
         module_path_override.as_deref(),
     );
 
-    let config_content = format!(
-        "spec_dirs:\n  - \"{}\"\nexclude: []\ntest_patterns: []\n",
-        escape_yaml_double_quoted(&normalized_spec_dir)
-    );
+    let config_content = render_scaffold_config(&normalized_spec_dir);
 
     let mut created = Vec::new();
     let mut skipped_existing = Vec::new();
@@ -224,6 +221,27 @@ pub(crate) fn infer_root_module_path(project_root: &Path) -> Option<String> {
         .copied()
         .find(|dir| project_root.join(dir).is_dir())
         .map(|dir| format!("{dir}/**/*"))
+}
+
+fn render_scaffold_config(spec_dir: &str) -> String {
+    let defaults = SpecConfig::default();
+    let mut content = String::new();
+
+    content.push_str("spec_dirs:\n");
+    content.push_str(&render_yaml_string_list(&[spec_dir.to_string()]));
+    content.push_str("exclude:\n");
+    content.push_str(&render_yaml_string_list(&defaults.exclude));
+    content.push_str("test_patterns:\n");
+    content.push_str(&render_yaml_string_list(&defaults.test_patterns));
+
+    content
+}
+
+fn render_yaml_string_list(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| format!("  - \"{}\"\n", escape_yaml_double_quoted(value)))
+        .collect()
 }
 
 pub(crate) fn write_scaffold_file(

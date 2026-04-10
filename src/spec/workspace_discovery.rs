@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 use crate::deterministic::normalize_path;
 use crate::spec::{
     Result, SpecConfig, SpecError,
-    config::{DEFAULT_EXCLUDED_DIRS, include_dir_set},
+    config::{include_dir_set, should_skip_default_dir},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,14 +52,22 @@ pub fn discover_workspace_packages_strict(
 
     let mut candidate_dirs = BTreeSet::new();
     for pattern in patterns {
-        candidate_dirs.extend(expand_workspace_pattern(project_root, &pattern)?);
+        candidate_dirs.extend(expand_workspace_pattern(
+            project_root,
+            &pattern,
+            &include_dirs,
+        )?);
     }
 
     let mut packages = Vec::new();
     let mut used_modules = BTreeSet::new();
 
     for relative_dir in candidate_dirs {
-        if should_skip_workspace_dir(&relative_dir, &include_dirs) {
+        if should_skip_default_dir(
+            project_root,
+            &project_root.join(&relative_dir),
+            &include_dirs,
+        ) {
             continue;
         }
 
@@ -220,7 +228,11 @@ fn normalize_pattern(raw: &str) -> String {
         .replace('\\', "/")
 }
 
-fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Result<Vec<String>> {
+fn expand_workspace_pattern(
+    project_root: &Path,
+    pattern: &str,
+    include_dirs: &BTreeSet<String>,
+) -> Result<Vec<String>> {
     let normalized_pattern = normalize_pattern(pattern);
     if normalized_pattern.is_empty() {
         return Ok(Vec::new());
@@ -262,7 +274,9 @@ fn expand_workspace_pattern(project_root: &Path, pattern: &str) -> Result<Vec<St
         walker = walker.max_depth(1);
     }
 
-    for entry in walker {
+    for entry in walker.into_iter().filter_entry(|entry| {
+        !should_skip_workspace_entry(project_root, entry.path(), include_dirs)
+    }) {
         let entry = entry.map_err(|source| SpecError::WorkspaceTraversal {
             path: search_root.clone(),
             source,
@@ -293,14 +307,12 @@ fn workspace_source_path(project_root: &Path, pattern: &str) -> std::path::PathB
     project_root.join(pattern)
 }
 
-pub(crate) fn excluded_dir_names() -> &'static [&'static str] {
-    DEFAULT_EXCLUDED_DIRS
-}
-
-fn should_skip_workspace_dir(relative_dir: &str, include_dirs: &BTreeSet<String>) -> bool {
-    relative_dir
-        .split('/')
-        .any(|segment| excluded_dir_names().contains(&segment) && !include_dirs.contains(segment))
+fn should_skip_workspace_entry(
+    project_root: &Path,
+    path: &Path,
+    include_dirs: &BTreeSet<String>,
+) -> bool {
+    should_skip_default_dir(project_root, path, include_dirs)
 }
 
 #[cfg(test)]
@@ -507,7 +519,8 @@ mod tests {
     #[test]
     fn checked_discovery_rejects_invalid_workspace_glob() {
         let temp = TempDir::new().expect("tempdir");
-        let error = expand_workspace_pattern(temp.path(), "[abc*").expect_err("invalid glob");
+        let error = expand_workspace_pattern(temp.path(), "[abc*", &BTreeSet::new())
+            .expect_err("invalid glob");
 
         assert!(
             error.to_string().contains("invalid workspace glob"),

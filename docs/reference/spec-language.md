@@ -20,9 +20,9 @@ Specgate enforces strict version compatibility for spec files.
 | 2.0 | ❌ Not supported | Must upgrade to 2.2 or 2.3 |
 | 2 | ❌ Not supported | Must upgrade to 2.2 or 2.3 |
 
-### Why Strict Matching?
+### Why strict matching?
 
-The spec language is evolving rapidly during foundation phases. We enforce exact version matching to:
+The spec language is still evolving. Exact version matching keeps behavior clear and keeps migrations explicit:
 
 1. Force explicit version updates when specs change
 2. Make version compatibility unambiguous
@@ -136,6 +136,57 @@ telemetry:
 - `strict_ownership: true` enables blocking ownership checks in `specgate doctor ownership`.
 - `strict_ownership_level: errors` gates duplicate module ids and invalid ownership globs.
 - `strict_ownership_level: warnings` gates all ownership findings, including unclaimed files, overlaps, and orphaned specs.
+
+### Project config defaults
+
+`specgate init` writes `specgate.config.yml` with the current built-in defaults
+for `exclude` and `test_patterns` rendered explicitly:
+
+```yaml
+spec_dirs:
+  - "modules"
+exclude:
+  - "**/node_modules/**"
+  - "**/.next/**"
+  - "**/.turbo/**"
+  - "**/.nuxt/**"
+  - "**/.svelte-kit/**"
+  - "**/.astro/**"
+  - "**/.output/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/coverage/**"
+  - "**/generated/**"
+  - "**/target/**"
+  - "**/vendor/**"
+  - "**/.git/**"
+test_patterns:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/__tests__/**"
+  - "**/__mocks__/**"
+```
+
+Config rules that matter in monorepos:
+- `exclude` replaces the built-in list; it does not merge with it. If you
+  customize `exclude`, keep any defaults you still want.
+- `foo/**` is root-relative and only matches a top-level `foo/`.
+- `**/foo/**` is recursive and matches nested workspace paths such as
+  `apps/web/node_modules/` or `packages/site/.next/`.
+- `include_dirs` is only for intentionally re-including a directory name from
+  the built-in excluded set.
+
+Example:
+
+```yaml
+include_dirs:
+  - vendor
+```
+
+That re-includes `vendor/` directories that would otherwise be skipped by the
+built-in excluded-dir list.
 
 ### Doctor Ownership
 

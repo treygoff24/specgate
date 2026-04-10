@@ -2,7 +2,7 @@
 
 `specgate policy-diff` compares policy snapshots between two git refs and classifies each detected change as `widening`, `narrowing`, or `structural`.
 
-This command is for policy governance across git history. It diffs both module specs (`.spec.yml`) and the repo-root `specgate.config.yml`, then produces a deterministic report and exit code for CI gating.
+Use it when you want governance over policy changes across git history. It diffs both module specs, `.spec.yml`, and the repo-root `specgate.config.yml`, then produces a deterministic report and exit code that CI can trust.
 
 ## Usage
 

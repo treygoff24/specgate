@@ -4,7 +4,7 @@
 
 Baselines let operators track known violations without turning every CI run into
 triage churn. This policy defines how `specgate` baselines are created, reviewed,
-and retired for this MVP.
+and retired in the current product.
 
 ## In-scope baseline behavior
 
@@ -18,7 +18,7 @@ and retired for this MVP.
   - Baseline matches are report-only.
   - New violations follow normal severity policy.
 
-## Policy decisions for this release
+## Policy decisions
 
 1. **Baseline mismatch does not block merges by default**
    - A stale or missing match still reports in summary fields.
@@ -41,7 +41,7 @@ and retired for this MVP.
 
 ## Explicit limitations and future semantics
 
-The following capability classes are deferred and should be treated as explicit
+The following capability classes are still deferred and should be treated as explicit
 non-guarantees for now:
 
 - `C02` pattern-aware no-pattern style checks are not part of the enforced
@@ -50,7 +50,7 @@ non-guarantees for now:
 - `C07` unique-export/visibility edge cases are not yet fully enforced in the
   Tier A gate.
 
-## When baseline is invalid
+## When a baseline is invalid
 
 Treat the baseline as invalid and regenerate if:
 

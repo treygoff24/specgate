@@ -1,6 +1,6 @@
 # Contributing to Specgate
 
-Thanks for your interest in contributing. This document covers the basics.
+Thanks for wanting to contribute. This guide covers the basics so you can get a change in cleanly.
 
 ## Filing issues
 
@@ -11,7 +11,7 @@ Open a GitHub issue for bugs, feature requests, or questions. Include:
 - Minimal reproduction steps (a small repo or spec file that triggers the problem)
 - Expected vs actual behavior
 
-For boundary-rule false positives, include the spec file, the relevant source files, and the `specgate check` output.
+If you think a boundary rule produced a false positive, include the spec file, the relevant source files, and the `specgate check` output.
 
 ## Pull requests
 
@@ -26,7 +26,7 @@ cargo test
 ./scripts/ci/mvp_gate.sh
 ```
 
-4. Open a PR against `master`. Describe what changed and why.
+4. Open a PR against `master` and explain what changed and why.
 
 ## Code style
 
@@ -38,7 +38,7 @@ cargo test
 
 ## Tests
 
-All PRs must pass `cargo test`. The test suite has several layers:
+All PRs must pass `cargo test`. The suite has several layers:
 
 - **Unit tests** in `src/` modules
 - **Integration tests** in `tests/`
@@ -76,7 +76,7 @@ Specgate is a single Rust crate with internal module boundaries:
 
 ## Agent contributors
 
-AI agents are welcome contributors. Point your agent at [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md) for the onboarding path, then follow the same PR process as human contributors. The merge gate (`./scripts/ci/mvp_gate.sh`) is the source of truth for whether a change is shippable.
+AI agents are welcome contributors. Point the agent at [SPECGATE_FOR_AGENTS.md](SPECGATE_FOR_AGENTS.md), then follow the same PR process as a human contributor. The merge gate, `./scripts/ci/mvp_gate.sh`, is the source of truth for whether a change is ready to ship.
 
 ## License
 
