@@ -33,3 +33,10 @@ When multiple modules declare the same governance constraint rule (e.g., `enforc
 4. Remaining configs with different params are reported as config issues (non-fatal warnings in the doctor output).
 
 This means the "winning" config is always the one from the module whose ID sorts first alphabetically. This convention applies to all governance rules that use global config (currently `enforce-layer` and `enforce-category`).
+
+## Frontend Delight Workflow
+
+- Specgate is primarily a Rust CLI, so frontend guidance is conditional here. Use the `frontend-delight` skill only when touching docs, demos, screenshots, marketing surfaces, or any future web UI around the product.
+- When UI work does happen, start with a `visual thesis`, `content plan`, and `interaction thesis`, then keep the surface clear, technical, and operator-friendly.
+- Prefer real CLI output, fixtures, and concrete architecture examples over generic marketing copy or decorative dashboard patterns.
+- Verify rendered docs/demo changes in a browser before handoff, including mobile layout if the surface is web-based.
