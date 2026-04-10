@@ -1,0 +1,415 @@
+SPECGATE DOGFOOD PLAN — HEARTH CODEBASE
+
+Goal: Set up Specgate in the Hearth repo with prescriptive architectural specs,
+run it against the current codebase, fix any violations, then wire it into CI
+as a permanent enforcement gate.
+
+===============================================================================
+PHASE 1: INSTALL & INITIALIZE
+===============================================================================
+
+1. Install the specgate binary (already built at ~/Development/specgate):
+
+   cp ~/Development/specgate/target/release/specgate /usr/local/bin/specgate
+
+2. Initialize specgate in Hearth:
+
+   cd ~/Development/hearth
+   specgate init
+
+   This creates specgate.config.yml and a modules/ directory.
+
+3. Configure specgate.config.yml:
+
+   spec_dirs:
+     - "modules"
+   exclude:
+     - "node_modules"
+     - "dist"
+     - ".next"
+     - "coverage"
+   test_patterns:
+     - "**/*.test.ts"
+     - "**/*.test.tsx"
+     - "**/*.spec.ts"
+
+===============================================================================
+PHASE 2: WRITE PRESCRIPTIVE SPEC FILES
+===============================================================================
+
+Create the following spec files. These define the IDEAL architecture, not the
+current state. Violations = things to fix.
+
+--- modules/shared.spec.yml ---
+
+version: "2.2"
+module: shared
+description: "Shared contract layer — types, schemas, constants shared between server and client"
+boundaries:
+  path: "src/shared"
+  public_api:
+    - "src/shared/*.ts"
+  allow_imports_from: []
+  never_imports:
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - server/support
+    - client/components
+    - client/stores
+    - client/hooks
+    - client/lib
+    - client/constants
+    - client/utils
+    - client/workshop
+  visibility: public
+
+--- modules/server-bridge.spec.yml ---
+
+version: "2.2"
+module: server/bridge
+description: "OpenClaw communication layer — auth, bridge, events, message handling"
+boundaries:
+  path: "src/server/bridge"
+  public_api:
+    - "src/server/bridge/index.ts"
+  allow_imports_from:
+    - shared
+    - server/support
+  never_imports:
+    - server/transport
+    - server/watchers
+    - client/components
+    - client/stores
+    - client/hooks
+    - client/lib
+
+--- modules/server-watchers.spec.yml ---
+
+version: "2.2"
+module: server/watchers
+description: "File system watchers — state, cron, usage file monitoring"
+boundaries:
+  path: "src/server/watchers"
+  public_api:
+    - "src/server/watchers/index.ts"
+  allow_imports_from:
+    - shared
+    - server/support
+  never_imports:
+    - server/bridge
+    - server/transport
+    - client/components
+    - client/stores
+    - client/hooks
+    - client/lib
+
+--- modules/server-transport.spec.yml ---
+
+version: "2.2"
+module: server/transport
+description: "HTTP/WebSocket/webhook transport layer"
+boundaries:
+  path: "src/server/transport"
+  public_api:
+    - "src/server/transport/index.ts"
+  allow_imports_from:
+    - shared
+    - server/support
+    - server/bridge
+  never_imports:
+    - server/watchers
+    - client/components
+    - client/stores
+    - client/hooks
+    - client/lib
+
+--- modules/server-support.spec.yml ---
+
+version: "2.2"
+module: server/support
+description: "Cross-cutting server utilities — logging, sessions, auth, origin policy, event stream"
+boundaries:
+  path: "src/server/support"
+  public_api:
+    - "src/server/support/index.ts"
+  allow_imports_from:
+    - shared
+  never_imports:
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - client/components
+    - client/stores
+    - client/hooks
+    - client/lib
+
+--- modules/client-stores.spec.yml ---
+
+version: "2.2"
+module: client/stores
+description: "Zustand state stores"
+boundaries:
+  path: "src/client/stores"
+  public_api:
+    - "src/client/stores/*.ts"
+  allow_imports_from:
+    - shared
+    - client/lib
+    - client/utils
+    - client/constants
+  never_imports:
+    - client/components
+    - client/hooks
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - server/support
+
+--- modules/client-hooks.spec.yml ---
+
+version: "2.2"
+module: client/hooks
+description: "React hooks"
+boundaries:
+  path: "src/client/hooks"
+  public_api:
+    - "src/client/hooks/*.ts"
+  allow_imports_from:
+    - shared
+    - client/stores
+    - client/lib
+    - client/constants
+  never_imports:
+    - client/components
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - server/support
+
+--- modules/client-lib.spec.yml ---
+
+version: "2.2"
+module: client/lib
+description: "Client infrastructure — WebSocket client, auth, config"
+boundaries:
+  path: "src/client/lib"
+  public_api:
+    - "src/client/lib/*.ts"
+  allow_imports_from:
+    - shared
+    - client/utils
+    - client/constants
+  never_imports:
+    - client/stores
+    - client/hooks
+    - client/components
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - server/support
+
+--- modules/client-constants.spec.yml ---
+
+version: "2.2"
+module: client/constants
+description: "Client constants — colors, positions, config"
+boundaries:
+  path: "src/client/constants"
+  public_api:
+    - "src/client/constants/*.ts"
+  allow_imports_from:
+    - shared
+  never_imports:
+    - client/stores
+    - client/hooks
+    - client/lib
+    - client/components
+    - server/bridge
+    - server/transport
+
+--- modules/client-utils.spec.yml ---
+
+version: "2.2"
+module: client/utils
+description: "Client utility functions"
+boundaries:
+  path: "src/client/utils"
+  public_api:
+    - "src/client/utils/*.ts"
+  allow_imports_from:
+    - shared
+    - client/constants
+  never_imports:
+    - client/stores
+    - client/hooks
+    - client/lib
+    - client/components
+    - server/bridge
+
+--- modules/client-workshop.spec.yml ---
+
+version: "2.2"
+module: client/workshop
+description: "Workshop color derivation and profiles"
+boundaries:
+  path: "src/client/workshop"
+  public_api:
+    - "src/client/workshop/*.ts"
+  allow_imports_from:
+    - shared
+    - client/constants
+  never_imports:
+    - client/stores
+    - client/hooks
+    - client/lib
+    - client/components
+    - server/bridge
+
+--- modules/client-components.spec.yml ---
+
+version: "2.2"
+module: client/components
+description: "React/R3F UI components — top of the client dependency tree"
+boundaries:
+  path: "src/client/components"
+  public_api:
+    - "src/client/components/**/*.tsx"
+    - "src/client/components/**/*.ts"
+  allow_imports_from:
+    - shared
+    - client/stores
+    - client/hooks
+    - client/lib
+    - client/constants
+    - client/utils
+    - client/workshop
+  never_imports:
+    - server/bridge
+    - server/transport
+    - server/watchers
+    - server/support
+
+===============================================================================
+PHASE 3: FIRST RUN — FIND VIOLATIONS
+===============================================================================
+
+Run specgate with no baseline (prescriptive mode):
+
+   cd ~/Development/hearth
+   specgate check
+
+This will produce a JSON verdict listing every violation. Expect:
+- Zero violations on the top-level boundaries (server↔client↔shared are clean)
+- Possible violations on server internal boundaries (transport→watchers?)
+- Possible violations on client internal boundaries (stores importing from
+  somewhere unexpected, etc.)
+
+Review the violation list. Each one is a refactoring task.
+
+If the violation count is zero: congratulations, the architecture already
+matches the ideal. Skip to Phase 5.
+
+If violations exist: proceed to Phase 4.
+
+===============================================================================
+PHASE 4: FIX VIOLATIONS
+===============================================================================
+
+For each violation, fix the import to respect the boundary:
+
+Common fixes:
+- Move shared logic to support/ or shared/ if two modules both need it
+- Use dependency injection (pass callbacks/interfaces) instead of direct imports
+- Extract a type to shared/ if it's used across the server/client boundary
+- If a store imports from a component, that's a real architecture bug — restructure
+
+After fixing each batch, re-run `specgate check` to verify the violation count
+drops. Repeat until clean.
+
+===============================================================================
+PHASE 5: GENERATE BASELINE (optional, for any deferred violations)
+===============================================================================
+
+If there are violations you intentionally defer (rare with prescriptive specs,
+but possible):
+
+   specgate baseline --output .specgate-baseline.json
+   git add .specgate-baseline.json
+
+This baselines those specific violations so they don't block CI while you
+fix them in later PRs.
+
+===============================================================================
+PHASE 6: WIRE INTO CI
+===============================================================================
+
+Add to your GitHub Actions workflow (or create .github/workflows/specgate.yml):
+
+   name: Specgate Architecture Check
+   on: [push, pull_request]
+   jobs:
+     specgate:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             fetch-depth: 0  # needed for blast-radius mode
+         - name: Install Specgate
+           run: |
+             cargo install --locked --git https://github.com/treygoff24/specgate --tag v0.1.0-rc3
+         - name: Check architecture boundaries
+           run: specgate check
+         - name: Check new violations only (PR mode)
+           if: github.event_name == 'pull_request'
+           run: specgate check --since origin/main --baseline-new-only
+
+This gives you:
+- Full check on every push (catches any violation)
+- Blast-radius mode on PRs (only checks modules affected by the PR)
+- Baseline-aware (deferred violations don't block, new ones do)
+
+===============================================================================
+PHASE 7: VALIDATE THE DOGFOOD
+===============================================================================
+
+After a week of running, evaluate:
+
+1. Did specgate catch any real boundary violations in new work?
+2. Was the onboarding experience smooth? (doc gaps, confusing errors?)
+3. Did blast-radius mode work correctly on PRs?
+4. Were there any false positives?
+5. How does baseline drift look?
+
+Feed findings back into Specgate issues/fixes.
+
+===============================================================================
+CURRENT ARCHITECTURE SNAPSHOT (from import analysis)
+===============================================================================
+
+Known clean:
+  ✅ server/ never imports from client/
+  ✅ client/ never imports from server/
+  ✅ shared/ never imports from either
+
+Server internal (verified):
+  ✅ bridge/ imports from: shared/, support/
+  ✅ watchers/ imports from: shared/
+  ✅ transport/ imports from: shared/, support/, bridge/ (openclawAuth)
+  ✅ support/ imports from: shared/ only
+
+Potential issue spotted:
+  ⚠️ transport/ imports from bridge/openclawAuth.ts directly (not through
+     bridge/index.ts). This works but bypasses the public_api enforcement.
+     If you set bridge's public_api to just index.ts, this will be a violation.
+     Fix: either re-export openclawAuth through bridge/index.ts, or add
+     bridge/openclawAuth.ts to bridge's public_api.
+
+Client internal (not yet verified in detail):
+  - stores/ imports from: shared/, lib/ (websocketClient types) — check if
+    lib/ import is just a type import (allowed) or value import
+  - hooks/ imports from: stores/, lib/, shared/, constants/ — looks correct
+  - lib/ has no imports from stores/hooks/components — looks correct
+
+Prediction: 0-3 violations on first run, mostly around public_api enforcement
+(direct file imports bypassing index.ts re-exports).
